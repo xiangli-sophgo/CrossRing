@@ -39,7 +39,8 @@ export const DEEPSEEK_V3: LLMModelConfig = {
   num_kv_heads: 128,         // MLA (实际使用 kv_lora_rank=512 压缩)
   intermediate_size: 18432,  // Dense层FFN维度 (前3层使用)
   vocab_size: 129280,
-  dtype: 'bf16',
+  weight_dtype: 'bf16',
+  activation_dtype: 'bf16',
   max_seq_length: 131072,
   norm_type: 'rmsnorm',
   attention_type: 'mla',
@@ -49,6 +50,7 @@ export const DEEPSEEK_V3: LLMModelConfig = {
     expert_capacity_factor: 1.0,
     num_shared_experts: 1,
     expert_intermediate_size: 2048,  // 每个专家的FFN维度
+    first_k_dense_replace: 3,        // 前3层使用Dense FFN
   },
   mla_config: DEEPSEEK_V3_MLA,
 };
@@ -63,7 +65,8 @@ export const DEEPSEEK_R1: LLMModelConfig = {
   num_kv_heads: 128,         // MLA (实际使用 kv_lora_rank=512 压缩)
   intermediate_size: 18432,  // Dense层FFN维度 (前3层使用)
   vocab_size: 129280,
-  dtype: 'bf16',
+  weight_dtype: 'bf16',
+  activation_dtype: 'bf16',
   max_seq_length: 131072,
   norm_type: 'rmsnorm',
   attention_type: 'mla',
@@ -73,6 +76,7 @@ export const DEEPSEEK_R1: LLMModelConfig = {
     expert_capacity_factor: 1.0,
     num_shared_experts: 1,
     expert_intermediate_size: 2048,  // 每个专家的FFN维度
+    first_k_dense_replace: 3,        // 前3层使用Dense FFN
   },
   mla_config: DEEPSEEK_V3_MLA,  // 与 V3 相同的 MLA 配置
 };
@@ -91,7 +95,8 @@ export const QWEN2_5_72B: LLMModelConfig = {
   num_kv_heads: 8,   // GQA
   intermediate_size: 29568,
   vocab_size: 152064,
-  dtype: 'bf16',
+  weight_dtype: 'bf16',
+  activation_dtype: 'bf16',
   max_seq_length: 131072,
   norm_type: 'rmsnorm',
   attention_type: 'gqa',
@@ -107,7 +112,8 @@ export const QWEN2_5_32B: LLMModelConfig = {
   num_kv_heads: 8,   // GQA
   intermediate_size: 27648,
   vocab_size: 152064,
-  dtype: 'bf16',
+  weight_dtype: 'bf16',
+  activation_dtype: 'bf16',
   max_seq_length: 131072,
   norm_type: 'rmsnorm',
   attention_type: 'gqa',
@@ -123,7 +129,8 @@ export const QWEN3_32B: LLMModelConfig = {
   num_kv_heads: 8,   // GQA
   intermediate_size: 25600,  // 估算: ~5H
   vocab_size: 151936,
-  dtype: 'bf16',
+  weight_dtype: 'bf16',
+  activation_dtype: 'bf16',
   max_seq_length: 131072,
   norm_type: 'rmsnorm',
   attention_type: 'gqa',
@@ -141,7 +148,8 @@ export const QWEN3_235B: LLMModelConfig = {
   num_kv_heads: 8,   // GQA
   intermediate_size: 29568,  // Dense FFN
   vocab_size: 151936,
-  dtype: 'bf16',
+  weight_dtype: 'bf16',
+  activation_dtype: 'bf16',
   max_seq_length: 131072,
   norm_type: 'rmsnorm',
   attention_type: 'gqa',

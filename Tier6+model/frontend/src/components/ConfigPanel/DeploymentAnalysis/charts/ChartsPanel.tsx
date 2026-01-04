@@ -52,7 +52,7 @@ interface ChartsPanelProps {
   topology?: HierarchicalTopology | null
 }
 
-type MetricType = 'score' | 'ttft' | 'tpot' | 'throughput' | 'mfu' | 'mbu' | 'cost' | 'p99_ttft' | 'p99_tpot'
+type MetricType = 'score' | 'ttft' | 'tpot' | 'throughput' | 'tps_per_batch' | 'tps_per_chip' | 'mfu' | 'mbu' | 'cost' | 'p99_ttft' | 'p99_tpot'
 
 const chartCardStyle: React.CSSProperties = {
   background: '#fff',
@@ -125,7 +125,8 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({
           num_kv_heads: model.num_kv_heads,
           intermediate_size: model.intermediate_size,
           vocab_size: model.vocab_size,
-          dtype: model.dtype,
+          weight_dtype: model.weight_dtype,
+          activation_dtype: model.activation_dtype,
           max_seq_length: model.max_seq_length,
           attention_type: model.attention_type,
           norm_type: model.norm_type,
@@ -250,13 +251,15 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({
 
   const metricOptions = [
     { value: 'score', label: '综合评分' },
-    { value: 'ttft', label: 'TTFT (ms)' },
+    { value: 'ttft', label: 'FTL (ms)' },
     { value: 'tpot', label: 'TPOT (ms)' },
-    { value: 'throughput', label: '吞吐量 (tok/s)' },
+    { value: 'throughput', label: '总吞吐 (tok/s)' },
+    { value: 'tps_per_batch', label: 'TPS/Batch (tok/s)' },
+    { value: 'tps_per_chip', label: 'TPS/Chip (tok/s)' },
     { value: 'mfu', label: 'MFU (%)' },
     { value: 'mbu', label: 'MBU (%)' },
     { value: 'cost', label: '成本 ($/M)' },
-    { value: 'p99_ttft', label: 'TTFT P99 (ms)' },
+    { value: 'p99_ttft', label: 'FTL P99 (ms)' },
     { value: 'p99_tpot', label: 'TPOT P99 (ms)' },
   ]
 

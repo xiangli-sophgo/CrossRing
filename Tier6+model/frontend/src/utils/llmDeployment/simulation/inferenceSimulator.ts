@@ -738,6 +738,7 @@ export class InferenceSimulator {
       dynamicMbu,
       maxPPBubbleRatio,
       totalEvents: this.events.length,
+      prefillFlops: totalFlops,
     }
   }
 
@@ -754,7 +755,8 @@ export class InferenceSimulator {
     if (avgTpotMs <= 0) return 0
 
     const GB_TO_BYTES = 1024 * 1024 * 1024
-    const bytesPerElement = getBytesPerElement(this.model.dtype)
+    const weightBytesPerElement = getBytesPerElement(this.model.weight_dtype)
+    const actBytesPerElement = getBytesPerElement(this.model.activation_dtype)
     const H = this.model.hidden_size
 
     // 1. 计算模型权重 (需要正确处理 MoE)
@@ -768,33 +770,33 @@ export class InferenceSimulator {
             (this.model.mla_config.qk_nope_head_dim + this.model.mla_config.qk_rope_head_dim) +  // Q LoRA up
           H * this.model.mla_config.kv_lora_rank +  // KV compress
           this.model.num_attention_heads * (this.model.mla_config.v_head_dim ?? (H / this.model.num_attention_heads)) * H  // Output proj
-        ) * bytesPerElement / this.parallelism.tp
-      : (4 * H * H) * bytesPerElement / this.parallelism.tp  // 标准 QKV + O
+        ) * weightBytesPerElement / this.parallelism.tp
+      : (4 * H * H) * weightBytesPerElement / this.parallelism.tp  // 标准 QKV + O
 
     // FFN 权重
     if (this.model.model_type === 'moe' && this.model.moe_config) {
       // MoE: 前几层是 Dense，其余是 MoE
-      const numDenseLayers = 3  // DeepSeek-V3 前 3 层是 Dense
+      const numDenseLayers = this.model.moe_config.first_k_dense_replace ?? 3
       const numMoELayers = this.model.num_layers - numDenseLayers
 
       // Dense FFN (按 TP 切分)
-      const denseFFNWeightPerLayer = 3 * H * this.model.intermediate_size * bytesPerElement / this.parallelism.tp
+      const denseFFNWeightPerLayer = 3 * H * this.model.intermediate_size * weightBytesPerElement / this.parallelism.tp
       // MoE FFN (8 experts, 不按 TP 切分!)
       const moeFFNWeightPerLayer = 3 * H * (this.model.moe_config.expert_intermediate_size ?? this.model.intermediate_size) *
-        bytesPerElement * this.model.moe_config.num_experts_per_tok
+        weightBytesPerElement * this.model.moe_config.num_experts_per_tok
 
       modelWeightBytes = (attnWeightPerLayer + denseFFNWeightPerLayer) * numDenseLayers +
                          (attnWeightPerLayer + moeFFNWeightPerLayer) * numMoELayers
     } else {
       // Dense 模型
-      const ffnWeightPerLayer = 3 * H * this.model.intermediate_size * bytesPerElement / this.parallelism.tp
+      const ffnWeightPerLayer = 3 * H * this.model.intermediate_size * weightBytesPerElement / this.parallelism.tp
       modelWeightBytes = (attnWeightPerLayer + ffnWeightPerLayer) * this.model.num_layers
     }
 
-    // 2. 计算 KV Cache (按平均 context 长度)
+    // 2. 计算 KV Cache (按平均 context 长度，使用激活精度)
     const avgContext = this.inference.input_seq_length + this.inference.output_seq_length / 2
     const kvDim = this.model.mla_config?.kv_lora_rank ?? (this.model.hidden_size / this.model.num_attention_heads * this.model.num_kv_heads)
-    const kvCacheBytes = 2 * this.inference.batch_size * avgContext * kvDim * bytesPerElement / this.parallelism.tp * this.model.num_layers
+    const kvCacheBytes = 2 * this.inference.batch_size * avgContext * kvDim * actBytesPerElement / this.parallelism.tp * this.model.num_layers
 
     // 3. 计算 MBU
     const dataReadPerTokenGB = (modelWeightBytes + kvCacheBytes) / GB_TO_BYTES

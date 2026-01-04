@@ -7,7 +7,7 @@ import ReactECharts from 'echarts-for-react'
 import type { EChartsOption } from 'echarts'
 import { PlanAnalysisResult } from '../../../../utils/llmDeployment/types'
 
-type MetricType = 'ttft' | 'tpot' | 'throughput' | 'mfu' | 'mbu' | 'cost' | 'p99_ttft' | 'p99_tpot' | 'score'
+type MetricType = 'ttft' | 'tpot' | 'throughput' | 'tps_per_batch' | 'tps_per_chip' | 'mfu' | 'mbu' | 'cost' | 'p99_ttft' | 'p99_tpot' | 'score'
 
 interface MetricsBarChartProps {
   plans: PlanAnalysisResult[]
@@ -24,7 +24,7 @@ const METRIC_CONFIG: Record<MetricType, {
   lowerIsBetter?: boolean
 }> = {
   ttft: {
-    name: 'TTFT',
+    name: 'FTL',
     unit: 'ms',
     accessor: (p) => p.latency.prefill_total_latency_ms,
     colorStart: '#69c0ff',
@@ -40,11 +40,25 @@ const METRIC_CONFIG: Record<MetricType, {
     lowerIsBetter: true,
   },
   throughput: {
-    name: '吞吐量',
+    name: '总吞吐',
     unit: 'tok/s',
     accessor: (p) => p.throughput.tokens_per_second,
     colorStart: '#95de64',
     colorEnd: '#52c41a',
+  },
+  tps_per_batch: {
+    name: 'TPS/Batch',
+    unit: 'tok/s',
+    accessor: (p) => p.throughput.tps_per_batch,
+    colorStart: '#7cb342',
+    colorEnd: '#388e3c',
+  },
+  tps_per_chip: {
+    name: 'TPS/Chip',
+    unit: 'tok/s',
+    accessor: (p) => p.throughput.tps_per_chip,
+    colorStart: '#66bb6a',
+    colorEnd: '#2e7d32',
   },
   mfu: {
     name: 'MFU',
@@ -69,7 +83,7 @@ const METRIC_CONFIG: Record<MetricType, {
     lowerIsBetter: true,
   },
   p99_ttft: {
-    name: 'TTFT P99',
+    name: 'FTL P99',
     unit: 'ms',
     accessor: (p) => p.latency.ttft_percentiles?.p99 ?? p.latency.prefill_total_latency_ms * 1.8,
     colorStart: '#85a5ff',

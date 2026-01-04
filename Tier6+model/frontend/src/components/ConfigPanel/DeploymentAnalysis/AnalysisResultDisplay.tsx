@@ -23,7 +23,6 @@ import {
   WarningOutlined,
   CheckCircleOutlined,
   HistoryOutlined,
-  ArrowLeftOutlined,
   DeleteOutlined,
   ClearOutlined,
   ExportOutlined,
@@ -33,6 +32,7 @@ import {
   AimOutlined,
 } from '@ant-design/icons'
 import { PlanAnalysisResult, HardwareConfig, LLMModelConfig, InferenceConfig, DEFAULT_SCORE_WEIGHTS } from '../../../utils/llmDeployment/types'
+import { generateBenchmarkName, parseBenchmarkParts } from '../../../utils/llmDeployment/benchmarkNaming'
 import { AnalysisHistoryItem, AnalysisViewMode } from '../shared'
 import { colors } from './ConfigSelectors'
 import { BaseCard } from '../../common/BaseCard'
@@ -86,74 +86,52 @@ const HistoryList: React.FC<HistoryListProps> = ({
 
   const columns = [
     {
-      title: '模型',
-      dataIndex: 'modelName',
-      key: 'model',
-      width: 120,
-      render: (name: string) => (
-        <Text strong style={{ fontSize: 13 }}>{name}</Text>
+      title: 'Benchmark',
+      key: 'benchmark',
+      width: 260,
+      ellipsis: true,
+      render: (_: unknown, record: AnalysisHistoryItem) => (
+        <Text strong style={{ fontSize: 14 }}>
+          {generateBenchmarkName(record.modelConfig, record.inferenceConfig)}
+        </Text>
       ),
     },
     {
       title: '并行策略',
       key: 'parallelism',
-      width: 140,
+      width: 160,
       render: (_: unknown, record: AnalysisHistoryItem) => (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          <Tag color="blue" style={{ fontSize: 10, margin: 0 }}>DP{record.parallelism.dp}</Tag>
-          <Tag color="green" style={{ fontSize: 10, margin: 0 }}>TP{record.parallelism.tp}</Tag>
-          <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>PP{record.parallelism.pp}</Tag>
+          {record.parallelism.dp > 1 && (
+            <Tag color="blue" style={{ fontSize: 12, margin: 0 }}>DP{record.parallelism.dp}</Tag>
+          )}
+          {record.parallelism.tp > 1 && (
+            <Tag color="green" style={{ fontSize: 12, margin: 0 }}>TP{record.parallelism.tp}</Tag>
+          )}
+          {record.parallelism.pp > 1 && (
+            <Tag color="orange" style={{ fontSize: 12, margin: 0 }}>PP{record.parallelism.pp}</Tag>
+          )}
           {record.parallelism.ep > 1 && (
-            <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>EP{record.parallelism.ep}</Tag>
+            <Tag color="purple" style={{ fontSize: 12, margin: 0 }}>EP{record.parallelism.ep}</Tag>
           )}
         </div>
       ),
     },
     {
-      title: '评分',
-      dataIndex: 'score',
-      key: 'score',
-      width: 70,
-      render: (score: number) => (
-        <Text strong style={{ color: score >= 70 ? colors.success : score >= 50 ? colors.warning : colors.error }}>
-          {score.toFixed(1)}
-        </Text>
-      ),
-    },
-    {
-      title: 'TTFT',
-      dataIndex: 'ttft',
-      key: 'ttft',
-      width: 80,
-      render: (v: number) => `${v.toFixed(1)}ms`,
-    },
-    {
-      title: '吞吐',
+      title: 'TPS',
       dataIndex: 'throughput',
       key: 'throughput',
+      width: 120,
+      align: 'center' as const,
+      render: (v: number) => <span style={{ fontSize: 14 }}>{v.toFixed(0)} tok/s</span>,
+    },
+    {
+      title: 'FTL',
+      dataIndex: 'ttft',
+      key: 'ttft',
       width: 90,
-      render: (v: number) => `${v.toFixed(0)} tok/s`,
-    },
-    {
-      title: '芯片',
-      dataIndex: 'chips',
-      key: 'chips',
-      width: 60,
-      render: (v: number) => v,
-    },
-    {
-      title: '时间',
-      dataIndex: 'timestamp',
-      key: 'time',
-      width: 100,
-      render: (ts: number) => {
-        const date = new Date(ts)
-        return (
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            {date.toLocaleDateString()} {date.toLocaleTimeString().slice(0, 5)}
-          </Text>
-        )
-      },
+      align: 'center' as const,
+      render: (v: number) => <span style={{ fontSize: 14 }}>{v.toFixed(1)} ms</span>,
     },
     {
       title: '',
@@ -274,7 +252,7 @@ interface AnalysisResultDisplayProps {
   inference?: InferenceConfig
 }
 
-type MetricType = 'ttft' | 'tpot' | 'throughput' | 'mfu' | 'mbu' | 'cost' | 'percentiles' | 'bottleneck' | 'e2e' | 'chips' | 'memory' | null
+type MetricType = 'ttft' | 'tpot' | 'throughput' | 'tps_batch' | 'tps_chip' | 'mfu' | 'mbu' | 'cost' | 'percentiles' | 'bottleneck' | 'e2e' | 'chips' | 'memory' | null
 
 export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
   result,
@@ -284,7 +262,7 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
   searchStats,
   errorMsg,
   viewMode = 'history',
-  onViewModeChange,
+  onViewModeChange: _onViewModeChange,
   history = [],
   onLoadFromHistory,
   onDeleteHistory,
@@ -298,6 +276,7 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
 }) => {
   const [selectedMetric, setSelectedMetric] = useState<MetricType>(null)
   const [showScoreDetails, setShowScoreDetails] = useState(false)
+  const [showBenchmarkDetails, setShowBenchmarkDetails] = useState(false)
   const [selectedParallelism, setSelectedParallelism] = useState<ParallelismType | null>(null)
 
   // 各章节折叠状态
@@ -313,11 +292,6 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
   const handleLoadFromHistory = useCallback((item: AnalysisHistoryItem) => {
     onLoadFromHistory?.(item)
   }, [onLoadFromHistory])
-
-  // 返回历史列表
-  const handleBackToHistory = useCallback(() => {
-    onViewModeChange?.('history')
-  }, [onViewModeChange])
 
   if (loading) {
     return (
@@ -352,17 +326,6 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
   if (viewMode === 'history') {
     return (
       <div style={{ padding: 4 }}>
-        {/* 如果有已查看的结果，显示返回按钮 */}
-        {result && (
-          <Button
-            type="link"
-            icon={<ArrowLeftOutlined />}
-            onClick={() => onViewModeChange?.('detail')}
-            style={{ marginBottom: 12, padding: 0 }}
-          >
-            返回分析详情
-          </Button>
-        )}
         <HistoryList
           history={history}
           onLoad={handleLoadFromHistory}
@@ -402,34 +365,6 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
 
   return (
     <div>
-      {/* 顶部导航栏 */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 14,
-      }}>
-        {model && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Tag color="blue" style={{ fontSize: 12, margin: 0 }}>{model.model_name}</Tag>
-            {is_feasible ? (
-              <Tag color="success" style={{ fontSize: 11, margin: 0 }}>{score.overall_score.toFixed(1)}分</Tag>
-            ) : (
-              <Tag color="error" style={{ fontSize: 11, margin: 0 }}>不可行</Tag>
-            )}
-          </div>
-        )}
-        <Button
-          type="text"
-          size="small"
-          icon={<ArrowLeftOutlined />}
-          onClick={handleBackToHistory}
-          style={{ fontSize: 12, color: colors.textSecondary }}
-        >
-          历史记录
-        </Button>
-      </div>
-
       {/* ═══════════════════════════════════════════════════════════════ */}
       {/* 一、部署方案 */}
       {/* ═══════════════════════════════════════════════════════════════ */}
@@ -441,78 +376,42 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
           expanded={expandedSections.deployment}
           onExpandChange={(expanded) => setExpandedSections(prev => ({ ...prev, deployment: expanded }))}
         >
-          {/* 顶部：并行策略卡片 + 综合评分 */}
-          <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-            {/* 并行策略卡片 */}
-            <div style={{ flex: 1, display: 'flex', gap: 8 }}>
+          {/* 并行策略卡片 */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <ParallelismCard
+              type="dp"
+              value={plan.parallelism.dp}
+              selected={selectedParallelism === 'dp'}
+              onClick={() => setSelectedParallelism(selectedParallelism === 'dp' ? null : 'dp')}
+            />
+            <ParallelismCard
+              type="tp"
+              value={plan.parallelism.tp}
+              selected={selectedParallelism === 'tp'}
+              onClick={() => setSelectedParallelism(selectedParallelism === 'tp' ? null : 'tp')}
+            />
+            <ParallelismCard
+              type="pp"
+              value={plan.parallelism.pp}
+              selected={selectedParallelism === 'pp'}
+              onClick={() => setSelectedParallelism(selectedParallelism === 'pp' ? null : 'pp')}
+            />
+            {plan.parallelism.ep > 1 && (
               <ParallelismCard
-                type="dp"
-                value={plan.parallelism.dp}
-                selected={selectedParallelism === 'dp'}
-                onClick={() => setSelectedParallelism(selectedParallelism === 'dp' ? null : 'dp')}
+                type="ep"
+                value={plan.parallelism.ep}
+                selected={selectedParallelism === 'ep'}
+                onClick={() => setSelectedParallelism(selectedParallelism === 'ep' ? null : 'ep')}
               />
+            )}
+            {plan.parallelism.sp > 1 && (
               <ParallelismCard
-                type="tp"
-                value={plan.parallelism.tp}
-                selected={selectedParallelism === 'tp'}
-                onClick={() => setSelectedParallelism(selectedParallelism === 'tp' ? null : 'tp')}
+                type="sp"
+                value={plan.parallelism.sp}
+                selected={selectedParallelism === 'sp'}
+                onClick={() => setSelectedParallelism(selectedParallelism === 'sp' ? null : 'sp')}
               />
-              <ParallelismCard
-                type="pp"
-                value={plan.parallelism.pp}
-                selected={selectedParallelism === 'pp'}
-                onClick={() => setSelectedParallelism(selectedParallelism === 'pp' ? null : 'pp')}
-              />
-              {plan.parallelism.ep > 1 && (
-                <ParallelismCard
-                  type="ep"
-                  value={plan.parallelism.ep}
-                  selected={selectedParallelism === 'ep'}
-                  onClick={() => setSelectedParallelism(selectedParallelism === 'ep' ? null : 'ep')}
-                />
-              )}
-              {plan.parallelism.sp > 1 && (
-                <ParallelismCard
-                  type="sp"
-                  value={plan.parallelism.sp}
-                  selected={selectedParallelism === 'sp'}
-                  onClick={() => setSelectedParallelism(selectedParallelism === 'sp' ? null : 'sp')}
-                />
-              )}
-            </div>
-
-            {/* 综合评分 */}
-            <div
-              style={{
-                flex: '0 0 100px',
-                padding: '8px 12px',
-                background: is_feasible ? '#f6ffed' : '#fff2f0',
-                border: `1.5px solid ${is_feasible ? '#b7eb8f' : '#ffccc7'}`,
-                borderRadius: 8,
-                textAlign: 'center',
-                cursor: 'pointer',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-              }}
-              onClick={() => setShowScoreDetails(!showScoreDetails)}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                {is_feasible ? (
-                  <CheckCircleOutlined style={{ color: colors.success, fontSize: 14 }} />
-                ) : (
-                  <Tooltip title={infeasibility_reason}>
-                    <WarningOutlined style={{ color: colors.error, fontSize: 14 }} />
-                  </Tooltip>
-                )}
-                <Text strong style={{ fontSize: 22, color: is_feasible ? colors.success : colors.error, lineHeight: 1 }}>
-                  {score.overall_score.toFixed(1)}
-                </Text>
-              </div>
-              <div style={{ fontSize: 10, color: colors.textSecondary, marginTop: 4 }}>
-                综合评分 {showScoreDetails ? '▲' : '▼'}
-              </div>
-            </div>
+            )}
           </div>
 
           {/* 芯片数和搜索统计 */}
@@ -526,14 +425,49 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
             <span style={{ marginLeft: 16, color: '#bbb' }}>点击策略卡片查看详情</span>
           </div>
 
-          {/* 推理配置 */}
-          {inference && (
-            <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 0 }}>
-              <span>推理配置: </span>
-              <span style={{ marginLeft: 16 }}>Batch Size <b style={{ color: colors.text }}>{inference.batch_size}</b></span>
-              <span style={{ marginLeft: 16 }}>Input Length <b style={{ color: colors.text }}>{inference.input_seq_length}</b></span>
-              <span style={{ marginLeft: 16 }}>Output Length <b style={{ color: colors.text }}>{inference.output_seq_length}</b></span>
-              <span style={{ marginLeft: 16 }}>Max Seq Length <b style={{ color: colors.text }}>{inference.max_seq_length}</b></span>
+          {/* Benchmark 标识 (可点击展开) */}
+          {inference && model && (
+            <div style={{ marginBottom: 0 }}>
+              <div
+                style={{
+                  fontSize: 13,
+                  color: colors.textSecondary,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+                onClick={() => setShowBenchmarkDetails(!showBenchmarkDetails)}
+              >
+                <span>Benchmark: </span>
+                <b style={{ color: colors.text, marginLeft: 8 }}>{generateBenchmarkName(model, inference)}</b>
+                <span style={{ marginLeft: 8, fontSize: 10, color: '#bbb' }}>
+                  {showBenchmarkDetails ? '▲ 收起' : '▼ 展开'}
+                </span>
+              </div>
+              {showBenchmarkDetails && (
+                <div style={{
+                  marginTop: 12,
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 12,
+                }}>
+                  {parseBenchmarkParts(model, inference).map((part, idx) => (
+                    <div key={idx} style={{
+                      padding: '12px 16px',
+                      background: '#fafafa',
+                      borderRadius: 8,
+                      border: '1px solid #e8e8e8',
+                      minWidth: 100,
+                    }}>
+                      <div style={{ color: colors.primary, fontWeight: 600, fontSize: 18, marginBottom: 4, textAlign: 'center' }}>{part.key}</div>
+                      <div style={{ fontSize: 13 }}>
+                        <span style={{ color: '#999' }}>{part.label}：</span>
+                        <span style={{ color: colors.text, fontWeight: 500 }}>{part.value}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -541,86 +475,6 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
           {selectedParallelism && (
             <div style={{ marginBottom: 12 }}>
               <ParallelismInfo type={selectedParallelism} />
-            </div>
-          )}
-
-          {/* 评分详情展开区域 */}
-          {showScoreDetails && (
-            <div style={{
-              marginTop: 12,
-              paddingTop: 12,
-              borderTop: `1px dashed ${colors.borderLight}`,
-            }}>
-              {/* 各项得分 */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 12 }}>
-                <div style={{ textAlign: 'center', padding: 8, background: '#f0f5ff', borderRadius: 6 }}>
-                  <ClockCircleOutlined style={{ color: '#1890ff', fontSize: 14 }} />
-                  <div style={{ fontSize: 16, fontWeight: 600, color: '#1890ff', margin: '4px 0' }}>
-                    {score.latency_score.toFixed(0)}
-                  </div>
-                  <div style={{ fontSize: 10, color: colors.textSecondary }}>延迟 {(DEFAULT_SCORE_WEIGHTS.latency * 100).toFixed(0)}%</div>
-                </div>
-                <div style={{ textAlign: 'center', padding: 8, background: '#f6ffed', borderRadius: 6 }}>
-                  <ThunderboltOutlined style={{ color: '#52c41a', fontSize: 14 }} />
-                  <div style={{ fontSize: 16, fontWeight: 600, color: '#52c41a', margin: '4px 0' }}>
-                    {score.throughput_score.toFixed(0)}
-                  </div>
-                  <div style={{ fontSize: 10, color: colors.textSecondary }}>吞吐 {(DEFAULT_SCORE_WEIGHTS.throughput * 100).toFixed(0)}%</div>
-                </div>
-                <div style={{ textAlign: 'center', padding: 8, background: '#fff7e6', borderRadius: 6 }}>
-                  <DashboardOutlined style={{ color: '#faad14', fontSize: 14 }} />
-                  <div style={{ fontSize: 16, fontWeight: 600, color: '#faad14', margin: '4px 0' }}>
-                    {score.efficiency_score.toFixed(0)}
-                  </div>
-                  <div style={{ fontSize: 10, color: colors.textSecondary }}>效率 {(DEFAULT_SCORE_WEIGHTS.efficiency * 100).toFixed(0)}%</div>
-                </div>
-                <div style={{ textAlign: 'center', padding: 8, background: '#f9f0ff', borderRadius: 6 }}>
-                  <AimOutlined style={{ color: '#722ed1', fontSize: 14 }} />
-                  <div style={{ fontSize: 16, fontWeight: 600, color: '#722ed1', margin: '4px 0' }}>
-                    {score.balance_score.toFixed(0)}
-                  </div>
-                  <div style={{ fontSize: 10, color: colors.textSecondary }}>均衡 {(DEFAULT_SCORE_WEIGHTS.balance * 100).toFixed(0)}%</div>
-                </div>
-              </div>
-
-              {/* 评分规则说明 */}
-              <Collapse
-                size="small"
-                style={{ background: '#fafafa', borderRadius: 6 }}
-                items={[{
-                  key: 'rules',
-                  label: <Text style={{ fontSize: 12 }}>评分规则说明</Text>,
-                  children: (
-                    <div style={{ fontSize: 12, color: colors.textSecondary }}>
-                      <div style={{ marginBottom: 8 }}>
-                        <Text strong style={{ color: '#1890ff' }}>延迟评分：</Text>
-                        <span>TTFT &lt; 100ms → 100分，TTFT &gt; 1000ms → 0分</span>
-                      </div>
-                      <div style={{ marginBottom: 8 }}>
-                        <Text strong style={{ color: '#52c41a' }}>吞吐评分：</Text>
-                        <span>MFU ≥ 50% → 100分，线性计算</span>
-                      </div>
-                      <div style={{ marginBottom: 8 }}>
-                        <Text strong style={{ color: '#faad14' }}>效率评分：</Text>
-                        <span>计算和显存利用率综合评估</span>
-                      </div>
-                      <div style={{ marginBottom: 8 }}>
-                        <Text strong style={{ color: '#722ed1' }}>均衡评分：</Text>
-                        <span>TP/PP/EP 均匀切分时得分高</span>
-                      </div>
-                      <div style={{
-                        marginTop: 8,
-                        padding: 8,
-                        background: '#e6f7ff',
-                        borderRadius: 4,
-                        fontFamily: 'monospace',
-                      }}>
-                        综合 = {(DEFAULT_SCORE_WEIGHTS.latency * 100).toFixed(0)}%×延迟 + {(DEFAULT_SCORE_WEIGHTS.throughput * 100).toFixed(0)}%×吞吐 + {(DEFAULT_SCORE_WEIGHTS.efficiency * 100).toFixed(0)}%×效率 + {(DEFAULT_SCORE_WEIGHTS.balance * 100).toFixed(0)}%×均衡
-                      </div>
-                    </div>
-                  ),
-                }]}
-              />
             </div>
           )}
 
@@ -693,7 +547,7 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 12 }}>
           <div style={{ ...metricCardStyle(selectedMetric === 'ttft'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'ttft' ? null : 'ttft')}>
             <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'ttft' ? colors.primary : '#d9d9d9' }} />
-            <Text style={{ fontSize: 13, color: colors.textSecondary }}>TTFT</Text>
+            <Text style={{ fontSize: 13, color: colors.textSecondary }}>FTL</Text>
             <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
               {latency.prefill_total_latency_ms.toFixed(1)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>ms</span>
             </div>
@@ -723,14 +577,36 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
 
         {/* 吞吐与效率 */}
         <Text style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', marginBottom: 8 }}>吞吐与效率</Text>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
-          <div style={{ ...metricCardStyle(selectedMetric === 'throughput'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'throughput' ? null : 'throughput')}>
-            <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'throughput' ? colors.primary : '#d9d9d9' }} />
-            <Text style={{ fontSize: 13, color: colors.textSecondary }}>吞吐量</Text>
-            <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
-              {throughput.tokens_per_second.toFixed(0)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>tok/s</span>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 8 }}>
+          <Tooltip title="TPS per Batch = 1000 / TPOT(ms)，用户体验指标，SLO约束 ≥10">
+            <div style={{ ...metricCardStyle(selectedMetric === 'tps_batch'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'tps_batch' ? null : 'tps_batch')}>
+              <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'tps_batch' ? colors.primary : '#d9d9d9' }} />
+              <Text style={{ fontSize: 13, color: colors.textSecondary }}>TPS/Batch</Text>
+              <div style={{ fontSize: 18, fontWeight: 600, color: throughput.tps_per_batch >= 10 ? colors.text : colors.error, marginTop: 4 }}>
+                {throughput.tps_per_batch.toFixed(1)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>tok/s</span>
+              </div>
             </div>
-          </div>
+          </Tooltip>
+          <Tooltip title="TPS per Chip = B × TPS_batch，成本效益优化目标">
+            <div style={{ ...metricCardStyle(selectedMetric === 'tps_chip'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'tps_chip' ? null : 'tps_chip')}>
+              <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'tps_chip' ? colors.primary : '#d9d9d9' }} />
+              <Text style={{ fontSize: 13, color: colors.textSecondary }}>TPS/Chip</Text>
+              <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
+                {throughput.tps_per_chip.toFixed(0)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>tok/s</span>
+              </div>
+            </div>
+          </Tooltip>
+          <Tooltip title="Total TPS = TPS_chip × NumChips，集群总吞吐">
+            <div style={{ ...metricCardStyle(selectedMetric === 'throughput'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'throughput' ? null : 'throughput')}>
+              <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'throughput' ? colors.primary : '#d9d9d9' }} />
+              <Text style={{ fontSize: 13, color: colors.textSecondary }}>总吞吐</Text>
+              <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
+                {throughput.tokens_per_second.toFixed(0)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>tok/s</span>
+              </div>
+            </div>
+          </Tooltip>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 12 }}>
           <div style={{ ...metricCardStyle(selectedMetric === 'mfu'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'mfu' ? null : 'mfu')}>
             <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'mfu' ? colors.primary : '#d9d9d9' }} />
             <Text style={{ fontSize: 13, color: colors.textSecondary }}>MFU</Text>
@@ -777,23 +653,54 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
           </div>
         </div>
 
-        {/* 瓶颈分析 */}
-        <Text style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', marginBottom: 8 }}>瓶颈分析</Text>
-        <div
-          style={{
-            padding: 12,
-            background: selectedMetric === 'bottleneck' ? colors.warningLight : '#fff',
-            borderRadius: 8,
-            cursor: 'pointer',
-            border: selectedMetric === 'bottleneck' ? `2px solid ${colors.warning}` : `1px solid ${colors.border}`,
-            transition: 'all 0.2s ease',
-            marginBottom: 12,
-          }}
-          onClick={() => setSelectedMetric(selectedMetric === 'bottleneck' ? null : 'bottleneck')}
-        >
-          {/* 瓶颈类型标签 */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {/* 综合评分 + 瓶颈分析 */}
+        <div style={{ display: 'flex', alignItems: 'stretch', gap: 12, marginTop: 16, paddingTop: 16, borderTop: `1px dashed ${colors.borderLight}` }}>
+          {/* 综合评分 */}
+          <div
+            style={{
+              padding: '12px 20px',
+              background: is_feasible ? '#f6ffed' : '#fff2f0',
+              border: `1.5px solid ${is_feasible ? '#b7eb8f' : '#ffccc7'}`,
+              borderRadius: 8,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}
+            onClick={() => setShowScoreDetails(!showScoreDetails)}
+          >
+            {is_feasible ? (
+              <CheckCircleOutlined style={{ color: colors.success, fontSize: 18 }} />
+            ) : (
+              <Tooltip title={infeasibility_reason}>
+                <WarningOutlined style={{ color: colors.error, fontSize: 18 }} />
+              </Tooltip>
+            )}
+            <div>
+              <Text strong style={{ fontSize: 24, color: is_feasible ? colors.success : colors.error, lineHeight: 1 }}>
+                {score.overall_score.toFixed(1)}
+              </Text>
+              <span style={{ fontSize: 13, color: colors.textSecondary, marginLeft: 4 }}>分</span>
+            </div>
+            <div style={{ fontSize: 12, color: colors.textSecondary }}>
+              综合评分 {showScoreDetails ? '▲' : '▼'}
+            </div>
+          </div>
+
+          {/* 瓶颈分析 */}
+          <div
+            style={{
+              flex: 1,
+              padding: '12px 16px',
+              background: selectedMetric === 'bottleneck' ? colors.warningLight : '#fafafa',
+              borderRadius: 8,
+              cursor: 'pointer',
+              border: selectedMetric === 'bottleneck' ? `2px solid ${colors.warning}` : `1px solid ${colors.border}`,
+              transition: 'all 0.2s ease',
+            }}
+            onClick={() => setSelectedMetric(selectedMetric === 'bottleneck' ? null : 'bottleneck')}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
               <Tag color={
                 latency.bottleneck_type === 'compute' ? 'orange' :
                 latency.bottleneck_type === 'memory' ? 'blue' :
@@ -806,57 +713,76 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
                  latency.bottleneck_type === 'balanced' ? '均衡状态' : latency.bottleneck_type}
               </Tag>
               {latency.bottleneck_analysis && (
-                <Text style={{ fontSize: 12, color: colors.textSecondary }}>
-                  {latency.bottleneck_analysis.dominant_phase === 'prefill' ? 'Prefill阶段主导' : 'Decode阶段主导'}
+                <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                  {latency.bottleneck_analysis.dominant_phase === 'prefill' ? 'Prefill主导' : 'Decode主导'}
                 </Text>
               )}
             </div>
-            <InfoCircleOutlined style={{ fontSize: 12, color: selectedMetric === 'bottleneck' ? colors.warning : '#ccc' }} />
+            {latency.bottleneck_analysis && (
+              <>
+                <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: '#e8e8e8' }}>
+                  {(() => {
+                    const analysis = latency.bottleneck_analysis.dominant_phase === 'prefill'
+                      ? latency.bottleneck_analysis.prefill
+                      : latency.bottleneck_analysis.decode;
+                    return (
+                      <>
+                        <div style={{ width: `${analysis.compute_ratio * 100}%`, background: '#faad14' }} />
+                        <div style={{ width: `${analysis.memory_ratio * 100}%`, background: '#1890ff' }} />
+                        <div style={{ width: `${analysis.comm_ratio * 100}%`, background: '#722ed1' }} />
+                      </>
+                    );
+                  })()}
+                </div>
+                <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: 10, color: colors.textSecondary }}>
+                  {(() => {
+                    const analysis = latency.bottleneck_analysis.dominant_phase === 'prefill'
+                      ? latency.bottleneck_analysis.prefill
+                      : latency.bottleneck_analysis.decode;
+                    return (
+                      <>
+                        <span><span style={{ display: 'inline-block', width: 6, height: 6, background: '#faad14', borderRadius: 1, marginRight: 3, verticalAlign: 'middle' }} />计算{(analysis.compute_ratio * 100).toFixed(0)}%</span>
+                        <span><span style={{ display: 'inline-block', width: 6, height: 6, background: '#1890ff', borderRadius: 1, marginRight: 3, verticalAlign: 'middle' }} />访存{(analysis.memory_ratio * 100).toFixed(0)}%</span>
+                        <span><span style={{ display: 'inline-block', width: 6, height: 6, background: '#722ed1', borderRadius: 1, marginRight: 3, verticalAlign: 'middle' }} />通信{(analysis.comm_ratio * 100).toFixed(0)}%</span>
+                      </>
+                    );
+                  })()}
+                </div>
+              </>
+            )}
           </div>
-
-          {/* 延迟组成条 */}
-          {latency.bottleneck_analysis && (
-            <>
-              <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: '#f0f0f0' }}>
-                {(() => {
-                  const analysis = latency.bottleneck_analysis.dominant_phase === 'prefill'
-                    ? latency.bottleneck_analysis.prefill
-                    : latency.bottleneck_analysis.decode;
-                  return (
-                    <>
-                      <div style={{ width: `${analysis.compute_ratio * 100}%`, background: '#faad14' }} />
-                      <div style={{ width: `${analysis.memory_ratio * 100}%`, background: '#1890ff' }} />
-                      <div style={{ width: `${analysis.comm_ratio * 100}%`, background: '#722ed1' }} />
-                    </>
-                  );
-                })()}
-              </div>
-              <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 11, color: colors.textSecondary }}>
-                {(() => {
-                  const analysis = latency.bottleneck_analysis.dominant_phase === 'prefill'
-                    ? latency.bottleneck_analysis.prefill
-                    : latency.bottleneck_analysis.decode;
-                  return (
-                    <>
-                      <span>
-                        <span style={{ display: 'inline-block', width: 8, height: 8, background: '#faad14', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />
-                        计算 {(analysis.compute_ratio * 100).toFixed(0)}%
-                      </span>
-                      <span>
-                        <span style={{ display: 'inline-block', width: 8, height: 8, background: '#1890ff', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />
-                        访存 {(analysis.memory_ratio * 100).toFixed(0)}%
-                      </span>
-                      <span>
-                        <span style={{ display: 'inline-block', width: 8, height: 8, background: '#722ed1', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />
-                        通信 {(analysis.comm_ratio * 100).toFixed(0)}%
-                      </span>
-                    </>
-                  );
-                })()}
-              </div>
-            </>
-          )}
         </div>
+
+        {/* 评分详情展开区域 */}
+        {showScoreDetails && (
+          <div style={{ marginTop: 12, padding: 12, background: '#fafafa', borderRadius: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 12 }}>
+              <div style={{ textAlign: 'center', padding: 8, background: '#f0f5ff', borderRadius: 6 }}>
+                <ClockCircleOutlined style={{ color: '#1890ff', fontSize: 14 }} />
+                <div style={{ fontSize: 16, fontWeight: 600, color: '#1890ff', margin: '4px 0' }}>{score.latency_score.toFixed(0)}</div>
+                <div style={{ fontSize: 10, color: colors.textSecondary }}>延迟 {(DEFAULT_SCORE_WEIGHTS.latency * 100).toFixed(0)}%</div>
+              </div>
+              <div style={{ textAlign: 'center', padding: 8, background: '#f6ffed', borderRadius: 6 }}>
+                <ThunderboltOutlined style={{ color: '#52c41a', fontSize: 14 }} />
+                <div style={{ fontSize: 16, fontWeight: 600, color: '#52c41a', margin: '4px 0' }}>{score.throughput_score.toFixed(0)}</div>
+                <div style={{ fontSize: 10, color: colors.textSecondary }}>吞吐 {(DEFAULT_SCORE_WEIGHTS.throughput * 100).toFixed(0)}%</div>
+              </div>
+              <div style={{ textAlign: 'center', padding: 8, background: '#fff7e6', borderRadius: 6 }}>
+                <DashboardOutlined style={{ color: '#faad14', fontSize: 14 }} />
+                <div style={{ fontSize: 16, fontWeight: 600, color: '#faad14', margin: '4px 0' }}>{score.efficiency_score.toFixed(0)}</div>
+                <div style={{ fontSize: 10, color: colors.textSecondary }}>效率 {(DEFAULT_SCORE_WEIGHTS.efficiency * 100).toFixed(0)}%</div>
+              </div>
+              <div style={{ textAlign: 'center', padding: 8, background: '#f9f0ff', borderRadius: 6 }}>
+                <AimOutlined style={{ color: '#722ed1', fontSize: 14 }} />
+                <div style={{ fontSize: 16, fontWeight: 600, color: '#722ed1', margin: '4px 0' }}>{score.balance_score.toFixed(0)}</div>
+                <div style={{ fontSize: 10, color: colors.textSecondary }}>均衡 {(DEFAULT_SCORE_WEIGHTS.balance * 100).toFixed(0)}%</div>
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: colors.textSecondary, textAlign: 'center', fontFamily: 'monospace' }}>
+              综合 = {(DEFAULT_SCORE_WEIGHTS.latency * 100).toFixed(0)}%×延迟 + {(DEFAULT_SCORE_WEIGHTS.throughput * 100).toFixed(0)}%×吞吐 + {(DEFAULT_SCORE_WEIGHTS.efficiency * 100).toFixed(0)}%×效率 + {(DEFAULT_SCORE_WEIGHTS.balance * 100).toFixed(0)}%×均衡
+            </div>
+          </div>
+        )}
 
         {/* 指标详情展示 - 内嵌在性能分析中 */}
         {selectedMetric && (

@@ -767,6 +767,7 @@ class LLMInferenceSimulator:
             dynamic_mbu=min(decode_mbu, 1.0),
             max_pp_bubble_ratio=0.0,  # TODO: 计算气泡比
             total_events=len(self.gantt_builder.tasks),
+            prefill_flops=prefill_flops,
         )
 
     def _calc_total_flops(self, seq_length: int) -> float:

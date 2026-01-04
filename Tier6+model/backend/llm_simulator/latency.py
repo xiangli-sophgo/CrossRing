@@ -883,8 +883,10 @@ def calc_moe_expert_ffn_latency(
     tokens_per_expert = total_tokens * moe.num_experts_per_tok / moe.num_experts
     tokens_per_expert_per_ep = tokens_per_expert / parallelism.ep
 
-    # 专家 FFN 中间维度 (如果配置了使用配置值，否则使用模型默认)
-    expert_intermediate = moe.expert_intermediate_size if moe.expert_intermediate_size > 0 else model.intermediate_size
+    # 专家 FFN 中间维度 (必须配置，不允许 fallback 到 model.intermediate_size)
+    if moe.expert_intermediate_size <= 0:
+        raise ValueError(f"MoE 配置必须指定 expert_intermediate_size，当前值: {moe.expert_intermediate_size}")
+    expert_intermediate = moe.expert_intermediate_size
 
     # Gate + Up + Down 三个矩阵乘法
     flops_gate = 2 * tokens_per_expert_per_ep * model.hidden_size * expert_intermediate
@@ -913,16 +915,34 @@ def calc_moe_shared_expert_latency(
     """
     计算 MoE 共享专家 FFN 延迟
 
-    共享专家处理所有 token，使用标准 FFN 计算
-    DeepSeek V3: 1 个共享专家
+    共享专家处理所有 token，使用 MoE 专家相同的中间维度
+    DeepSeek V3: 1 个共享专家，intermediate_size = 2048
     """
     if model.moe_config is None or model.moe_config.num_shared_experts == 0:
         return 0.0
 
-    # 共享专家使用标准 FFN 结构
-    return calc_ffn_gate_latency(model, inference, parallelism, hardware, num_tokens) + \
-           calc_ffn_up_latency(model, inference, parallelism, hardware, num_tokens) + \
-           calc_ffn_down_latency(model, inference, parallelism, hardware, num_tokens)
+    moe = model.moe_config
+    bytes_per_elem = get_bytes_per_element(model.dtype)
+
+    if moe.expert_intermediate_size <= 0:
+        raise ValueError(f"MoE 配置必须指定 expert_intermediate_size")
+
+    expert_intermediate = moe.expert_intermediate_size
+    total_tokens = inference.batch_size * num_tokens
+
+    # Gate + Up + Down 三个矩阵乘法 (共享专家数 * 单专家计算量)
+    flops_per_expert = 2 * total_tokens * model.hidden_size * expert_intermediate * 3
+    total_flops = flops_per_expert * moe.num_shared_experts
+    tflops = total_flops / 1e12
+    compute_time = tflops / hardware.chip.compute_tflops_fp16 * 1000
+
+    # 内存访问
+    weight_bytes = 3 * model.hidden_size * expert_intermediate * bytes_per_elem * moe.num_shared_experts
+    io_bytes = total_tokens * (model.hidden_size * 2 + expert_intermediate) * bytes_per_elem
+    data_gb = (weight_bytes + io_bytes) / (1024 ** 3)
+    memory_time = calc_hbm_read_latency(data_gb, hardware)
+
+    return max(compute_time, memory_time)
 
 
 def calc_ep_dispatch_latency(
@@ -978,18 +998,15 @@ def is_moe_layer(layer_index: int, model: LLMModelConfig) -> bool:
     """
     判断是否为 MoE 层
 
-    DeepSeek V3: layer 0-2 使用密集 FFN，layer 3+ 使用 MoE
-    其他 MoE 模型: 所有层都使用 MoE
+    通过 moe_config.first_k_dense_replace 配置前K层使用Dense FFN
+    例如 DeepSeek V3: first_k_dense_replace=3，即 layer 0-2 使用 Dense，layer 3+ 使用 MoE
     """
     if model.moe_config is None:
         return False
 
-    # DeepSeek V3 特殊规则: 前3层是密集FFN
-    if model.model_name and "deepseek" in model.model_name.lower():
-        return layer_index >= 3
-
-    # 其他 MoE 模型: 所有层都是 MoE
-    return True
+    # 使用配置的 first_k_dense_replace 参数
+    first_k = model.moe_config.first_k_dense_replace
+    return layer_index >= first_k
 
 
 def calc_ffn_gate_latency(

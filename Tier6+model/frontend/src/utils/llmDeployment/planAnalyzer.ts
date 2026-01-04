@@ -25,6 +25,8 @@ import { analyzeCommunication } from './commCalculator';
 import {
   analyzeLatency,
   analyzeBottleneckRoofline,
+  estimateTpsPerBatch,
+  estimateTpsPerChip,
   estimateTokenThroughput,
   estimateRequestThroughput,
   estimateMFU,
@@ -145,7 +147,13 @@ export function analyzeThroughput(
   parallelism: ParallelismStrategy,
   hardware: HardwareConfig
 ): ThroughputAnalysis {
+  // TPS per Batch = 1000 / TPOT(ms) - 用户体验指标
+  const tpsPerBatch = estimateTpsPerBatch(model, inference, parallelism, hardware);
+  // TPS per Chip = B × TPS_batch - 成本效益指标
+  const tpsPerChip = estimateTpsPerChip(model, inference, parallelism, hardware);
+  // Total TPS = TPS_chip × NumChips - 集群总吞吐
   const tokensPerSecond = estimateTokenThroughput(model, inference, parallelism, hardware);
+
   const requestsPerSecond = estimateRequestThroughput(model, inference, parallelism, hardware);
   const mfu = estimateMFU(model, inference, parallelism, hardware);
   const mbu = estimateMBU(model, inference, parallelism, hardware);
@@ -153,6 +161,8 @@ export function analyzeThroughput(
 
   return {
     tokens_per_second: tokensPerSecond,
+    tps_per_batch: tpsPerBatch,
+    tps_per_chip: tpsPerChip,
     requests_per_second: requestsPerSecond,
     model_flops_utilization: mfu,
     memory_bandwidth_utilization: mbu,
@@ -498,6 +508,8 @@ function createInfeasibleResult(
 
   const zeroThroughput: ThroughputAnalysis = {
     tokens_per_second: 0,
+    tps_per_batch: 0,
+    tps_per_chip: 0,
     requests_per_second: 0,
     model_flops_utilization: 0,
     memory_bandwidth_utilization: 0,

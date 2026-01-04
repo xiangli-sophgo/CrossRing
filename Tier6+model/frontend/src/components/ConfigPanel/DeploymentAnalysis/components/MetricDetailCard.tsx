@@ -15,7 +15,7 @@ import { PlanAnalysisResult } from '../../../../utils/llmDeployment/types'
 
 const { Text } = Typography
 
-export type MetricType = 'ttft' | 'tpot' | 'throughput' | 'mfu' | 'mbu' | 'cost' | 'percentiles' | 'bottleneck' | 'e2e' | 'chips' | 'memory'
+export type MetricType = 'ttft' | 'tpot' | 'throughput' | 'tps_batch' | 'tps_chip' | 'mfu' | 'mbu' | 'cost' | 'percentiles' | 'bottleneck' | 'e2e' | 'chips' | 'memory'
 
 interface MetricDetailCardProps {
   metric: MetricType
@@ -51,22 +51,20 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
     case 'ttft':
       return (
         <div style={detailWrapperStyle}>
-          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>Time To First Token (TTFT)</span>
-            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>首Token延迟 · Prefill阶段核心指标</span>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12 }}>
+            First Token Latency (FTL)
           </div>
           <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
-              从请求发送到生成第一个输出Token的延迟时间。直接影响用户感知的响应速度，
-              是评估LLM服务质量的关键SLO指标。MLPerf标准要求 P99 ≤ 450ms。
+              首Token延迟，即从请求发送到生成第一个输出Token的时间。
+              对应Prefill阶段，处理全部输入序列。MLPerf要求P99 ≤ 450ms。
             </div>
           </div>
 
           <FormulaCard
             title="核心公式"
-            tex={String.raw`\text{TTFT} = \frac{T_{\text{compute}} + T_{\text{comm}}}{1 - \beta}`}
-            description="Prefill阶段处理全部输入token，计算与TP通信串行；PP>1时受气泡比影响"
+            tex={String.raw`\text{FTL} = \frac{T_{\text{compute}} + T_{\text{comm}}}{1 - \beta}`}
             result={latency.prefill_total_latency_ms.toFixed(2)}
             unit="ms"
             resultColor="#1890ff"
@@ -76,34 +74,34 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             title="参数说明"
             variables={[
               {
-                symbol: 'T_{\\text{compute}}',
-                name: '计算延迟',
-                description: '$T_{compute} = \\frac{FLOPs}{Peak \\times MFU \\times TP}$，Prefill阶段是compute-bound',
-              },
-              {
-                symbol: 'T_{\\text{comm}}',
-                name: '通信延迟',
-                description: 'TP AllReduce通信：$T_{comm} = 2 \\times \\frac{B \\times S \\times H \\times dtype}{BW_{NVLink}}$',
-              },
-              {
-                symbol: '\\beta',
-                name: '气泡比 (Bubble Ratio)',
-                description: 'PP导致的空闲时间占比，$\\beta = \\frac{PP-1}{MB+PP-1}$（GPipe调度）',
-              },
-              {
-                symbol: '\\text{FLOPs}',
+                symbol: '\\text{FLOPs}_{\\text{prefill}}',
                 name: 'Prefill计算量',
-                description: '$FLOPs \\approx 2 \\times Params \\times SeqLen \\times Batch$（忽略Attention的$O(S^2)$项）',
+                description: '线性部分：$2 \\times (B \\times S) \\times P_{active}$；Attention部分：$O(S^2)$',
+              },
+              {
+                symbol: 'P_{\\text{active}}',
+                name: '激活参数量',
+                description: 'MoE模型实际参与计算的参数，如DeepSeek-V3约37B（总参671B）',
               },
               {
                 symbol: '\\text{Peak}',
                 name: '峰值算力',
-                description: '单芯片理论峰值，如H100 SXM = 989 TFLOPs (BF16)',
+                description: '单芯片理论峰值 × TP，如H100 SXM = 989 TFLOPs (BF16)',
               },
               {
                 symbol: '\\text{MFU}',
                 name: '硬件利用率',
-                description: 'Model FLOPs Utilization，Prefill阶段通常可达40-60%',
+                description: 'Model FLOPs Utilization，Prefill阶段通常可达50-60%',
+              },
+              {
+                symbol: 'T_{\\text{comm}}',
+                name: '通信延迟',
+                description: 'TP AllReduce：$2 \\times L \\times (B \\times S) \\times H \\times dtype / BW$',
+              },
+              {
+                symbol: '\\beta',
+                name: '气泡比',
+                description: 'PP导致的空闲时间占比，$\\beta = \\frac{PP-1}{MB+PP-1}$（GPipe调度）',
               },
               {
                 symbol: '\\text{TP}',
@@ -113,12 +111,7 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
               {
                 symbol: '\\text{PP}',
                 name: '流水线并行度',
-                description: '层间切分阶段数，引入气泡开销',
-              },
-              {
-                symbol: '\\text{MB}',
-                name: 'Micro-batch数',
-                description: '微批次数量，$MB \\geq 4 \\times PP$时气泡开销可忽略',
+                description: '层间切分阶段数，PP=1时无气泡开销',
               },
             ]}
           />
@@ -127,26 +120,26 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             title="计算分解"
             steps={[
               {
-                label: 'FLOPs',
-                formula: '\\text{FLOPs} = 2 \\times \\text{Params} \\times \\text{SeqLen} \\times \\text{Batch}',
-                value: ((2 * 70e9 * 1024 * 1) / 1e12).toFixed(2),
+                label: '\\text{FLOPs}_{\\text{prefill}}',
+                formula: '\\text{FLOPs}_{\\text{prefill}} = 2 \\times (B \\times S) \\times P_{active} + O(S^2)',
+                value: latency.prefill_flops ? (latency.prefill_flops / 1e12).toFixed(1) : '-',
                 unit: 'TFLOPs',
               },
               {
-                label: '计算延迟',
-                formula: 'T_{\\text{compute}} = \\frac{\\text{FLOPs}}{\\text{Peak} \\times \\text{Util} \\times \\text{TP}}',
+                label: 'T_{\\text{compute}}',
+                formula: 'T_{\\text{compute}} = \\frac{\\text{FLOPs}_{\\text{prefill}}}{\\text{Peak} \\times \\text{MFU}}',
                 value: latency.prefill_compute_latency_ms.toFixed(2),
                 unit: 'ms',
               },
               {
-                label: '通信延迟',
-                formula: 'T_{\\text{comm}} = \\sum\\left(\\frac{\\text{Data}}{\\text{BW}} + t_{\\text{startup}}\\right)',
+                label: 'T_{\\text{comm}}',
+                formula: 'T_{\\text{comm}} = 2 \\times L \\times \\frac{(B \\times S) \\times H \\times dtype}{BW}',
                 value: latency.prefill_comm_latency_ms.toFixed(2),
                 unit: 'ms',
               },
               {
-                label: '气泡比 β',
-                formula: '\\beta = \\frac{\\text{PP} - 1}{\\text{MB} + \\text{PP} - 1}',
+                label: '\\beta',
+                formula: '\\beta = \\frac{PP - 1}{MB + PP - 1}',
                 value: (latency.pipeline_bubble_ratio * 100).toFixed(1),
                 unit: '%',
               },
@@ -158,22 +151,20 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
     case 'tpot':
       return (
         <div style={detailWrapperStyle}>
-          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>Time Per Output Token (TPOT)</span>
-            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>单Token延迟 · Decode阶段核心指标</span>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12 }}>
+            Time Per Output Token (TPOT)
           </div>
           <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
-              Decode阶段生成每个输出Token的平均延迟。决定了文本生成的"打字速度"，
-              TPOT越小用户看到的文本流越快。Decode阶段是memory-bound，受限于显存带宽。
+              单Token延迟，即Decode阶段生成每个输出Token的时间。
+              是memory-bound，瓶颈在显存带宽。MLPerf要求P99 ≤ 40ms。
             </div>
           </div>
 
           <FormulaCard
             title="核心公式"
             tex={String.raw`\text{TPOT} = \max(T_{\text{compute}}, T_{\text{memory}}) + T_{\text{comm}}`}
-            description="Decode阶段每个token只需处理一次前向传播，瓶颈通常在显存带宽"
             result={latency.decode_per_token_latency_ms.toFixed(3)}
             unit="ms"
             resultColor="#13c2c2"
@@ -185,42 +176,52 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
               {
                 symbol: 'T_{\\text{compute}}',
                 name: '计算延迟',
-                description: '$T_{compute} = \\frac{2 \\times Params}{Peak \\times TP}$，单token前向传播计算时间',
+                description: '单token前向传播计算时间',
               },
               {
                 symbol: 'T_{\\text{memory}}',
                 name: '访存延迟',
-                description: '$T_{memory} = \\frac{Model + KV}{BW_{HBM}}$，每token需读取全部权重（memory-bound）',
+                description: '每token需读取全部权重，Decode阶段瓶颈',
               },
               {
                 symbol: 'T_{\\text{comm}}',
                 name: '通信延迟',
-                description: 'TP AllReduce：$T_{comm} = \\frac{2 \\times B \\times H \\times dtype}{BW_{NVLink}}$',
+                description: 'TP AllReduce通信开销',
               },
               {
-                symbol: '\\text{FLOPs/Token}',
+                symbol: '\\text{FLOPs}_{\\text{decode}}',
                 name: '每Token计算量',
-                description: '$\\approx 2 \\times Params$，decode每次只处理1个token',
+                description: 'Decode阶段单token计算量',
               },
               {
-                symbol: '\\text{Model Size}',
-                name: '模型权重',
-                description: '$= \\frac{Params \\times dtype}{TP}$ GB，每token需完整读取一次',
+                symbol: 'P',
+                name: '参数量',
+                description: '模型总参数数量',
               },
               {
-                symbol: '\\text{KV Cache}',
-                name: 'KV缓存',
-                description: '$= 2 \\times L \\times H \\times S \\times B \\times dtype$，随序列长度增长',
+                symbol: 'M_{\\text{model}}',
+                name: '模型显存',
+                description: '模型权重占用的显存大小（GB）',
               },
               {
-                symbol: '\\text{BW}_{\\text{HBM}}',
-                name: 'HBM带宽',
-                description: '显存带宽，H100 = 3.35 TB/s，A100 = 2.0 TB/s',
+                symbol: 'M_{\\text{KV}}',
+                name: 'KV缓存显存',
+                description: 'Key/Value占用的显存（GB）',
               },
               {
-                symbol: '\\text{Batch}',
+                symbol: 'B',
                 name: '批次大小',
-                description: '增大batch可提高算术强度，从memory-bound转向compute-bound',
+                description: '同时处理的请求数量',
+              },
+              {
+                symbol: 'H',
+                name: '隐藏维度',
+                description: '模型隐藏层维度',
+              },
+              {
+                symbol: '\\text{BW}',
+                name: '带宽',
+                description: '访存用HBM带宽，通信用Link带宽（来自拓扑配置）',
               },
             ]}
           />
@@ -229,26 +230,26 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             title="计算分解"
             steps={[
               {
-                label: 'FLOPs/Token',
-                formula: '\\text{FLOPs} \\approx 2 \\times \\text{Params}',
+                label: '\\text{FLOPs}_{\\text{decode}}',
+                formula: '\\text{FLOPs}_{\\text{decode}} \\approx 2 \\times P',
                 value: (2 * 70e9 / 1e9).toFixed(0),
                 unit: 'GFLOPs',
               },
               {
-                label: '计算延迟',
-                formula: 'T_{\\text{compute}} = \\frac{2 \\times Params}{Peak \\times TP}',
+                label: 'T_{\\text{compute}}',
+                formula: 'T_{\\text{compute}} = \\frac{\\text{FLOPs}_{\\text{decode}}}{\\text{Peak} \\times \\text{TP}}',
                 value: latency.decode_compute_latency_ms.toFixed(3),
                 unit: 'ms',
               },
               {
-                label: '访存延迟',
-                formula: 'T_{\\text{memory}} = \\frac{Model + KV}{BW_{HBM}}',
+                label: 'T_{\\text{memory}}',
+                formula: 'T_{\\text{memory}} = \\frac{M_{\\text{model}} + M_{\\text{KV}}}{\\text{BW}}',
                 value: (memory.model_memory_gb / 3.35).toFixed(2),
                 unit: 'ms',
               },
               {
-                label: '通信延迟',
-                formula: 'T_{\\text{comm}} = \\frac{2(TP-1)}{TP} \\times \\frac{B \\times H \\times dtype}{BW}',
+                label: 'T_{\\text{comm}}',
+                formula: 'T_{\\text{comm}} = \\frac{2 \\times B \\times H}{\\text{BW}}',
                 value: latency.decode_comm_latency_ms.toFixed(3),
                 unit: 'ms',
               },
@@ -635,16 +636,15 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
       const tpotP = latency.tpot_percentiles
       return (
         <div style={detailWrapperStyle}>
-          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>Latency Percentiles (延迟分位数)</span>
-            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>SLO关键指标 · P50/P90/P99</span>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12 }}>
+            Latency Percentiles (延迟分位数)
           </div>
 
           <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
-              延迟的统计分布。P99表示99%请求的延迟都低于此值，是SLO的关键指标。
-              MLPerf Inference标准要求：TTFT P99 ≤ 450ms，TPOT P99 ≤ 40ms。
+              延迟的统计分布，P99表示99%请求延迟低于此值。
+              MLPerf要求：FTL P99 ≤ 450ms，TPOT P99 ≤ 40ms。
             </div>
           </div>
 
@@ -744,7 +744,7 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
               color: '#2f54eb',
               textAlign: 'center',
             }}>
-              📊 MLPerf SLO标准: TTFT P99 ≤ 450ms, TPOT P99 ≤ 40ms
+              📊 MLPerf SLO标准: FTL P99 ≤ 450ms, TPOT P99 ≤ 40ms
             </div>
         </div>
       )
@@ -822,22 +822,20 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
     case 'e2e':
       return (
         <div style={detailWrapperStyle}>
-          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>End-to-End Latency (端到端延迟)</span>
-            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>完整请求耗时 · 用户感知延迟</span>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12 }}>
+            End-to-End Latency (E2E)
           </div>
           <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
-              从发送请求到接收完整响应的总时间。包括Prefill阶段（TTFT）和Decode阶段的全部时间。
-              是用户感知的实际响应时间，直接影响用户体验。
+              端到端延迟，即从发送请求到接收完整响应的总时间。
+              E2E = FTL + TPOT × 输出Token数。
             </div>
           </div>
 
           <FormulaCard
             title="核心公式"
-            tex={String.raw`T_{\text{e2e}} = \text{TTFT} + \text{TPOT} \times N_{\text{output}}`}
-            description="端到端延迟 = 首Token延迟 + 每Token延迟 × 输出Token数"
+            tex={String.raw`T_{\text{e2e}} = \text{FTL} + \text{TPOT} \times N_{\text{output}}`}
             result={(latency.end_to_end_latency_ms / 1000).toFixed(2)}
             unit="秒"
             resultColor="#eb2f96"
@@ -878,19 +876,19 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             title="延迟分解"
             steps={[
               {
-                label: 'Prefill占比',
-                formula: '\\frac{\\text{TTFT}}{T_{\\text{e2e}}} \\times 100\\%',
+                label: '\\text{Prefill}_{\\%}',
+                formula: '\\frac{\\text{FTL}}{T_{\\text{e2e}}} \\times 100\\%',
                 value: (latency.prefill_total_latency_ms / latency.end_to_end_latency_ms * 100).toFixed(1),
                 unit: '%',
               },
               {
-                label: 'TTFT (Prefill)',
-                formula: '\\text{TTFT} = \\frac{\\max(T_{\\text{compute}}, T_{\\text{comm}})}{1 - \\beta}',
+                label: '\\text{FTL}',
+                formula: '\\text{FTL} = \\frac{T_{\\text{compute}} + T_{\\text{comm}}}{1 - \\beta}',
                 value: latency.prefill_total_latency_ms.toFixed(2),
                 unit: 'ms',
               },
               {
-                label: 'Decode总时间',
+                label: 'T_{\\text{decode}}',
                 formula: '\\text{TPOT} \\times N_{\\text{output}}',
                 value: (latency.end_to_end_latency_ms - latency.prefill_total_latency_ms).toFixed(1),
                 unit: 'ms',

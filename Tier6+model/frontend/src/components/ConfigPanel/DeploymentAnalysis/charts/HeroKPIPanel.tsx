@@ -169,12 +169,12 @@ export const HeroKPIPanel: React.FC<HeroKPIPanelProps> = ({
     {
       id: 'ttft',
       icon: <ClockCircleOutlined />,
-      label: 'TTFT',
+      label: 'FTL',
       value: formatValue(latency.prefill_total_latency_ms),
       unit: 'ms',
       subValue: `延迟评分 ${score.latency_score.toFixed(0)}`,
       status: getTTFTStatus(),
-      tooltip: 'Time To First Token - 首个Token延迟',
+      tooltip: 'First Token Latency - 首个Token延迟',
     },
     {
       id: 'tpot',

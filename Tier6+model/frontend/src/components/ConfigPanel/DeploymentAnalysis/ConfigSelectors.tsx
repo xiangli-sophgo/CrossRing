@@ -18,6 +18,7 @@ import {
   InferenceConfig,
   HardwareConfig,
 } from '../../../utils/llmDeployment/types'
+import { calculateModelParams } from '../../../utils/llmDeployment/modelCalculator'
 import {
   getModelList,
   getChipList,
@@ -179,56 +180,10 @@ export const ModelConfigSelector: React.FC<ModelConfigSelectorProps> = ({ value,
   const isCustomModel = presetId.startsWith('custom_')
 
   const estimateParams = () => {
-    const H = value.hidden_size
-    const L = value.num_layers
-    const V = value.vocab_size
-    const I = value.intermediate_size
-
-    const embedding = V * H
-    const attention = 4 * H * H * L
-    const layerNorm = 2 * H * L
-
-    let ffn: number
-    let breakdown: string
-
-    if (value.model_type === 'moe' && value.moe_config) {
-      const E = value.moe_config.num_experts
-      const S = value.moe_config.num_shared_experts || 0
-      const expertI = value.moe_config.expert_intermediate_size || I
-      ffn = 3 * H * expertI * L * (E + S)
-      const router = E * H * L
-      const total = embedding + attention + ffn + layerNorm + router
-      const billions = total / 1e9
-      const result = billions >= 1 ? `${billions.toFixed(1)}B` : `${(total / 1e6).toFixed(0)}M`
-
-      breakdown = [
-        `Embedding: ${(embedding / 1e9).toFixed(2)}B`,
-        `Attention: ${(attention / 1e9).toFixed(2)}B`,
-        `MoE FFN: ${(ffn / 1e9).toFixed(2)}B (${E}+${S}专家, I'=${expertI})`,
-        `LayerNorm: ${(layerNorm / 1e6).toFixed(1)}M`,
-        `Router: ${(router / 1e6).toFixed(1)}M`,
-        `─────────`,
-        `总计: ${result}`,
-      ].join('\n')
-
-      return { value: result, breakdown }
-    } else {
-      ffn = 3 * H * I * L
-      const total = embedding + attention + ffn + layerNorm
-      const billions = total / 1e9
-      const result = billions >= 1 ? `${billions.toFixed(1)}B` : `${(total / 1e6).toFixed(0)}M`
-
-      breakdown = [
-        `Embedding: ${(embedding / 1e9).toFixed(2)}B`,
-        `Attention: ${(attention / 1e9).toFixed(2)}B`,
-        `FFN: ${(ffn / 1e9).toFixed(2)}B`,
-        `LayerNorm: ${(layerNorm / 1e6).toFixed(1)}M`,
-        `─────────`,
-        `总计: ${result}`,
-      ].join('\n')
-
-      return { value: result, breakdown }
-    }
+    const total = calculateModelParams(value)
+    const billions = total / 1e9
+    const result = billions >= 1 ? `${billions.toFixed(1)}B` : `${(total / 1e6).toFixed(0)}M`
+    return { value: result, breakdown: `总参数量: ${result}` }
   }
 
   return (
@@ -323,14 +278,23 @@ export const ModelConfigSelector: React.FC<ModelConfigSelectorProps> = ({ value,
               onChange={(v) => updateField('vocab_size', v || 32000)} style={{ width: 80 }} />
           </div>
           <div style={paramRowStyle}>
-            <Tooltip title="数据精度: 影响显存占用和计算速度"><Text style={{ fontSize: 11, cursor: 'help' }}>精度</Text></Tooltip>
-            <Select size="small" value={value.dtype} onChange={(v) => updateField('dtype', v)} style={{ width: 80 }}
+            <Tooltip title="权重精度: 模型权重的存储精度，影响权重显存占用"><Text style={{ fontSize: 11, cursor: 'help' }}>权重精度</Text></Tooltip>
+            <Select size="small" value={value.weight_dtype} onChange={(v) => updateField('weight_dtype', v)} style={{ width: 70 }}
               options={[
-                { value: 'fp32', label: 'FP32' },
-                { value: 'fp16', label: 'FP16' },
                 { value: 'bf16', label: 'BF16' },
+                { value: 'fp16', label: 'FP16' },
                 { value: 'int8', label: 'INT8' },
                 { value: 'int4', label: 'INT4' },
+              ]}
+            />
+          </div>
+          <div style={paramRowStyle}>
+            <Tooltip title="激活精度: 计算过程中的激活值和KV Cache精度"><Text style={{ fontSize: 11, cursor: 'help' }}>激活精度</Text></Tooltip>
+            <Select size="small" value={value.activation_dtype} onChange={(v) => updateField('activation_dtype', v)} style={{ width: 70 }}
+              options={[
+                { value: 'bf16', label: 'BF16' },
+                { value: 'fp16', label: 'FP16' },
+                { value: 'int8', label: 'INT8' },
               ]}
             />
           </div>
@@ -364,6 +328,11 @@ export const ModelConfigSelector: React.FC<ModelConfigSelectorProps> = ({ value,
                   onChange={(v) => updateMoeField('expert_intermediate_size', v || undefined)} style={{ width: 80 }}
                   placeholder="同FFN" />
               </div>
+              <div style={paramRowStyle}>
+                <Tooltip title="First K Dense: 前K层使用Dense FFN而非MoE（DeepSeek V3=3）"><Text style={{ fontSize: 11, cursor: 'help' }}>前K层Dense</Text></Tooltip>
+                <InputNumber size="small" min={0} max={100} value={value.moe_config.first_k_dense_replace || 0}
+                  onChange={(v) => updateMoeField('first_k_dense_replace', v || 0)} style={{ width: 80 }} />
+              </div>
             </div>
           )}
           <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #e8e8e8' }}>
@@ -390,8 +359,8 @@ export const ModelConfigSelector: React.FC<ModelConfigSelectorProps> = ({ value,
             <Tooltip title="Intermediate Size: FFN层的中间维度，通常是隐藏层的2.5-4倍">
               <Text type="secondary" style={{ cursor: 'help' }}>FFN: {value.intermediate_size}</Text>
             </Tooltip>
-            <Tooltip title="数据精度: FP32/FP16/BF16/INT8/INT4，精度越低显存占用越少">
-              <Text type="secondary" style={{ cursor: 'help' }}>精度: {value.dtype.toUpperCase()}</Text>
+            <Tooltip title="精度: W=权重精度, A=激活精度，如W4A16表示权重INT4、激活FP16">
+              <Text type="secondary" style={{ cursor: 'help' }}>精度: W{value.weight_dtype === 'int4' ? '4' : value.weight_dtype === 'int8' ? '8' : '16'}A{value.activation_dtype === 'int8' ? '8' : '16'}</Text>
             </Tooltip>
           </div>
           {value.model_type === 'moe' && value.moe_config && (

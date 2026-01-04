@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import { Layout, Typography, Spin, message, Segmented, Card, Descriptions, Tag, Collapse } from 'antd'
+import { Layout, Typography, Spin, message, Segmented, Card, Descriptions, Tag, Collapse, Button } from 'antd'
+import { ArrowLeftOutlined } from '@ant-design/icons'
 import { Scene3D } from './components/Scene3D'
 import { ConfigPanel } from './components/ConfigPanel'
 import { TopologyGraph, NodeDetail, LinkDetail } from './components/TopologyGraph'
@@ -872,6 +873,17 @@ const App: React.FC = () => {
                   <div style={{ fontSize: 20, fontWeight: 600, color: '#1a1a1a' }}>
                     LLM 部署分析结果
                   </div>
+                  {analysisViewMode === 'detail' && (
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<ArrowLeftOutlined />}
+                      onClick={() => setAnalysisViewMode('history')}
+                      style={{ fontSize: 13 }}
+                    >
+                      历史记录
+                    </Button>
+                  )}
                 </div>
 
                 {/* 分析结果/历史记录 - 使用 App 级别的状态和回调确保始终可交互 */}

@@ -285,6 +285,8 @@ export interface SimulationStats {
   maxPPBubbleRatio: number
   /** 事件总数 */
   totalEvents: number
+  /** Prefill阶段计算量 (FLOPs) */
+  prefillFlops: number
 }
 
 // ============================================

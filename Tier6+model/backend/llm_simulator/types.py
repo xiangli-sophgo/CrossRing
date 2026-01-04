@@ -197,6 +197,7 @@ class MoEConfig:
     expert_capacity_factor: float = 1.0
     num_shared_experts: int = 0
     expert_intermediate_size: int = 0
+    first_k_dense_replace: int = 0  # 前K层使用Dense FFN（DeepSeek V3 = 3）
 
 
 @dataclass
@@ -319,6 +320,7 @@ class SimulationStats:
     dynamic_mbu: float = 0.0
     max_pp_bubble_ratio: float = 0.0
     total_events: int = 0
+    prefill_flops: float = 0.0  # Prefill 阶段计算量 (FLOPs)
 
 
 # ============================================

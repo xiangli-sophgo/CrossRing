@@ -34,7 +34,7 @@ export function calculateTPCommVolumePrefill(
   const L = model.num_layers;
   const batch = inference.batch_size;
   const seq = inference.input_seq_length;
-  const bytesPerElement = getBytesPerElement(model.dtype);
+  const bytesPerElement = getBytesPerElement(model.activation_dtype);
 
   // 每层有 2 次 AllReduce: Attention 后 + FFN 后
   // 每次 AllReduce 的消息大小 = batch × seq × H × bytes
@@ -62,7 +62,7 @@ export function calculateTPCommVolumeDecode(
   const H = model.hidden_size;
   const L = model.num_layers;
   const batch = inference.batch_size;
-  const bytesPerElement = getBytesPerElement(model.dtype);
+  const bytesPerElement = getBytesPerElement(model.activation_dtype);
 
   // Decode 时 seq=1
   const messageSize = batch * 1 * H * bytesPerElement;
@@ -92,7 +92,7 @@ export function calculatePPCommVolumePrefill(
   const H = model.hidden_size;
   const batch = inference.batch_size;
   const seq = inference.input_seq_length;
-  const bytesPerElement = getBytesPerElement(model.dtype);
+  const bytesPerElement = getBytesPerElement(model.activation_dtype);
 
   // micro-batch 大小
   const microBatchSize = batch / numMicroBatches;
@@ -119,7 +119,7 @@ export function calculatePPCommVolumeDecode(
 
   const H = model.hidden_size;
   const batch = inference.batch_size;
-  const bytesPerElement = getBytesPerElement(model.dtype);
+  const bytesPerElement = getBytesPerElement(model.activation_dtype);
 
   // Decode 时 seq=1
   const messageSize = batch * 1 * H * bytesPerElement;
@@ -151,7 +151,7 @@ export function calculateEPCommVolumePrefill(
   const L = model.num_layers;
   const batch = inference.batch_size;
   const seq = inference.input_seq_length;
-  const bytesPerElement = getBytesPerElement(model.dtype);
+  const bytesPerElement = getBytesPerElement(model.activation_dtype);
   const expertsPerTok = model.moe_config.num_experts_per_tok;
 
   // 每个 token 激活 expertsPerTok 个专家
@@ -182,7 +182,7 @@ export function calculateEPCommVolumeDecode(
   const H = model.hidden_size;
   const L = model.num_layers;
   const batch = inference.batch_size;
-  const bytesPerElement = getBytesPerElement(model.dtype);
+  const bytesPerElement = getBytesPerElement(model.activation_dtype);
   const expertsPerTok = model.moe_config.num_experts_per_tok;
 
   // Decode 时 seq=1
@@ -213,7 +213,7 @@ export function calculateSPCommVolumePrefill(
   const L = model.num_layers;
   const batch = inference.batch_size;
   const seq = inference.input_seq_length;
-  const bytesPerElement = getBytesPerElement(model.dtype);
+  const bytesPerElement = getBytesPerElement(model.activation_dtype);
 
   // AllGather + ReduceScatter: 每次通信量 = (n-1)/n × message_size
   // 每层约 2 次
@@ -239,7 +239,7 @@ export function calculateSPCommVolumeDecode(
   const H = model.hidden_size;
   const L = model.num_layers;
   const batch = inference.batch_size;
-  const bytesPerElement = getBytesPerElement(model.dtype);
+  const bytesPerElement = getBytesPerElement(model.activation_dtype);
 
   const messageSize = batch * 1 * H * bytesPerElement;
   const commFactor = (spSize - 1) / spSize;
@@ -346,7 +346,7 @@ export function calculateDPGradientSyncVolume(
   if (dpSize <= 1) return 0;
 
   const totalParams = calculateModelParamsForComm(model);
-  const bytesPerElement = getBytesPerElement(model.dtype);
+  const bytesPerElement = getBytesPerElement(model.activation_dtype);
 
   // AllReduce 梯度: 2 × (n-1)/n × 参数量 × bytes
   const allReduceFactor = 2 * (dpSize - 1) / dpSize;

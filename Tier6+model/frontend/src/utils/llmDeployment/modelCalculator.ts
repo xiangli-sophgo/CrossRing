@@ -44,16 +44,39 @@ export function calculateModelParams(model: LLMModelConfig): number {
   const lmHeadParams = tieWordEmbeddings ? 0 : H * V;
 
   // 每层 Transformer 参数:
-  // Attention:
-  //   - Q: H * H
-  //   - K: H * (H / numHeads * numKVHeads) = H * headDim * numKVHeads
-  //   - V: H * headDim * numKVHeads
-  //   - O: H * H
-  const qParams = H * H;
-  const kParams = H * headDim * numKVHeads;
-  const vParams = H * headDim * numKVHeads;
-  const oParams = H * H;
-  const attentionParams = qParams + kParams + vParams + oParams;
+  // Attention 参数量计算
+  let attentionParams: number;
+
+  if (model.attention_type === 'mla' && model.mla_config) {
+    // MLA (Multi-head Latent Attention): 5 个投影矩阵
+    // 参考文档《性能指标计算》: 单层 MLA 参数量 = 187M
+    const mla = model.mla_config;
+    const Nh = model.num_attention_heads;
+
+    // q_a_proj: H → q_lora_rank
+    const W_q_a = H * mla.q_lora_rank;
+    // q_b_proj: q_lora_rank → Nh × (qk_nope_head_dim + qk_rope_head_dim)
+    const W_q_b = mla.q_lora_rank * Nh * (mla.qk_nope_head_dim + mla.qk_rope_head_dim);
+    // kv_a_proj: H → (kv_lora_rank + qk_rope_head_dim)
+    const W_kv_a = H * (mla.kv_lora_rank + mla.qk_rope_head_dim);
+    // kv_b_proj: kv_lora_rank → Nh × (qk_nope_head_dim + v_head_dim)
+    const W_kv_b = mla.kv_lora_rank * Nh * (mla.qk_nope_head_dim + mla.v_head_dim);
+    // o_proj: Nh × v_head_dim → H
+    const W_o = Nh * mla.v_head_dim * H;
+
+    attentionParams = W_q_a + W_q_b + W_kv_a + W_kv_b + W_o;
+  } else {
+    // 标准 GQA/MHA
+    //   - Q: H * H
+    //   - K: H * headDim * numKVHeads
+    //   - V: H * headDim * numKVHeads
+    //   - O: H * H
+    const qParams = H * H;
+    const kParams = H * headDim * numKVHeads;
+    const vParams = H * headDim * numKVHeads;
+    const oParams = H * H;
+    attentionParams = qParams + kParams + vParams + oParams;
+  }
 
   // FFN (SwiGLU):
   //   - gate: H * I
@@ -61,16 +84,23 @@ export function calculateModelParams(model: LLMModelConfig): number {
   //   - down: I * H
   let ffnParams = 3 * H * I;
 
-  // MoE: FFN 参数 × 专家数
+  // MoE: 区分 Dense 层和 MoE 层
   if (model.model_type === 'moe' && model.moe_config) {
     const numExperts = model.moe_config.num_experts;
     const numSharedExperts = model.moe_config.num_shared_experts ?? 0;
-    // 使用 expert_intermediate_size，如果未设置则使用 intermediate_size
     const expertI = model.moe_config.expert_intermediate_size ?? I;
-    ffnParams = 3 * H * expertI * (numExperts + numSharedExperts);
-
-    // Router: H * numExperts
-    ffnParams += H * numExperts;
+    const firstKDense = model.moe_config.first_k_dense_replace ?? 0;
+    
+    // Dense 层 (前 firstKDense 层): 使用标准 FFN
+    const numDenseLayers = Math.min(firstKDense, L);
+    const denseFFNParams = 3 * H * I * numDenseLayers;
+    
+    // MoE 层 (后续层): 使用专家
+    const numMoELayers = L - numDenseLayers;
+    const moeFFNParams = (3 * H * expertI * (numExperts + numSharedExperts) + H * numExperts) * numMoELayers;
+    
+    // 覆盖 ffnParams（不再乘以 L，因为已经考虑了层数）
+    ffnParams = (denseFFNParams + moeFFNParams) / L;
   }
 
   // LayerNorm/RMSNorm: 每层 2 个 (attention前 + FFN前)
@@ -163,9 +193,18 @@ export function calculateParamsPerLayer(model: LLMModelConfig): {
   if (model.model_type === 'moe' && model.moe_config) {
     const numExperts = model.moe_config.num_experts;
     const numSharedExperts = model.moe_config.num_shared_experts ?? 0;
-    // 使用 expert_intermediate_size，如果未设置则使用 intermediate_size
     const expertI = model.moe_config.expert_intermediate_size ?? I;
-    ffn = 3 * H * expertI * (numExperts + numSharedExperts) + H * numExperts;
+    const firstKDense = model.moe_config.first_k_dense_replace ?? 0;
+    const numLayers = model.num_layers;
+    
+    // 计算平均每层 FFN 参数（混合 Dense 和 MoE）
+    const numDenseLayers = Math.min(firstKDense, numLayers);
+    const numMoELayers = numLayers - numDenseLayers;
+    const denseFFN = 3 * H * I;
+    const moeFFN = 3 * H * expertI * (numExperts + numSharedExperts) + H * numExperts;
+    
+    // 加权平均
+    ffn = numLayers > 0 ? (denseFFN * numDenseLayers + moeFFN * numMoELayers) / numLayers : moeFFN;
   }
 
   // LayerNorm/RMSNorm: 每层 2 个
@@ -192,7 +231,7 @@ export function calculateModelMemory(
   parallelism: ParallelismStrategy
 ): number {
   const totalParams = calculateModelParams(model);
-  const bytesPerParam = getBytesPerElement(model.dtype);
+  const bytesPerParam = getBytesPerElement(model.weight_dtype);
 
   // 模型按 TP 和 PP 切分
   const paramsPerChip = totalParams / parallelism.tp / parallelism.pp;
@@ -223,7 +262,7 @@ export function calculateKVCacheMemory(
   const numKVHeads = model.num_kv_heads;
   const headDim = model.hidden_size / numHeads;
   const numLayers = model.num_layers;
-  const bytesPerElement = getBytesPerElement(model.dtype);
+  const bytesPerElement = getBytesPerElement(model.activation_dtype);
 
   // KV Cache 大小 = 2 (K+V) × batch × seq × kv_heads × head_dim × layers × bytes
   // 按 TP 切分 KV heads
@@ -257,7 +296,7 @@ export function calculateActivationMemory(
   const H = model.hidden_size;
   const I = model.intermediate_size;
   const numLayers = model.num_layers;
-  const bytesPerElement = getBytesPerElement(model.dtype);
+  const bytesPerElement = getBytesPerElement(model.activation_dtype);
 
   // Prefill 阶段激活值 (最大)
   const seqLen = inference.input_seq_length;

@@ -6,6 +6,7 @@
 import React, { useState, useMemo } from 'react'
 import { Tag } from 'antd'
 import { LLMModelConfig, InferenceConfig } from '../../../../utils/llmDeployment/types'
+import { calculateModelParams } from '../../../../utils/llmDeployment/modelCalculator'
 
 interface ModelInfoCardProps {
   model: LLMModelConfig
@@ -58,8 +59,19 @@ const calculateFLOPs = (model: LLMModelConfig, inference?: InferenceConfig) => {
     const expertI = model.moe_config.expert_intermediate_size || I
     const topK = model.moe_config.num_experts_per_tok
     const shared = model.moe_config.num_shared_experts || 0
-    ffnTotal = (topK + shared) * (2 * 2 * B * S * H * expertI + 2 * B * S * expertI * H)
-    ffnTotal += 2 * B * S * H * model.moe_config.num_experts
+    const firstKDense = model.moe_config.first_k_dense_replace || 0
+    
+    // MoE 层的 FFN FLOPs (激活专家数 * 单专家计算量 + Router)
+    const moeFFN = (topK + shared) * (2 * 2 * B * S * H * expertI + 2 * B * S * expertI * H)
+                 + 2 * B * S * H * model.moe_config.num_experts
+    
+    // Dense 层的 FFN FLOPs
+    const denseFFN = 2 * 2 * B * S * H * I + 2 * B * S * I * H
+    
+    // 加权平均（考虑 Dense 和 MoE 层的比例）
+    const numDenseLayers = Math.min(firstKDense, L)
+    const numMoELayers = L - numDenseLayers
+    ffnTotal = L > 0 ? (denseFFN * numDenseLayers + moeFFN * numMoELayers) / L : moeFFN
   }
 
   const embFLOPs = 2 * B * S * V * H
@@ -75,7 +87,7 @@ const calculateFLOPs = (model: LLMModelConfig, inference?: InferenceConfig) => {
   }
 }
 
-// 参数量计算
+// 参数量计算 - 使用统一的 calculateModelParams 计算总量
 const calculateParams = (model: LLMModelConfig) => {
   const H = model.hidden_size
   const I = model.intermediate_size
@@ -92,7 +104,16 @@ const calculateParams = (model: LLMModelConfig) => {
     const E = model.moe_config.num_experts
     const S = model.moe_config.num_shared_experts || 0
     const expertI = model.moe_config.expert_intermediate_size || I
-    ffnParams = (E + S) * 3 * H * expertI + H * E
+    const firstKDense = model.moe_config.first_k_dense_replace || 0
+
+    // 区分 Dense 层和 MoE 层
+    const numDenseLayers = Math.min(firstKDense, L)
+    const numMoELayers = L - numDenseLayers
+    const denseFFN = 3 * H * I
+    const moeFFN = (E + S) * 3 * H * expertI + H * E
+
+    // 加权平均每层 FFN 参数
+    ffnParams = L > 0 ? (denseFFN * numDenseLayers + moeFFN * numMoELayers) / L : moeFFN
   }
 
   const outParams = H * V
@@ -102,7 +123,7 @@ const calculateParams = (model: LLMModelConfig) => {
     attention: attnParams * L,
     ffn: ffnParams * L,
     output: outParams,
-    total: embParams + L * (attnParams + ffnParams) + outParams,
+    total: calculateModelParams(model),
   }
 }
 

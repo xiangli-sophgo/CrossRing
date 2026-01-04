@@ -304,22 +304,23 @@ export const CalculationSteps: React.FC<CalculationStepsProps> = ({
           key={i}
           style={{
             display: 'grid',
-            gridTemplateColumns: '90px 1fr 120px',
+            gridTemplateColumns: '100px 1fr 110px',
             alignItems: 'center',
             padding: '10px 16px',
             borderBottom: i < steps.length - 1 ? '1px solid #f0f0f0' : 'none',
           }}
         >
-          {/* 标签 */}
-          <span style={{ fontSize: 12, color: '#6b7280' }}>
-            {step.label}
-          </span>
+          {/* 标签（支持LaTeX渲染） */}
+          <span
+            style={{ fontSize: 13, color: '#6b7280' }}
+            dangerouslySetInnerHTML={{ __html: renderInlineMath(step.label) }}
+          />
 
           {/* 公式（居中） */}
           <div style={{ textAlign: 'center' }}>
             {step.formula && (
               <span
-                style={{ fontSize: 15, color: '#374151' }}
+                style={{ fontSize: 14, color: '#374151' }}
                 dangerouslySetInnerHTML={{ __html: renderInlineMath(`\\displaystyle ${step.formula}`) }}
               />
             )}
@@ -327,11 +328,11 @@ export const CalculationSteps: React.FC<CalculationStepsProps> = ({
 
           {/* 结果（居中，包含单位） */}
           <div style={{ textAlign: 'center' }}>
-            <span style={{ fontSize: 18, fontWeight: 600, color: '#1f2937' }}>
+            <span style={{ fontSize: 15, fontWeight: 600, color: '#1f2937' }}>
               {typeof step.value === 'number' ? step.value.toLocaleString() : step.value}
             </span>
             {step.unit && (
-              <span style={{ fontSize: 12, color: '#9ca3af', marginLeft: 4 }}>
+              <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 4 }}>
                 {step.unit}
               </span>
             )}

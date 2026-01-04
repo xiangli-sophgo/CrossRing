@@ -96,6 +96,8 @@ export interface MoEConfig {
   num_shared_experts?: number;
   /** 每个专家的FFN中间维度 (可选，不设置则使用 intermediate_size) */
   expert_intermediate_size?: number;
+  /** 前K层使用Dense FFN（DeepSeek V3 = 3，即layer 0-2是Dense，layer 3+是MoE） */
+  first_k_dense_replace?: number;
 }
 
 /** MLA (Multi-head Latent Attention) 配置 - DeepSeek V3/R1 专用 */
@@ -130,8 +132,10 @@ export interface LLMModelConfig {
   intermediate_size: number;
   /** 词表大小 */
   vocab_size: number;
-  /** 数据精度 */
-  dtype: DataType;
+  /** 权重精度 */
+  weight_dtype: DataType;
+  /** 激活/KV Cache 精度 */
+  activation_dtype: DataType;
   /** 最大序列长度 */
   max_seq_length: number;
   /** MoE 配置 (可选) */
@@ -302,6 +306,8 @@ export interface LatencyAnalysis {
   prefill_comm_latency_ms: number;
   /** Prefill 总延迟 (ms) = TTFT */
   prefill_total_latency_ms: number;
+  /** Prefill 计算量 (FLOPs) */
+  prefill_flops?: number;
   /** Decode 单 token 计算延迟 (ms) */
   decode_compute_latency_ms: number;
   /** Decode 单 token 访存延迟 (ms) */
@@ -328,8 +334,12 @@ export interface LatencyAnalysis {
 
 /** 吞吐量分析结果 */
 export interface ThroughputAnalysis {
-  /** Token 吞吐量 (tokens/s) */
+  /** Token 吞吐量 (tokens/s) - 集群总吞吐 = TPS_chip × NumChips */
   tokens_per_second: number;
+  /** TPS per Batch (tokens/s) = 1000 / T_decode(ms) - 用户体验指标，SLO约束 ≥10 */
+  tps_per_batch: number;
+  /** TPS per Chip (tokens/s) = B × 1000 / T_decode(ms) - 成本效益，优化目标 */
+  tps_per_chip: number;
   /** 请求吞吐量 (requests/s) */
   requests_per_second: number;
   /** 有效算力利用率 MFU (0-1) - Prefill 阶段关键指标 */
@@ -574,6 +584,16 @@ export const BYTES_PER = {
 /** 获取数据类型的字节数 */
 export function getBytesPerElement(dtype: DataType): number {
   return BYTES_PER[dtype];
+}
+
+/** 获取权重精度的字节数 */
+export function getWeightBytes(model: LLMModelConfig): number {
+  return BYTES_PER[model.weight_dtype];
+}
+
+/** 获取激活/KV Cache 精度的字节数 */
+export function getActivationBytes(model: LLMModelConfig): number {
+  return BYTES_PER[model.activation_dtype];
 }
 
 // ============================================
