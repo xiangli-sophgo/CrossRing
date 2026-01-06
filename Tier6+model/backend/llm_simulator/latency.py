@@ -33,6 +33,71 @@ SOFTMAX_FLOPS_FACTOR = 5  # exp + sum + div + sub + max
 
 
 # ============================================
+# 通用辅助函数
+# ============================================
+
+def bytes_to_gb(size_bytes: float) -> float:
+    """将字节转换为 GB"""
+    return size_bytes / (1024 ** 3)
+
+
+def calc_compute_time_ms(tflops: float, hardware: HardwareConfig) -> float:
+    """
+    计算基于 TFLOPS 的计算时间
+
+    Args:
+        tflops: 计算量 (TFLOPS)
+        hardware: 硬件配置
+
+    Returns:
+        计算时间 (ms)
+    """
+    if tflops <= 0:
+        return 0.0
+    return tflops / hardware.chip.compute_tflops_fp16 * 1000
+
+
+def calc_memory_bound_time_ms(data_gb: float, hardware: HardwareConfig) -> float:
+    """
+    计算内存带宽受限的访问时间
+
+    Args:
+        data_gb: 数据量 (GB)
+        hardware: 硬件配置
+
+    Returns:
+        访问时间 (ms)
+    """
+    if data_gb <= 0:
+        return 0.0
+    bandwidth_gbps = hardware.chip.memory_bandwidth_gbps * HBM_EFFICIENCY
+    return (data_gb / bandwidth_gbps) * 1000
+
+
+def calc_roofline_latency(
+    compute_tflops: float,
+    memory_gb: float,
+    hardware: HardwareConfig,
+) -> float:
+    """
+    基于 Roofline 模型计算延迟
+
+    返回计算时间和内存时间的较大值
+
+    Args:
+        compute_tflops: 计算量 (TFLOPS)
+        memory_gb: 内存访问量 (GB)
+        hardware: 硬件配置
+
+    Returns:
+        延迟 (ms)
+    """
+    compute_time = calc_compute_time_ms(compute_tflops, hardware)
+    memory_time = calc_memory_bound_time_ms(memory_gb, hardware)
+    return max(compute_time, memory_time)
+
+
+# ============================================
 # PCIe 传输延迟
 # ============================================
 
@@ -509,11 +574,13 @@ def calc_mla_kv_cache_read_latency(
     """
     计算 MLA KV Cache 读取延迟
 
-    MLA 的关键优势: KV Cache 只存储压缩后的 kv_lora_rank 维度
-    大小 = 2 * batch * context * kv_lora_rank * bytes / TP
+    根据 DeepSeek-V3 论文 (arXiv:2412.19437):
+    "for MLA, only c_t^KV and k_t^R need to be cached during generation"
+    - c_t^KV: 压缩后的 KV 潜在向量，维度 = kv_lora_rank
+    - k_t^R: RoPE 解耦 key，维度 = qk_rope_head_dim
 
-    对比传统 GQA: 2 * batch * context * num_kv_heads * head_dim * bytes / TP
-    压缩比 ≈ (num_kv_heads * head_dim) / kv_lora_rank ≈ 32x
+    KV Cache 维度 = kv_lora_rank + qk_rope_head_dim (如 512 + 64 = 576)
+    大小 = 2 * batch * context * (kv_lora_rank + qk_rope_head_dim) * bytes / TP
     """
     if model.mla_config is None:
         return calc_kv_cache_read_latency(model, inference, parallelism, hardware, context_length)
@@ -521,10 +588,11 @@ def calc_mla_kv_cache_read_latency(
     mla = model.mla_config
     bytes_per_elem = get_bytes_per_element(model.dtype)
 
-    # MLA KV Cache 大小 (压缩后)
+    # MLA KV Cache 大小: c_t^KV + k_t^R
+    kv_cache_dim = mla.kv_lora_rank + mla.qk_rope_head_dim
     kv_cache_bytes = (
         2 * inference.batch_size * context_length *
-        mla.kv_lora_rank * bytes_per_elem
+        kv_cache_dim * bytes_per_elem
     ) / parallelism.tp
 
     kv_cache_gb = kv_cache_bytes / (1024 ** 3)
@@ -540,6 +608,9 @@ def calc_mla_kv_cache_write_latency(
 ) -> float:
     """
     计算 MLA KV Cache 写入延迟
+
+    根据 DeepSeek-V3 论文: KV Cache 存储 c_t^KV + k_t^R
+    维度 = kv_lora_rank + qk_rope_head_dim
     """
     if model.mla_config is None:
         return calc_kv_cache_write_latency(model, inference, parallelism, hardware, num_tokens)
@@ -547,10 +618,11 @@ def calc_mla_kv_cache_write_latency(
     mla = model.mla_config
     bytes_per_elem = get_bytes_per_element(model.dtype)
 
-    # MLA KV Cache 写入 (压缩后)
+    # MLA KV Cache 写入: c_t^KV + k_t^R
+    kv_cache_dim = mla.kv_lora_rank + mla.qk_rope_head_dim
     kv_bytes = (
         2 * inference.batch_size * num_tokens *
-        mla.kv_lora_rank * bytes_per_elem
+        kv_cache_dim * bytes_per_elem
     ) / parallelism.tp
 
     kv_gb = kv_bytes / (1024 ** 3)

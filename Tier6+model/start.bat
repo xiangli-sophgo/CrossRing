@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 > nul
-title 仿真一体化平台
+title Tier6+ 3D拓扑配置器
 
-echo ========================================
-echo   仿真一体化平台
-echo ========================================
+echo ==========================================
+echo   Tier6+ 3D 拓扑配置器
+echo ==========================================
 
 set SCRIPT_DIR=%~dp0
 cd /d %SCRIPT_DIR%
@@ -22,12 +22,9 @@ if not exist "venv" (
 call venv\Scripts\activate.bat
 echo 安装后端依赖...
 pip install -r requirements.txt
-echo 安装项目依赖...
-pip install -r %SCRIPT_DIR%..\requirements.txt
 
-:: 设置PYTHONPATH并启动后端
-set PYTHONPATH=%SCRIPT_DIR%..
-start "CrossRing Backend" cmd /k "cd /d %SCRIPT_DIR%backend && call venv\Scripts\activate.bat && python -m uvicorn app.main:app --port 8002 --reload"
+:: 启动后端
+start "Tier6+ Backend" cmd /k "cd /d %SCRIPT_DIR%backend && call venv\Scripts\activate.bat && python -m uvicorn llm_simulator.api:app --port 8001 --reload"
 
 cd ..
 
@@ -48,20 +45,19 @@ if not exist "node_modules" (
     call pnpm install
 )
 
-start "CrossRing Frontend" cmd /k "cd /d %SCRIPT_DIR%frontend && pnpm run dev"
+start "Tier6+ Frontend" cmd /k "cd /d %SCRIPT_DIR%frontend && pnpm run dev"
 
 echo.
-echo ========================================
+echo ==========================================
 echo 服务已启动:
-echo   前端: http://localhost:3002
-echo   后端: http://localhost:8002
-echo   API文档: http://localhost:8002/api/docs
-echo ========================================
+echo   前端: http://localhost:3100
+echo   后端: http://localhost:8001
+echo ==========================================
 echo 关闭此窗口不会停止服务,请手动关闭后端和前端窗口以停止服务
 echo.
 
 :: 等待几秒后自动打开浏览器
 timeout /t 3 /nobreak > nul
-start http://localhost:3002
+start http://localhost:3100
 
 pause

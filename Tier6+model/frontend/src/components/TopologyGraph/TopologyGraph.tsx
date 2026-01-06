@@ -20,6 +20,38 @@ const { Text } = Typography
 
 // ManualConnectionLine 已提取到独立文件，renderNode 统一渲染所有节点类型
 
+// ============================================
+// 模块级常量（避免组件重渲染时重新创建）
+// ============================================
+
+// 节点尺寸配置（统一管理）- 单层级视图
+const NODE_SIZE_CONFIG: Record<string, { w: number; h: number; labelY: number; fontSize: number }> = {
+  switch: { w: 61, h: 24, labelY: 4, fontSize: 14 },
+  pod: { w: 56, h: 32, labelY: 9, fontSize: 15 },
+  rack: { w: 36, h: 56, labelY: 6, fontSize: 14 },
+  board: { w: 64, h: 36, labelY: 5, fontSize: 15 },
+  chip: { w: 40, h: 40, labelY: 5, fontSize: 14 },
+  default: { w: 50, h: 36, labelY: 0, fontSize: 11 },
+}
+
+// 多层级视图的节点尺寸配置（可单独调整）
+const MULTI_LEVEL_NODE_SIZE_CONFIG: Record<string, { w: number; h: number; labelY: number; fontSize: number }> = {
+  switch: { w: 61, h: 24, labelY: 5, fontSize: 14 },
+  pod: { w: 56, h: 32, labelY: 9, fontSize: 16 },
+  rack: { w: 36, h: 56, labelY: 6, fontSize: 16 },
+  board: { w: 64, h: 36, labelY: 5, fontSize: 16 },
+  chip: { w: 40, h: 40, labelY: 5, fontSize: 16 },
+  default: { w: 50, h: 36, labelY: 0, fontSize: 11 },
+}
+
+// 格式化标签（名称第一个字符大写 + 编号）
+const formatNodeLabel = (label: string): string => {
+  const match = label.match(/\d+/)
+  const num = match ? match[0] : ''
+  const firstChar = label.charAt(0).toUpperCase()
+  return `${firstChar}${num}`
+}
+
 export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   visible,
   onClose,
@@ -218,35 +250,6 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       utilization: lt.utilizationPercent,
     }
   }, [linkTrafficMap, maxTrafficMb])
-
-  // 节点尺寸配置（统一管理）- 单层级视图
-  const NODE_SIZE_CONFIG: Record<string, { w: number; h: number; labelY: number; fontSize: number }> = {
-    switch: { w: 61, h: 24, labelY: 4, fontSize: 14 },
-    pod: { w: 56, h: 32, labelY: 9, fontSize: 15 },
-    rack: { w: 36, h: 56, labelY: 6, fontSize: 14 },
-    board: { w: 64, h: 36, labelY: 5, fontSize: 15 },
-    chip: { w: 40, h: 40, labelY: 5, fontSize: 14 },
-    default: { w: 50, h: 36, labelY: 0, fontSize: 11 },
-  }
-
-  // 多层级视图的节点尺寸配置（可单独调整）
-  const MULTI_LEVEL_NODE_SIZE_CONFIG: Record<string, { w: number; h: number; labelY: number; fontSize: number }> = {
-    switch: { w: 61, h: 24, labelY: 5, fontSize: 14 },
-    pod: { w: 56, h: 32, labelY: 9, fontSize: 16 },
-    rack: { w: 36, h: 56, labelY: 6, fontSize: 16 },
-    board: { w: 64, h: 36, labelY: 5, fontSize: 16 },
-    chip: { w: 40, h: 40, labelY: 5, fontSize: 16 },
-    default: { w: 50, h: 36, labelY: 0, fontSize: 11 },
-  }
-
-  // 格式化标签（名称第一个字符大写 + 编号）
-  const formatNodeLabel = (label: string) => {
-    const match = label.match(/\d+/)
-    const num = match ? match[0] : ''
-    // 取名称的第一个字符大写作为前缀
-    const firstChar = label.charAt(0).toUpperCase()
-    return `${firstChar}${num}`
-  }
 
   // 节点形状渲染函数（仅渲染形状和标签，不包含外层g）
   const renderNodeShape = useCallback((node: Node, useMultiLevelConfig: boolean = false) => {

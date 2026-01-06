@@ -4,12 +4,27 @@ FastAPI 接口模块
 提供 LLM 推理模拟的 REST API 接口。
 """
 
+import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Any
 
-from .simulator import run_simulation
+from .simulator import (
+    run_simulation,
+    validate_model_config,
+    validate_hardware_config,
+    validate_parallelism_config,
+    validate_mla_config,
+    validate_moe_config,
+)
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
 # ============================================
@@ -81,6 +96,7 @@ async def simulate(request: SimulationRequest):
         模拟结果，包含甘特图数据和统计信息
     """
     try:
+        logger.info(f"开始模拟: model={request.model.get('model_name', 'Unknown')}")
         result = run_simulation(
             topology_dict=request.topology,
             model_dict=request.model,
@@ -89,10 +105,19 @@ async def simulate(request: SimulationRequest):
             hardware_dict=request.hardware,
             config_dict=request.config,
         )
+        logger.info("模拟完成")
         return SimulationResponse(**result)
     except ValueError as e:
+        logger.warning(f"配置验证失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+    except KeyError as e:
+        logger.warning(f"配置缺少必要字段: {e}")
+        raise HTTPException(status_code=400, detail=f"配置缺少必要字段: {e}")
+    except TypeError as e:
+        logger.warning(f"配置类型错误: {e}")
+        raise HTTPException(status_code=400, detail=f"配置类型错误: {e}")
     except Exception as e:
+        logger.error(f"模拟失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"模拟失败: {str(e)}")
 
 
@@ -102,43 +127,80 @@ async def validate_config(request: SimulationRequest):
     验证配置是否有效
 
     检查：
+    - 模型配置的有效性
+    - 硬件配置的合理性
+    - 并行策略的正确性
+    - MLA/MoE 配置的完整性
     - 拓扑中芯片数量是否满足并行策略需求
-    - 硬件配置是否完整
-    - 模型配置是否合理
     """
+    errors = []
+
+    # 验证模型配置
     try:
-        topology = request.topology
-        parallelism = request.parallelism
+        validate_model_config(request.model)
+    except ValueError as e:
+        errors.append(f"模型配置: {e}")
 
-        # 计算所需芯片数
-        required_chips = (
-            parallelism.get("dp", 1) *
-            parallelism.get("tp", 1) *
-            parallelism.get("pp", 1) *
-            parallelism.get("ep", 1)
-        )
+    # 验证硬件配置
+    try:
+        validate_hardware_config(request.hardware)
+    except ValueError as e:
+        errors.append(f"硬件配置: {e}")
 
-        # 计算拓扑中的芯片数
-        available_chips = 0
-        for pod in topology.get("pods", []):
-            for rack in pod.get("racks", []):
-                for board in rack.get("boards", []):
-                    available_chips += len(board.get("chips", []))
+    # 验证并行策略
+    try:
+        validate_parallelism_config(request.parallelism)
+    except ValueError as e:
+        errors.append(f"并行策略: {e}")
 
-        if available_chips < required_chips:
-            return {
-                "valid": False,
-                "error": f"芯片数量不足: 需要 {required_chips} 个，拓扑中只有 {available_chips} 个",
-            }
+    # 验证 MLA 配置（如果存在）
+    mla_dict = request.model.get("mla_config")
+    if mla_dict:
+        try:
+            validate_mla_config(mla_dict)
+        except ValueError as e:
+            errors.append(f"MLA 配置: {e}")
 
+    # 验证 MoE 配置（如果存在）
+    moe_dict = request.model.get("moe_config")
+    if moe_dict:
+        try:
+            validate_moe_config(moe_dict)
+        except ValueError as e:
+            errors.append(f"MoE 配置: {e}")
+
+    # 验证芯片数量
+    topology = request.topology
+    parallelism = request.parallelism
+
+    required_chips = (
+        parallelism.get("dp", 1) *
+        parallelism.get("tp", 1) *
+        parallelism.get("pp", 1) *
+        parallelism.get("ep", 1)
+    )
+
+    available_chips = 0
+    for pod in topology.get("pods", []):
+        for rack in pod.get("racks", []):
+            for board in rack.get("boards", []):
+                available_chips += len(board.get("chips", []))
+
+    if available_chips < required_chips:
+        errors.append(f"芯片数量不足: 需要 {required_chips} 个，拓扑中只有 {available_chips} 个")
+
+    if errors:
+        logger.warning(f"配置验证失败: {errors}")
         return {
-            "valid": True,
+            "valid": False,
+            "errors": errors,
             "required_chips": required_chips,
             "available_chips": available_chips,
         }
 
-    except Exception as e:
-        return {
-            "valid": False,
-            "error": str(e),
-        }
+    logger.info("配置验证通过")
+    return {
+        "valid": True,
+        "required_chips": required_chips,
+        "available_chips": available_chips,
+    }

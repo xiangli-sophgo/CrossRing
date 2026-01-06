@@ -642,7 +642,7 @@ class D2D_Model:
                 # 更新所有Die的当前周期和cycle_mod
                 for die_id, die_model in self.dies.items():
                     die_model.cycle = self.current_cycle
-                    die_model.cycle_mod = self.current_cycle % die_model.config.NETWORK_FREQUENCY
+                    die_model.cycle_mod = self.current_cycle % die_model.config.CYCLES_PER_NS
 
                     # 更新所有IP模块的当前周期
                     for ip_module in die_model.ip_modules.values():
@@ -964,7 +964,7 @@ class D2D_Model:
         if self.kwargs.get("verbose", 1) == 0:
             return
 
-        cycle_time = self.current_cycle // getattr(self.config, "NETWORK_FREQUENCY", 2)
+        cycle_time = self.current_cycle // self.config.CYCLES_PER_NS
 
         # 先打印总体时间信息
         print(f"T: {cycle_time}")

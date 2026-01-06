@@ -16,7 +16,6 @@ import {
   Table,
   Popconfirm,
   Empty,
-  Collapse,
 } from 'antd'
 import {
   InfoCircleOutlined,
@@ -636,9 +635,9 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
             <div style={{ fontSize: 18, fontWeight: 600, color: memory.is_memory_sufficient ? colors.text : colors.error, marginTop: 4 }}>
               {memory.total_per_chip_gb.toFixed(1)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>/ 80G</span>
             </div>
-            <div style={{ fontSize: 10, color: colors.textSecondary, marginTop: 4 }}>
-              模型{memory.model_memory_gb.toFixed(1)} · KV{memory.kv_cache_memory_gb.toFixed(1)} · 激活{memory.activation_memory_gb.toFixed(1)}
-            </div>
+            {/* <div style={{ fontSize: 10, color: colors.textSecondary, marginTop: 4 }}> */}
+              {/* 模型{memory.model_memory_gb.toFixed(1)} · KV{memory.kv_cache_memory_gb.toFixed(1)} · 激活{memory.activation_memory_gb.toFixed(1)} */}
+            {/* </div> */}
           </div>
           {/* 推理成本 */}
           <div

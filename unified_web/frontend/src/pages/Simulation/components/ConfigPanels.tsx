@@ -56,7 +56,13 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
               {configValues.NETWORK_FREQUENCY !== undefined && (
                 <Col span={8}>
                   <div style={{ marginBottom: 4 }}><ConfigLabel name="NETWORK_FREQUENCY" /></div>
-                  <InputNumber value={configValues.NETWORK_FREQUENCY} onChange={(v) => updateConfigValue('NETWORK_FREQUENCY', v)} min={1} style={{ width: '100%' }} />
+                  <InputNumber value={configValues.NETWORK_FREQUENCY} onChange={(v) => updateConfigValue('NETWORK_FREQUENCY', v)} min={0.5} step={0.5} style={{ width: '100%' }} />
+                </Col>
+              )}
+              {configValues.IP_FREQUENCY !== undefined && (
+                <Col span={8}>
+                  <div style={{ marginBottom: 4 }}><ConfigLabel name="IP_FREQUENCY" /></div>
+                  <InputNumber value={configValues.IP_FREQUENCY} onChange={(v) => updateConfigValue('IP_FREQUENCY', v)} min={0.5} step={0.5} style={{ width: '100%' }} />
                 </Col>
               )}
             </Row>

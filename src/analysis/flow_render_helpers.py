@@ -165,7 +165,7 @@ class LinkDataProcessor:
                         total_flit = stats["total_flit"]
                         total_cycles = stats["total_cycles"]
                         if total_cycles > 0 and config:
-                            time_ns = total_cycles / config.NETWORK_FREQUENCY
+                            time_ns = total_cycles / config.CYCLES_PER_NS
                             bandwidth = total_flit * 128 / time_ns
                             links[link] = bandwidth
                         else:

@@ -399,7 +399,7 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
           <text
             x={animX + 10}
             y={bounds.y + animH - 5}
-            fontSize={10}
+            fontSize={12}
             fill="#666"
             style={{ pointerEvents: 'none', opacity: shouldDimContainer ? 0.15 : 1, transition: 'opacity 0.2s ease' }}
           >

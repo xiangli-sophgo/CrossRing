@@ -103,7 +103,7 @@ class DualChannelBaseModel(BaseModel):
 
         while True:
             self.cycle += 1
-            self.cycle_mod = self.cycle % self.config.NETWORK_FREQUENCY
+            self.cycle_mod = self.cycle % self.config.CYCLES_PER_NS
 
             self.release_completed_sn_tracker()
             self.process_new_request()
@@ -136,7 +136,7 @@ class DualChannelBaseModel(BaseModel):
             # Update throughput metrics with combined flits
             self.update_throughput_metrics(flits_ch0 + flits_ch1)
 
-            if self.cycle / self.config.NETWORK_FREQUENCY % self.print_interval == 0:
+            if self.cycle / self.config.CYCLES_PER_NS % self.print_interval == 0:
                 self.log_summary()
 
             # Check for traffic completion and advance chains
@@ -148,7 +148,7 @@ class DualChannelBaseModel(BaseModel):
             total_recv_flits = self.data_network_ch0.recv_flits_num + self.data_network_ch1.recv_flits_num
             if (
                 self.traffic_scheduler.is_all_completed() and total_recv_flits >= (self.read_flit + self.write_flit) and self.trans_flits_num == 0 and not self.new_write_req
-            ) or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY:
+            ) or self.cycle > self.end_time * self.config.CYCLES_PER_NS:
                 if tail_time == 0:
                     if self.verbose:
                         print("Finish!")
@@ -181,7 +181,7 @@ class DualChannelBaseModel(BaseModel):
         if self.verbose:
             total_recv = self.data_network_ch0.recv_flits_num + self.data_network_ch1.recv_flits_num
             print(
-                f"T: {self.cycle // self.config.NETWORK_FREQUENCY}, Req_cnt: {self.req_count} In_Req: {self.req_num}, Rsp: {self.rsp_num},"
+                f"T: {self.cycle // self.config.CYCLES_PER_NS}, Req_cnt: {self.req_count} In_Req: {self.req_num}, Rsp: {self.rsp_num},"
                 f" R_fn: {self.send_read_flits_num_stat}, W_fn: {self.send_write_flits_num_stat}, "
                 f"Trans_fn: {self.trans_flits_num}, Recv_fn_ch0: {self.data_network_ch0.recv_flits_num}, Recv_fn_ch1: {self.data_network_ch1.recv_flits_num}, Recv_fn_total: {total_recv}"
             )

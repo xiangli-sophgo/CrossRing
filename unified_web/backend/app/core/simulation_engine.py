@@ -128,12 +128,15 @@ class SimulationEngine:
 
         # 确保其他数值配置是正确类型
         int_configs = [
-            'FLIT_SIZE', 'BURST', 'NETWORK_FREQUENCY',
+            'FLIT_SIZE', 'BURST',
             'RN_RDB_SIZE', 'RN_WDB_SIZE',
             'SN_DDR_RDB_SIZE', 'SN_DDR_WDB_SIZE',
             'SN_L2M_RDB_SIZE', 'SN_L2M_WDB_SIZE',
             'DDR_R_LATENCY', 'DDR_W_LATENCY', 'L2M_R_LATENCY', 'L2M_W_LATENCY',
         ]
+
+        # 浮点数配置（支持小数频率）
+        float_configs = ['NETWORK_FREQUENCY', 'IP_FREQUENCY']
 
         # 根据 KCIN 版本添加对应的 FIFO 参数
         kcin_version = getattr(self.config, 'KCIN_VERSION', 'v1')
@@ -156,6 +159,14 @@ class SimulationEngine:
             if isinstance(val, str):
                 try:
                     setattr(self.config, attr, int(float(val)))
+                except (ValueError, TypeError):
+                    pass
+
+        for attr in float_configs:
+            val = getattr(self.config, attr, None)
+            if isinstance(val, str):
+                try:
+                    setattr(self.config, attr, float(val))
                 except (ValueError, TypeError):
                     pass
 

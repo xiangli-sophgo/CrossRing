@@ -195,7 +195,7 @@ export interface ConfigPanelProps {
   // 布局相关
   layoutType?: LayoutType
   onLayoutTypeChange?: (type: LayoutType) => void
-  viewMode?: '3d' | 'topology' | 'analysis'
+  viewMode?: '3d' | 'topology' | 'analysis' | 'knowledge'
   // Switch 3D显示配置
   switchDisplayConfig?: SwitchDisplayConfig
   onSwitchDisplayConfigChange?: (config: SwitchDisplayConfig) => void

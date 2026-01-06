@@ -1,0 +1,610 @@
+{
+  "0": [
+    {
+      "node_id": 0,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 0,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 0,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 0,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 0
+      }
+    }
+  ],
+  "1": [
+    {
+      "node_id": 1,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 1
+      }
+    },
+    {
+      "node_id": 1,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 1
+      }
+    },
+    {
+      "node_id": 1,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 1
+      }
+    },
+    {
+      "node_id": 1,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 1
+      }
+    }
+  ],
+  "2": [
+    {
+      "node_id": 2,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 2
+      }
+    },
+    {
+      "node_id": 2,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 2
+      }
+    },
+    {
+      "node_id": 2,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 2
+      }
+    },
+    {
+      "node_id": 2,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 2
+      }
+    }
+  ],
+  "3": [
+    {
+      "node_id": 3,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 3
+      }
+    },
+    {
+      "node_id": 3,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 3
+      }
+    },
+    {
+      "node_id": 3,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 3
+      }
+    },
+    {
+      "node_id": 3,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 0,
+        "col": 3
+      }
+    }
+  ],
+  "4": [
+    {
+      "node_id": 4,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 4,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 4,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 4,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 0
+      }
+    }
+  ],
+  "5": [
+    {
+      "node_id": 5,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 1
+      }
+    },
+    {
+      "node_id": 5,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 1
+      }
+    },
+    {
+      "node_id": 5,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 1
+      }
+    },
+    {
+      "node_id": 5,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 1
+      }
+    }
+  ],
+  "6": [
+    {
+      "node_id": 6,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 2
+      }
+    },
+    {
+      "node_id": 6,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 2
+      }
+    },
+    {
+      "node_id": 6,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 2
+      }
+    },
+    {
+      "node_id": 6,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 2
+      }
+    }
+  ],
+  "7": [
+    {
+      "node_id": 7,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 3
+      }
+    },
+    {
+      "node_id": 7,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 3
+      }
+    },
+    {
+      "node_id": 7,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 3
+      }
+    },
+    {
+      "node_id": 7,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 1,
+        "col": 3
+      }
+    }
+  ],
+  "8": [
+    {
+      "node_id": 8,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 8,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 8,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 8,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 0
+      }
+    }
+  ],
+  "9": [
+    {
+      "node_id": 9,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 1
+      }
+    },
+    {
+      "node_id": 9,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 1
+      }
+    },
+    {
+      "node_id": 9,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 1
+      }
+    },
+    {
+      "node_id": 9,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 1
+      }
+    }
+  ],
+  "10": [
+    {
+      "node_id": 10,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 2
+      }
+    },
+    {
+      "node_id": 10,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 2
+      }
+    },
+    {
+      "node_id": 10,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 2
+      }
+    },
+    {
+      "node_id": 10,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 2
+      }
+    }
+  ],
+  "11": [
+    {
+      "node_id": 11,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 3
+      }
+    },
+    {
+      "node_id": 11,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 3
+      }
+    },
+    {
+      "node_id": 11,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 3
+      }
+    },
+    {
+      "node_id": 11,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 2,
+        "col": 3
+      }
+    }
+  ],
+  "12": [
+    {
+      "node_id": 12,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 12,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 12,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 12,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 0
+      }
+    }
+  ],
+  "13": [
+    {
+      "node_id": 13,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 1
+      }
+    },
+    {
+      "node_id": 13,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 1
+      }
+    },
+    {
+      "node_id": 13,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 1
+      }
+    },
+    {
+      "node_id": 13,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 1
+      }
+    }
+  ],
+  "14": [
+    {
+      "node_id": 14,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 2
+      }
+    },
+    {
+      "node_id": 14,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 2
+      }
+    },
+    {
+      "node_id": 14,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 2
+      }
+    },
+    {
+      "node_id": 14,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 2
+      }
+    }
+  ],
+  "15": [
+    {
+      "node_id": 15,
+      "ip_type": "gdma_0",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 3
+      }
+    },
+    {
+      "node_id": 15,
+      "ip_type": "gdma_1",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 3
+      }
+    },
+    {
+      "node_id": 15,
+      "ip_type": "ddr_0",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 3
+      }
+    },
+    {
+      "node_id": 15,
+      "ip_type": "ddr_1",
+      "topology": "4x4",
+      "position": {
+        "row": 3,
+        "col": 3
+      }
+    }
+  ]
+}

@@ -237,7 +237,7 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
         setHardwareConfig(config)
       }
     }
-  }, [selectedChipType])
+  }, [selectedChipType, hardwareSource, rackConfig, chipGroups, podCount, racksPerPod])
 
   // 并行策略状态
   const [parallelismMode, setParallelismMode] = useState<'manual' | 'auto'>('manual')

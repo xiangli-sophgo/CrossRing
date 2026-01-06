@@ -380,7 +380,7 @@ class BaseFlowRenderer:
 
                         # 计算实际带宽
                         if total_cycles > 0:
-                            time_ns = total_cycles / config.NETWORK_FREQUENCY
+                            time_ns = total_cycles / config.CYCLES_PER_NS
                             bandwidth = total_flit * 128 / time_ns
                         else:
                             bandwidth = 0
@@ -630,7 +630,7 @@ class BaseFlowRenderer:
 
                 # 计算带宽
                 if total_cycles > 0:
-                    time_ns = total_cycles / config.NETWORK_FREQUENCY
+                    time_ns = total_cycles / config.CYCLES_PER_NS
                     bandwidth = total_flit * 128 / time_ns
                 else:
                     bandwidth = 0

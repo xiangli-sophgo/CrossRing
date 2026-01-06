@@ -43,7 +43,7 @@ class BandwidthPlotter:
         """初始化带宽曲线绘制器"""
         pass
 
-    def plot_rn_bandwidth_curves(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None, show_fig: bool = False, return_fig: bool = False):
+    def plot_rn_bandwidth_curves(self, rn_bandwidth_time_series: Dict, network_frequency: int = 2, save_path: str = None, show_fig: bool = False, return_fig: bool = False):
         """
         绘制RN带宽时间曲线（Plotly交互式版本）
 
@@ -146,7 +146,7 @@ class BandwidthPlotter:
 
         return total_bw
 
-    def plot_rn_bandwidth_curves_work_interval(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None, show_fig: bool = False, return_fig: bool = False):
+    def plot_rn_bandwidth_curves_work_interval(self, rn_bandwidth_time_series: Dict, network_frequency: int = 2, save_path: str = None, show_fig: bool = False, return_fig: bool = False):
         """
         绘制RN带宽工作区间曲线（去除空闲时段）
 

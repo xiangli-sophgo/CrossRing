@@ -19,7 +19,7 @@ export default defineConfig({
     host: '127.0.0.1', // 避免 Mac 上 localhost IPv6 解析延迟
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8004', // 使用 127.0.0.1 替代 localhost
+        target: 'http://127.0.0.1:8001', // 使用 127.0.0.1 替代 localhost
         changeOrigin: true,
       },
     },

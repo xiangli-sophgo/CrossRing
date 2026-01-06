@@ -110,7 +110,7 @@ class D2D_Sys:
             channels[channel_name] = {
                 "send_flits": {},
                 "latency": getattr(config, latency_key, latency_default),
-                "bandwidth_limiter": TokenBucket(rate=axi_bandwidth / config.NETWORK_FREQUENCY / config.FLIT_SIZE, bucket_size=axi_bandwidth),
+                "bandwidth_limiter": TokenBucket(rate=axi_bandwidth / config.CYCLES_PER_NS / config.FLIT_SIZE, bucket_size=axi_bandwidth),
             }
 
         return channels

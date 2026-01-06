@@ -24,7 +24,7 @@ from src.utils.flit import Flit, get_original_source_type, get_original_destinat
 class RequestCollector:
     """请求数据收集器 - 从仿真模型或CSV文件收集请求数据"""
 
-    def __init__(self, network_frequency: float = 2.0):
+    def __init__(self, network_frequency: int = 2):
         """
         初始化请求收集器
 

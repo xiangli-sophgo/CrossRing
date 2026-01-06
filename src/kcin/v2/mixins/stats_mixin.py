@@ -39,7 +39,7 @@ class StatsMixin:
         try:
             if hasattr(self, "result_processor") and hasattr(self.result_processor, "requests"):
                 for req_info in self.result_processor.requests:
-                    end_time_ns = req_info.end_time // self.config.NETWORK_FREQUENCY
+                    end_time_ns = req_info.end_time // self.config.CYCLES_PER_NS
                     all_end_times.append(end_time_ns)
                     if req_info.req_type == "read":
                         read_end_times.append(end_time_ns)
@@ -50,7 +50,7 @@ class StatsMixin:
                 print(f"Warning: Could not get finish time stats from result_processor: {e}")
 
         # 更新统计数据，使用当前cycle作为备选
-        current_time_ns = self.cycle // self.config.NETWORK_FREQUENCY
+        current_time_ns = self.cycle // self.config.CYCLES_PER_NS
 
         if read_end_times:
             self.R_finish_time_stat = max(read_end_times)

@@ -37,11 +37,11 @@ class D2D_RN_Interface(IPInterface):
             # 如果父类没有设置带宽限制，使用D2D_RN专用配置
             d2d_rn_bw_limit = getattr(config, "D2D_RN_BW_LIMIT", 128)
             self.tx_token_bucket = TokenBucket(
-                rate=d2d_rn_bw_limit / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
+                rate=d2d_rn_bw_limit / config.CYCLES_PER_NS / config.FLIT_SIZE,
                 bucket_size=d2d_rn_bw_limit,
             )
             self.rx_token_bucket = TokenBucket(
-                rate=d2d_rn_bw_limit / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
+                rate=d2d_rn_bw_limit / config.CYCLES_PER_NS / config.FLIT_SIZE,
                 bucket_size=d2d_rn_bw_limit,
             )
 
@@ -473,7 +473,7 @@ class D2D_RN_Interface(IPInterface):
                     # D2D传输不设置_original属性，辅助函数会从d2d_*属性推断
                     local_flit.flit_type = "data"
                     # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
-                    local_flit.departure_cycle = self.current_cycle + i * self.config.NETWORK_FREQUENCY
+                    local_flit.departure_cycle = self.current_cycle + i * self.config.IP_SCALE
                     local_flit.req_departure_cycle = req.departure_cycle if hasattr(req, "departure_cycle") else self.current_cycle
                     local_flit.entry_db_cycle = req.entry_db_cycle if hasattr(req, "entry_db_cycle") else self.current_cycle
                     local_flit.source_type = req.source_type

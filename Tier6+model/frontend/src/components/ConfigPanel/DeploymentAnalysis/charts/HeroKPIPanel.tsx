@@ -21,8 +21,8 @@ interface HeroKPIPanelProps {
 }
 
 const colors = {
-  primary: '#5E6AD2',
-  primaryLight: 'rgba(94, 106, 210, 0.08)',
+  primary: '#4F6BED',
+  primaryLight: 'rgba(79, 107, 237, 0.08)',
   success: '#52c41a',
   warning: '#faad14',
   border: '#E5E5E5',
@@ -82,7 +82,7 @@ const KPICard: React.FC<KPICardProps> = ({
         <span style={{ color: isSelected ? colors.primary : colors.textSecondary, fontSize: 14 }}>
           {icon}
         </span>
-        <Text style={{ fontSize: 12, color: colors.textSecondary, fontWeight: 500 }}>
+        <Text style={{ fontSize: 13, color: colors.textSecondary, fontWeight: 500 }}>
           {label}
         </Text>
       </div>
@@ -91,7 +91,7 @@ const KPICard: React.FC<KPICardProps> = ({
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
         <span
           style={{
-            fontSize: 22,
+            fontSize: 24,
             fontWeight: 600,
             fontFamily: '"JetBrains Mono", monospace',
             color: isSelected ? colors.primary : colors.text,
@@ -100,7 +100,7 @@ const KPICard: React.FC<KPICardProps> = ({
         >
           {value}
         </span>
-        <span style={{ fontSize: 12, color: colors.textSecondary }}>
+        <span style={{ fontSize: 13, color: colors.textSecondary }}>
           {unit}
         </span>
       </div>
@@ -110,7 +110,7 @@ const KPICard: React.FC<KPICardProps> = ({
         <div style={{ marginTop: 6 }}>
           <span
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: statusColors[status],
               fontWeight: 500,
             }}

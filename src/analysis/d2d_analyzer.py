@@ -91,7 +91,7 @@ class D2DAnalyzer:
 
         self.config = config
         self.min_gap_threshold = min_gap_threshold
-        self.network_frequency = config.NETWORK_FREQUENCY
+        self.network_frequency = config.CYCLES_PER_NS
 
         # D2D数据存储
         self.d2d_requests: List[D2DRequestInfo] = []

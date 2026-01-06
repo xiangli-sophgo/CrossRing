@@ -45,6 +45,7 @@ const CONFIG_PATTERNS_FOR_COLUMN = [
   /^FLIT_SIZE$/,
   /^BURST$/,
   /^NETWORK_FREQUENCY$/,
+  /^IP_FREQUENCY$/,
   /^SLICE_PER_LINK_/,
   /^RN_RDB_SIZE$/, /^RN_WDB_SIZE$/,
   /^SN_DDR_RDB_SIZE$/, /^SN_DDR_WDB_SIZE$/,
@@ -274,6 +275,7 @@ const CONFIG_PARAM_PATTERNS = [
   /^FLIT_SIZE$/,
   /^BURST$/,
   /^NETWORK_FREQUENCY$/,
+  /^IP_FREQUENCY$/,
   /^SLICE_PER_LINK_/,
   // Resource configuration
   /^RN_RDB_SIZE$/, /^RN_WDB_SIZE$/,

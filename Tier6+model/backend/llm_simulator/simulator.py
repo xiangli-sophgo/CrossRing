@@ -49,6 +49,174 @@ from .latency import (
 from .gantt import GanttChartBuilder, convert_to_frontend_format
 
 
+# ============================================
+# 配置验证函数
+# ============================================
+
+def validate_mla_config(mla_dict: dict) -> MLAConfig:
+    """
+    验证并解析 MLA 配置
+
+    Args:
+        mla_dict: MLA 配置字典
+
+    Returns:
+        MLAConfig 对象
+
+    Raises:
+        ValueError: 配置无效时抛出
+    """
+    required_fields = ["kv_lora_rank", "q_lora_rank", "qk_nope_head_dim", "qk_rope_head_dim", "v_head_dim"]
+
+    # 检查必填字段
+    missing = [f for f in required_fields if f not in mla_dict]
+    if missing:
+        raise ValueError(f"MLA 配置缺少必填字段: {missing}")
+
+    # 检查值的有效性
+    for field in required_fields:
+        value = mla_dict[field]
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError(f"MLA 配置 {field} 必须为正整数，当前值: {value}")
+
+    return MLAConfig(
+        kv_lora_rank=mla_dict["kv_lora_rank"],
+        q_lora_rank=mla_dict["q_lora_rank"],
+        qk_nope_head_dim=mla_dict["qk_nope_head_dim"],
+        qk_rope_head_dim=mla_dict["qk_rope_head_dim"],
+        v_head_dim=mla_dict["v_head_dim"],
+    )
+
+
+def validate_moe_config(moe_dict: dict) -> MoEConfig:
+    """
+    验证并解析 MoE 配置
+
+    Args:
+        moe_dict: MoE 配置字典
+
+    Returns:
+        MoEConfig 对象
+
+    Raises:
+        ValueError: 配置无效时抛出
+    """
+    required_fields = ["num_experts", "num_experts_per_tok"]
+
+    # 检查必填字段
+    missing = [f for f in required_fields if f not in moe_dict]
+    if missing:
+        raise ValueError(f"MoE 配置缺少必填字段: {missing}")
+
+    num_experts = moe_dict["num_experts"]
+    num_experts_per_tok = moe_dict["num_experts_per_tok"]
+
+    # 检查值的有效性
+    if not isinstance(num_experts, int) or num_experts <= 0:
+        raise ValueError(f"MoE num_experts 必须为正整数，当前值: {num_experts}")
+    if not isinstance(num_experts_per_tok, int) or num_experts_per_tok <= 0:
+        raise ValueError(f"MoE num_experts_per_tok 必须为正整数，当前值: {num_experts_per_tok}")
+    if num_experts_per_tok > num_experts:
+        raise ValueError(f"MoE num_experts_per_tok ({num_experts_per_tok}) 不能大于 num_experts ({num_experts})")
+
+    # 检查 expert_intermediate_size（MoE 模型必须指定）
+    expert_intermediate_size = moe_dict.get("expert_intermediate_size", 0)
+    if expert_intermediate_size <= 0:
+        raise ValueError(f"MoE 配置必须指定 expert_intermediate_size (> 0)，当前值: {expert_intermediate_size}")
+
+    return MoEConfig(
+        num_experts=num_experts,
+        num_experts_per_tok=num_experts_per_tok,
+        expert_capacity_factor=moe_dict.get("expert_capacity_factor", 1.0),
+        num_shared_experts=moe_dict.get("num_shared_experts", 0),
+        expert_intermediate_size=expert_intermediate_size,
+    )
+
+
+def validate_model_config(model_dict: dict) -> None:
+    """
+    验证模型配置的有效性
+
+    Args:
+        model_dict: 模型配置字典
+
+    Raises:
+        ValueError: 配置无效时抛出
+    """
+    required_fields = ["hidden_size", "num_layers", "num_attention_heads", "intermediate_size"]
+
+    missing = [f for f in required_fields if f not in model_dict]
+    if missing:
+        raise ValueError(f"模型配置缺少必填字段: {missing}")
+
+    hidden_size = model_dict["hidden_size"]
+    num_heads = model_dict["num_attention_heads"]
+
+    if hidden_size <= 0:
+        raise ValueError(f"hidden_size 必须为正数，当前值: {hidden_size}")
+    if num_heads <= 0:
+        raise ValueError(f"num_attention_heads 必须为正数，当前值: {num_heads}")
+    if hidden_size % num_heads != 0:
+        raise ValueError(f"hidden_size ({hidden_size}) 必须能被 num_attention_heads ({num_heads}) 整除")
+
+
+def validate_hardware_config(hardware_dict: dict) -> None:
+    """
+    验证硬件配置的有效性
+
+    Args:
+        hardware_dict: 硬件配置字典
+
+    Raises:
+        ValueError: 配置无效时抛出
+    """
+    chip_hw = hardware_dict.get("chip", {})
+
+    # 检查关键硬件参数
+    compute_tflops = chip_hw.get("compute_tflops_fp16", 989)
+    memory_gb = chip_hw.get("memory_gb", 80)
+    memory_bw = chip_hw.get("memory_bandwidth_gbps", 3350)
+
+    if compute_tflops <= 0:
+        raise ValueError(f"compute_tflops_fp16 必须为正数，当前值: {compute_tflops}")
+    if memory_gb <= 0:
+        raise ValueError(f"memory_gb 必须为正数，当前值: {memory_gb}")
+    if memory_bw <= 0:
+        raise ValueError(f"memory_bandwidth_gbps 必须为正数，当前值: {memory_bw}")
+    if memory_bw > 10000:
+        raise ValueError(f"memory_bandwidth_gbps ({memory_bw}) 超过合理范围 (最大 10000 GB/s)")
+
+
+def validate_parallelism_config(parallelism_dict: dict, model_dict: dict | None = None) -> None:
+    """
+    验证并行策略配置的有效性
+
+    Args:
+        parallelism_dict: 并行策略配置字典
+        model_dict: 模型配置字典（可选，用于交叉验证）
+
+    Raises:
+        ValueError: 配置无效时抛出
+    """
+    for key in ["dp", "tp", "pp", "ep"]:
+        value = parallelism_dict.get(key, 1)
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError(f"并行度 {key} 必须为正整数，当前值: {value}")
+
+    # 交叉验证：PP 不能大于 num_layers
+    if model_dict:
+        pp = parallelism_dict.get("pp", 1)
+        num_layers = model_dict.get("num_layers", 1)
+        if pp > num_layers:
+            raise ValueError(f"PP ({pp}) 不能大于模型层数 ({num_layers})")
+
+        # 交叉验证：TP 不能大于 num_attention_heads
+        tp = parallelism_dict.get("tp", 1)
+        num_heads = model_dict.get("num_attention_heads", 1)
+        if tp > num_heads:
+            raise ValueError(f"TP ({tp}) 不能大于注意力头数 ({num_heads})")
+
+
 @dataclass
 class SimulationConfig:
     """模拟配置"""
@@ -255,8 +423,8 @@ class LLMInferenceSimulator:
         num_tokens = self.inference.input_seq_length
         context_length = self.inference.input_seq_length
 
-        # 每个 PP stage 处理的层数
-        layers_per_stage = self.model.num_layers // self.parallelism.pp
+        # 每个 PP stage 处理的层数（至少为 1，防止除零）
+        layers_per_stage = max(1, self.model.num_layers // self.parallelism.pp)
 
         # 为每个 PP stage 模拟
         stage_times = [start_time] * self.parallelism.pp
@@ -330,7 +498,8 @@ class LLMInferenceSimulator:
             self.inference.output_seq_length
         )
 
-        layers_per_stage = self.model.num_layers // self.parallelism.pp
+        # 每个 PP stage 处理的层数（至少为 1，防止除零）
+        layers_per_stage = max(1, self.model.num_layers // self.parallelism.pp)
 
         for token_idx in range(num_tokens_to_simulate):
             context_length = self.inference.input_seq_length + token_idx + 1
@@ -811,37 +980,112 @@ class LLMInferenceSimulator:
         return qkv_flops + score_flops + output_flops + ffn_flops + lm_head_flops
 
     def _calc_model_size_gb(self) -> float:
-        """计算模型大小 (GB)"""
+        """计算模型大小 (GB)
+
+        支持:
+        - MLA (Multi-head Latent Attention) vs 标准 Attention
+        - MoE (Mixture of Experts) vs Dense FFN
+        """
         bytes_per_elem = get_bytes_per_element(self.model.dtype)
         H = self.model.hidden_size
         L = self.model.num_layers
         I = self.model.intermediate_size
         V = self.model.vocab_size
+        num_heads = self.model.num_attention_heads
+        num_kv_heads = self.model.num_kv_heads
 
-        # Attention weights: (Q, K, V, O) per layer
-        attn_params = 4 * H * H * L
+        # === Attention 参数 ===
+        if self.model.mla_config is not None:
+            # MLA 参数 (DeepSeek-V3)
+            mla = self.model.mla_config
+            head_dim = mla.qk_nope_head_dim + mla.qk_rope_head_dim
 
-        # FFN weights: (gate, up, down) per layer
-        ffn_params = 3 * H * I * L
+            # Q path: W_DQ (H × q_lora_rank) + W_UQ (q_lora_rank × num_heads × head_dim)
+            # + W_QR (q_lora_rank × qk_rope_head_dim × num_heads)
+            q_down_params = H * mla.q_lora_rank
+            q_up_params = mla.q_lora_rank * num_heads * head_dim
+            q_rope_params = mla.q_lora_rank * mla.qk_rope_head_dim * num_heads
 
-        # Embedding (LM Head 通常与 Embedding 共享权重)
+            # KV path: W_DKV (H × kv_lora_rank) + W_UK (kv_lora_rank × num_heads × head_dim)
+            # + W_UV (kv_lora_rank × num_heads × v_head_dim) + W_KR (H × qk_rope_head_dim)
+            kv_down_params = H * mla.kv_lora_rank
+            k_up_params = mla.kv_lora_rank * num_heads * mla.qk_nope_head_dim
+            v_up_params = mla.kv_lora_rank * num_heads * mla.v_head_dim
+            k_rope_params = H * mla.qk_rope_head_dim
+
+            # Output: W_O (num_heads × v_head_dim × H)
+            o_params = num_heads * mla.v_head_dim * H
+
+            attn_params_per_layer = (q_down_params + q_up_params + q_rope_params +
+                                     kv_down_params + k_up_params + v_up_params +
+                                     k_rope_params + o_params)
+            attn_params = attn_params_per_layer * L
+        else:
+            # 标准 Attention: Q + K + V + O
+            head_dim = H // num_heads
+            q_params = H * H  # Q projection
+            k_params = H * num_kv_heads * head_dim  # K projection (GQA)
+            v_params = H * num_kv_heads * head_dim  # V projection (GQA)
+            o_params = H * H  # Output projection
+            attn_params = (q_params + k_params + v_params + o_params) * L
+
+        # === FFN 参数 ===
+        if self.model.model_type == "moe" and self.model.moe_config is not None:
+            # MoE 模型
+            moe = self.model.moe_config
+            expert_I = moe.expert_intermediate_size if moe.expert_intermediate_size > 0 else I
+
+            # Dense 层 (前 first_k_dense_replace 层)
+            dense_layers = moe.first_k_dense_replace
+            dense_ffn_params = 3 * H * I * dense_layers
+
+            # MoE 层
+            moe_layers = L - dense_layers
+            # 路由专家: num_experts × (gate + up + down)
+            routed_expert_params = moe.num_experts * 3 * H * expert_I * moe_layers
+            # 共享专家
+            shared_expert_params = moe.num_shared_experts * 3 * H * expert_I * moe_layers
+            # Gate 网络: H × num_experts
+            gate_params = H * moe.num_experts * moe_layers
+
+            ffn_params = dense_ffn_params + routed_expert_params + shared_expert_params + gate_params
+        else:
+            # Dense FFN: (gate, up, down) per layer
+            ffn_params = 3 * H * I * L
+
+        # === Embedding (LM Head 通常与 Embedding 共享权重) ===
         embed_params = V * H
 
         total_params = attn_params + ffn_params + embed_params
         return (total_params * bytes_per_elem) / (1024 ** 3)
 
     def _calc_kv_cache_size_gb(self, context_length: int) -> float:
-        """计算 KV Cache 大小 (GB)"""
+        """计算 KV Cache 大小 (GB)
+
+        根据 DeepSeek-V3 论文 (arXiv:2412.19437):
+        "for MLA, only c_t^KV and k_t^R need to be cached during generation"
+        - c_t^KV: 压缩后的 KV 潜在向量，维度 = kv_lora_rank
+        - k_t^R: RoPE 解耦 key，维度 = qk_rope_head_dim
+
+        MLA KV Cache 维度 = kv_lora_rank + qk_rope_head_dim (如 512 + 64 = 576)
+        """
         bytes_per_elem = get_bytes_per_element(self.model.dtype)
         B = self.inference.batch_size
-        H = self.model.hidden_size
         L = self.model.num_layers
-        num_heads = self.model.num_attention_heads
-        num_kv_heads = self.model.num_kv_heads
-        head_dim = H // num_heads
 
-        # KV Cache: 2 (K+V) × batch × context × kv_heads × head_dim × layers
-        kv_cache_bytes = 2 * B * context_length * num_kv_heads * head_dim * L * bytes_per_elem
+        if self.model.mla_config is not None:
+            # MLA: 只缓存 c_t^KV + k_t^R
+            mla = self.model.mla_config
+            kv_cache_dim = mla.kv_lora_rank + mla.qk_rope_head_dim
+            kv_cache_bytes = B * context_length * kv_cache_dim * L * bytes_per_elem
+        else:
+            # 标准 Attention: 2 (K+V) × batch × context × kv_heads × head_dim × layers
+            H = self.model.hidden_size
+            num_heads = self.model.num_attention_heads
+            num_kv_heads = self.model.num_kv_heads
+            head_dim = H // num_heads
+            kv_cache_bytes = 2 * B * context_length * num_kv_heads * head_dim * L * bytes_per_elem
+
         return kv_cache_bytes / (1024 ** 3)
 
 
@@ -867,29 +1111,22 @@ def run_simulation(
     Returns:
         模拟结果字典
     """
-    # 解析 MLA 配置 (DeepSeek V3/R1)
+    # 验证配置
+    validate_model_config(model_dict)
+    validate_hardware_config(hardware_dict)
+    validate_parallelism_config(parallelism_dict, model_dict)
+
+    # 解析并验证 MLA 配置 (DeepSeek V3/R1)
     mla_config = None
     mla_dict = model_dict.get("mla_config")
     if mla_dict:
-        mla_config = MLAConfig(
-            kv_lora_rank=mla_dict["kv_lora_rank"],
-            q_lora_rank=mla_dict["q_lora_rank"],
-            qk_nope_head_dim=mla_dict["qk_nope_head_dim"],
-            qk_rope_head_dim=mla_dict["qk_rope_head_dim"],
-            v_head_dim=mla_dict["v_head_dim"],
-        )
+        mla_config = validate_mla_config(mla_dict)
 
-    # 解析 MoE 配置 (DeepSeek, Mixtral, Qwen-MoE)
+    # 解析并验证 MoE 配置 (DeepSeek, Mixtral, Qwen-MoE)
     moe_config = None
     moe_dict = model_dict.get("moe_config")
     if moe_dict:
-        moe_config = MoEConfig(
-            num_experts=moe_dict["num_experts"],
-            num_experts_per_tok=moe_dict["num_experts_per_tok"],
-            expert_capacity_factor=moe_dict.get("expert_capacity_factor", 1.0),
-            num_shared_experts=moe_dict.get("num_shared_experts", 0),
-            expert_intermediate_size=moe_dict.get("expert_intermediate_size", 0),
-        )
+        moe_config = validate_moe_config(moe_dict)
 
     # 解析配置
     model = LLMModelConfig(

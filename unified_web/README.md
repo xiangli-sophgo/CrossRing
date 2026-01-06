@@ -11,12 +11,14 @@
 ## 快速启动
 
 ### Windows
+
 ```batch
 cd unified_web
-start.bat
+./start.bat
 ```
 
 ### Linux/macOS
+
 ```bash
 cd unified_web
 chmod +x start.sh
@@ -25,11 +27,11 @@ chmod +x start.sh
 
 ## 访问地址
 
-| 服务 | 地址 |
-|------|------|
-| 前端界面 | http://localhost:3002 |
-| 后端API | http://localhost:8002 |
-| API文档 | http://localhost:8002/api/docs |
+| 服务     | 地址                           |
+| -------- | ------------------------------ |
+| 前端界面 | http://localhost:3002          |
+| 后端API  | http://localhost:8002          |
+| API文档  | http://localhost:8002/api/docs |
 
 ## 目录结构
 
@@ -55,11 +57,13 @@ unified_web/
 ## 技术栈
 
 **后端**:
+
 - FastAPI
 - SQLAlchemy
 - WebSocket (实时进度)
 
 **前端**:
+
 - React 18 + TypeScript
 - Ant Design
 - Vite
@@ -68,12 +72,14 @@ unified_web/
 ## API端点
 
 ### 流量配置
+
 - `/api/ip-mount` - IP挂载管理
 - `/api/traffic/config` - 流量配置
 - `/api/traffic/generate` - 流量生成
 - `/api/traffic/bandwidth` - 带宽分析
 
 ### 仿真执行
+
 - `POST /api/simulation/run` - 启动仿真
 - `GET /api/simulation/status/{id}` - 查询状态
 - `POST /api/simulation/cancel/{id}` - 取消任务
@@ -81,6 +87,7 @@ unified_web/
 - `WS /api/simulation/ws/{id}` - 实时进度
 
 ### 实验管理
+
 - `/api/experiments` - 实验CRUD
 - `/api/results` - 结果查询
 - `/api/analysis` - 数据分析

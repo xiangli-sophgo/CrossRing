@@ -1,531 +1,62 @@
-import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import { Layout, Typography, Spin, message, Segmented, Card, Descriptions, Tag, Collapse, Button } from 'antd'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { Layout, Typography, Spin, Segmented, Card, Descriptions, Tag, Collapse, Button } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import { Scene3D } from './components/Scene3D'
 import { ConfigPanel } from './components/ConfigPanel'
-import { TopologyGraph, NodeDetail, LinkDetail } from './components/TopologyGraph'
-import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType, MultiLevelViewOptions } from './types'
-import { TopologyTrafficResult } from './utils/llmDeployment/types'
-import { DeploymentAnalysisData, AnalysisHistoryItem, AnalysisViewMode } from './components/ConfigPanel/shared'
+import { TopologyGraph, NodeDetail } from './components/TopologyGraph'
 import { ChartsPanel } from './components/ConfigPanel/DeploymentAnalysis/charts'
 import { AnalysisResultDisplay } from './components/ConfigPanel/DeploymentAnalysis'
-import { getTopology, generateTopology, getLevelConnectionDefaults } from './api/topology'
-import { useViewNavigation } from './hooks/useViewNavigation'
+import { WorkbenchProvider, useWorkbench } from './contexts/WorkbenchContext'
+import { KnowledgeGraph, CATEGORY_COLORS, CATEGORY_NAMES, ForceKnowledgeNode } from './components/KnowledgeGraph'
+import knowledgeData from './data/knowledge-graph.json'
 
 const { Header, Sider, Content } = Layout
 const { Title } = Typography
 
-// localStorage缓存key（与ConfigPanel保持一致）
-const CONFIG_CACHE_KEY = 'tier6_topology_config_cache'
+// 侧边栏宽度常量
 const SIDER_WIDTH_KEY = 'tier6_sider_width_cache'
-
-// 默认和限制值
-const DEFAULT_SIDER_WIDTH = 480
-const MIN_SIDER_WIDTH = 320
+const DEFAULT_SIDER_WIDTH = 520
+const MIN_SIDER_WIDTH = 380
 const MAX_SIDER_WIDTH = 900
 
-const App: React.FC = () => {
-  const [topology, setTopology] = useState<HierarchicalTopology | null>(null)
-  const [loading, setLoading] = useState(true)  // 初始加载状态
+/**
+ * 主工作台内容组件（使用 Context）
+ */
+const WorkbenchContent: React.FC = () => {
+  const { topology, connection, analysis, ui, navigation, currentViewConnections, getCurrentLevel } = useWorkbench()
 
-  // 视图模式：3d 或 topology
-  const [viewMode, setViewMode] = useState<'3d' | 'topology' | 'analysis'>('topology')
-
-  // 侧边栏宽度（从localStorage加载）
+  // 侧边栏宽度
   const [siderWidth, setSiderWidth] = useState(() => {
     const cached = localStorage.getItem(SIDER_WIDTH_KEY)
     return cached ? Math.max(MIN_SIDER_WIDTH, Math.min(MAX_SIDER_WIDTH, parseInt(cached, 10))) : DEFAULT_SIDER_WIDTH
   })
-
-  // 拖拽状态
   const [isDragging, setIsDragging] = useState(false)
   const dragStartX = useRef(0)
   const dragStartWidth = useRef(0)
 
-  // 视图导航状态
-  const navigation = useViewNavigation(topology)
-
-  // 选中的节点详情
-  const [selectedNode, setSelectedNode] = useState<NodeDetail | null>(null)
-
-  // 选中的连接详情
-  const [selectedLink, setSelectedLink] = useState<LinkDetail | null>(null)
-
-  // 聚焦的层级配置（点击容器时切换）
-  const [focusedLevel, setFocusedLevel] = useState<'datacenter' | 'pod' | 'rack' | 'board' | null>(null)
-
-  // 流量热力图结果
-  const [trafficResult, setTrafficResult] = useState<TopologyTrafficResult | null>(null)
-
-  // LLM 部署分析结果（用于右侧图表面板）
-  const [deploymentAnalysisData, setDeploymentAnalysisData] = useState<DeploymentAnalysisData | null>(null)
-
-  // App 级别的分析视图模式和历史记录（独立于 DeploymentAnalysisPanel）
-  const [analysisViewMode, setAnalysisViewMode] = useState<AnalysisViewMode>('history')
-  const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistoryItem[]>(() => {
-    try {
-      const stored = localStorage.getItem('llm-deployment-analysis-history')
-      return stored ? JSON.parse(stored) : []
-    } catch { return [] }
-  })
-
-  // 加载历史记录项
-  const handleLoadFromHistory = useCallback((item: AnalysisHistoryItem) => {
-    // 更新 deploymentAnalysisData 以显示该记录
-    setDeploymentAnalysisData(prev => ({
-      result: item.result,
-      topKPlans: item.topKPlans || [item.result],
-      hardware: item.hardwareConfig,
-      model: item.modelConfig,
-      inference: item.inferenceConfig,
-      loading: false,
-      errorMsg: null,
-      searchStats: null,
-      // 保留原有回调或使用空函数
-      onSelectPlan: prev?.onSelectPlan || (() => {}),
-      onMapToTopology: prev?.onMapToTopology,
-      onClearTraffic: prev?.onClearTraffic,
-      canMapToTopology: false,
-      viewMode: 'detail' as const,
-      onViewModeChange: prev?.onViewModeChange || (() => {}),
-      history: prev?.history || [],
-      onLoadFromHistory: prev?.onLoadFromHistory || (() => {}),
-      onDeleteHistory: prev?.onDeleteHistory || (() => {}),
-      onClearHistory: prev?.onClearHistory || (() => {}),
-    }))
-    setAnalysisViewMode('detail')
-  }, [])
-
-  // 删除历史记录
-  const handleDeleteHistory = useCallback((id: string) => {
-    setAnalysisHistory(prev => {
-      const updated = prev.filter(h => h.id !== id)
-      localStorage.setItem('llm-deployment-analysis-history', JSON.stringify(updated))
-      return updated
-    })
-  }, [])
-
-  // 清空历史记录
-  const handleClearHistory = useCallback(() => {
-    localStorage.setItem('llm-deployment-analysis-history', '[]')
-    setAnalysisHistory([])
-  }, [])
-
-  // 同步 DeploymentAnalysisPanel 传递过来的数据
-  const prevResultRef = useRef<typeof deploymentAnalysisData>(null)
-  useEffect(() => {
-    // 当从无结果变为有结果时，自动切换到分析视图
-    if (deploymentAnalysisData?.result && !prevResultRef.current?.result) {
-      setViewMode('analysis')
-      setAnalysisViewMode('detail')
-    }
-    // 同步历史记录（仅当面板存在时）
-    // 注意：viewMode 不在这里同步，因为它可能会被 modelConfig 变化意外重置
-    // viewMode 只应该在用户主动操作时更新（点击分析、加载历史等）
-    if (deploymentAnalysisData) {
-      if (deploymentAnalysisData.history) {
-        setAnalysisHistory(deploymentAnalysisData.history)
-      }
-    }
-    prevResultRef.current = deploymentAnalysisData
-  }, [deploymentAnalysisData])
-
-  // 各层级连接的默认参数（从后端加载，初始为空）
-  const [_levelConnectionDefaults, _setLevelConnectionDefaults] = useState<{
-    datacenter: { bandwidth: number; latency: number }
-    pod: { bandwidth: number; latency: number }
-    rack: { bandwidth: number; latency: number }
-    board: { bandwidth: number; latency: number }
-  } | null>(null)
-
-  // 手动连接状态 (从缓存加载)
-  const [manualConnectionConfig, setManualConnectionConfig] = useState<ManualConnectionConfig>(() => {
-    try {
-      const cachedStr = localStorage.getItem(CONFIG_CACHE_KEY)
-      if (cachedStr) {
-        const cached = JSON.parse(cachedStr)
-        if (cached.manualConnectionConfig) {
-          return cached.manualConnectionConfig
-        }
-      }
-    } catch (error) {
-      console.error('加载缓存手动连接配置失败:', error)
-    }
-    return { enabled: false, mode: 'append', connections: [] }
-  })
-
-  // 从后端加载默认配置，并设置到 manualConnectionConfig
-  useEffect(() => {
-    getLevelConnectionDefaults().then((defaults) => {
-      _setLevelConnectionDefaults(defaults)
-      // 设置 manualConnectionConfig 的 level_defaults（保留用户自定义的值）
-      setManualConnectionConfig((prev) => ({
-        ...prev,
-        level_defaults: {
-          ...defaults,
-          ...prev.level_defaults,
-        },
-      }))
-    }).catch((error) => {
-      console.error('获取层级连接默认配置失败:', error)
-    })
-  }, [])
-  const [connectionMode, setConnectionMode] = useState<ConnectionMode>('view')
-  const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set())  // 源节点集合
-  const [targetNodes, setTargetNodes] = useState<Set<string>>(new Set())  // 目标节点集合
-  const [sourceNode, setSourceNode] = useState<string | null>(null)  // 保留兼容
-  const [layoutType, setLayoutType] = useState<LayoutType>('auto')  // 布局类型
-
-  // 多层级视图选项
-  const [multiLevelOptions, setMultiLevelOptions] = useState<MultiLevelViewOptions>({
-    enabled: false,
-    levelPair: 'pod_rack',
-    expandedContainers: new Set(),
-  })
-
-  // 加载拓扑数据（优先使用缓存配置生成）
-  const loadTopology = useCallback(async () => {
-    setLoading(true)
-    try {
-      // 检查是否有缓存配置
-      const cachedStr = localStorage.getItem(CONFIG_CACHE_KEY)
-      if (cachedStr) {
-        const cached = JSON.parse(cachedStr)
-        // 使用缓存配置生成拓扑
-        const data = await generateTopology({
-          pod_count: cached.podCount,
-          racks_per_pod: cached.racksPerPod,
-          board_configs: cached.boardConfigs,
-          switch_config: cached.switchConfig,
-          manual_connections: cached.manualConnectionConfig,
-        })
-        setTopology(data)
-      } else {
-        // 没有缓存，使用默认配置
-        const data = await getTopology()
-        setTopology(data)
-      }
-    } catch (error) {
-      console.error('加载拓扑失败:', error)
-      message.error('加载拓扑数据失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  // 重新生成拓扑
-  const handleGenerate = useCallback(async (config: {
-    pod_count: number
-    racks_per_pod: number
-    board_configs: {
-      u1: { count: number; chips: { npu: number; cpu: number } }
-      u2: { count: number; chips: { npu: number; cpu: number } }
-      u4: { count: number; chips: { npu: number; cpu: number } }
-    }
-    rack_config?: {
-      total_u: number
-      boards: Array<{
-        id: string
-        name: string
-        u_height: number
-        count: number
-        chips: Array<{ name: string; count: number }>
-      }>
-    }
-    switch_config?: any
-    manual_connections?: ManualConnectionConfig
-  }) => {
-    try {
-      const data = await generateTopology(config)
-      setTopology(data)
-    } catch (error) {
-      console.error('生成拓扑失败:', error)
-      message.error('生成拓扑失败')
-    }
-  }, [])
-
-  // 初始加载
-  useEffect(() => {
-    loadTopology()
-  }, [loadTopology])
-
-  // 当层级默认参数变化时，应用到所有对应层级的连接
-  // 使用 setTimeout 确保在拓扑重新生成后再应用
-  useEffect(() => {
-    const levelDefaults = manualConnectionConfig.level_defaults
-    if (!levelDefaults) return
-
-    // 延迟执行，确保在拓扑重新生成后应用
-    const timer = setTimeout(() => {
-      setTopology(prev => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          connections: prev.connections.map(conn => {
-            // 根据连接类型确定层级
-            let level: 'datacenter' | 'pod' | 'rack' | 'board' | undefined
-            if (conn.type === 'intra') {
-              level = 'board' // 节点内连接 = Board层（芯片间）
-            } else if (conn.type === 'inter') {
-              level = 'rack' // 节点间连接 = Rack层（Board间）
-            }
-
-            const defaults = level ? levelDefaults[level] : undefined
-            if (defaults) {
-              return {
-                ...conn,
-                bandwidth: defaults.bandwidth ?? conn.bandwidth,
-                latency: defaults.latency ?? conn.latency,
-              }
-            }
-            return conn
-          }),
-        }
-      })
-    }, 600) // 等待拓扑重新生成完成（ConfigPanel 中有 500ms 防抖）
-
-    return () => clearTimeout(timer)
-  }, [manualConnectionConfig.level_defaults])
-
-  // 全局键盘快捷键处理（在3D和拓扑视图都生效）
+  // 全局键盘快捷键
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 如果正在输入框中则忽略
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return
-      }
-
-      // Esc / Backspace - 返回上一级
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       if (e.key === 'Escape' || e.key === 'Backspace') {
         e.preventDefault()
-        if (navigation.canGoBack) {
-          navigation.navigateBack()
-        }
+        if (navigation.canGoBack) navigation.navigateBack()
         return
       }
-
-      // 左方向键 - 历史后退
       if (e.key === 'ArrowLeft') {
         e.preventDefault()
-        if (navigation.canGoHistoryBack) {
-          navigation.navigateHistoryBack()
-        }
+        if (navigation.canGoHistoryBack) navigation.navigateHistoryBack()
         return
       }
-
-      // 右方向键 - 历史前进
       if (e.key === 'ArrowRight') {
         e.preventDefault()
-        if (navigation.canGoHistoryForward) {
-          navigation.navigateHistoryForward()
-        }
+        if (navigation.canGoHistoryForward) navigation.navigateHistoryForward()
         return
       }
     }
-
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [navigation])
-
-  // 手动连接处理函数
-  const handleManualConnectionConfigChange = useCallback((config: ManualConnectionConfig) => {
-    setManualConnectionConfig(config)
-    // 禁用时重置编辑状态
-    if (!config.enabled) {
-      setConnectionMode('view')
-      setSelectedNodes(new Set())
-      setTargetNodes(new Set())
-      setSourceNode(null)
-    }
-  }, [])
-
-  const handleConnectionModeChange = useCallback((mode: ConnectionMode) => {
-    setConnectionMode(mode)
-    if (mode === 'view') {
-      setSelectedNodes(new Set())
-      setTargetNodes(new Set())
-      setSourceNode(null)
-    } else if (mode === 'select_source') {
-      setTargetNodes(new Set())
-      setSourceNode(null)
-    }
-  }, [])
-
-  const handleSelectedNodesChange = useCallback((nodes: Set<string>) => {
-    setSelectedNodes(nodes)
-  }, [])
-
-  const handleTargetNodesChange = useCallback((nodes: Set<string>) => {
-    setTargetNodes(nodes)
-  }, [])
-
-  const handleSourceNodeChange = useCallback((nodeId: string | null) => {
-    setSourceNode(nodeId)
-  }, [])
-
-  const handleManualConnect = useCallback((sourceId: string, targetId: string, level: HierarchyLevel) => {
-    // 检查是否已存在手动连接（双向检查）
-    const existsManual = manualConnectionConfig.connections.some(c =>
-      (c.source === sourceId && c.target === targetId) ||
-      (c.source === targetId && c.target === sourceId)
-    )
-    if (existsManual) {
-      message.warning(`手动连接已存在: ${sourceId} ↔ ${targetId}`)
-      return
-    }
-
-    // 检查是否已存在自动连接（双向检查）
-    const existsAuto = topology?.connections?.some(c =>
-      (c.source === sourceId && c.target === targetId) ||
-      (c.source === targetId && c.target === sourceId)
-    )
-    if (existsAuto) {
-      message.warning(`自动连接已存在: ${sourceId} ↔ ${targetId}`)
-      return
-    }
-
-    const newConnection: ManualConnection = {
-      id: `manual_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      source: sourceId,
-      target: targetId,
-      hierarchy_level: level,
-      created_at: new Date().toISOString(),
-    }
-    setManualConnectionConfig(prev => ({
-      ...prev,
-      connections: [...prev.connections, newConnection],
-    }))
-    message.success(`已添加连接: ${sourceId} ↔ ${targetId}`)
-  }, [manualConnectionConfig.connections, topology?.connections])
-
-  // 批量连接：源节点集合 × 目标节点集合
-  const handleBatchConnect = useCallback((level: HierarchyLevel) => {
-    if (selectedNodes.size === 0 || targetNodes.size === 0) {
-      message.warning('请先选择源节点和目标节点')
-      return
-    }
-
-    let addedCount = 0
-    const newConnections: ManualConnection[] = []
-
-    selectedNodes.forEach(sourceId => {
-      targetNodes.forEach(targetId => {
-        if (sourceId === targetId) return
-
-        // 检查是否已存在
-        const existsManual = manualConnectionConfig.connections.some(c =>
-          (c.source === sourceId && c.target === targetId) ||
-          (c.source === targetId && c.target === sourceId)
-        )
-        const existsAuto = topology?.connections?.some(c =>
-          (c.source === sourceId && c.target === targetId) ||
-          (c.source === targetId && c.target === sourceId)
-        )
-        const existsNew = newConnections.some(c =>
-          (c.source === sourceId && c.target === targetId) ||
-          (c.source === targetId && c.target === sourceId)
-        )
-
-        if (!existsManual && !existsAuto && !existsNew) {
-          // 新建连接不设置带宽/延迟，使用层级默认值
-          newConnections.push({
-            id: `manual_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${addedCount}`,
-            source: sourceId,
-            target: targetId,
-            hierarchy_level: level,
-            created_at: new Date().toISOString(),
-          })
-          addedCount++
-        }
-      })
-    })
-
-    if (newConnections.length > 0) {
-      setManualConnectionConfig(prev => ({
-        ...prev,
-        connections: [...prev.connections, ...newConnections],
-      }))
-      message.success(`已添加 ${newConnections.length} 条连接`)
-    } else {
-      message.warning('所有连接已存在')
-    }
-
-    // 清空选中
-    setSelectedNodes(new Set())
-    setTargetNodes(new Set())
-    setConnectionMode('select_source')
-  }, [selectedNodes, targetNodes, manualConnectionConfig.connections, topology?.connections])
-
-  const handleDeleteManualConnection = useCallback((connectionId: string) => {
-    setManualConnectionConfig(prev => ({
-      ...prev,
-      connections: prev.connections.filter(c => c.id !== connectionId),
-    }))
-    message.success('已删除连接')
-  }, [])
-
-  // 删除任意连接（自动或手动）
-  const handleDeleteConnection = useCallback((source: string, target: string) => {
-    // 先检查是否是手动连接
-    const manualConn = manualConnectionConfig.connections.find(c =>
-      (c.source === source && c.target === target) ||
-      (c.source === target && c.target === source)
-    )
-    if (manualConn) {
-      // 删除手动连接
-      setManualConnectionConfig(prev => ({
-        ...prev,
-        connections: prev.connections.filter(c => c.id !== manualConn.id),
-      }))
-      message.success('已删除手动连接')
-    } else {
-      // 自动连接：直接从topology.connections中删除
-      setTopology(prev => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          connections: prev.connections.filter(c =>
-            !((c.source === source && c.target === target) ||
-              (c.source === target && c.target === source))
-          ),
-        }
-      })
-      message.success('已删除连接')
-    }
-  }, [manualConnectionConfig.connections])
-
-  // 更新连接参数（带宽/延迟）
-  const handleUpdateConnectionParams = useCallback((source: string, target: string, bandwidth?: number, latency?: number) => {
-    // 先检查是否是手动连接
-    const manualConn = manualConnectionConfig.connections.find(c =>
-      (c.source === source && c.target === target) ||
-      (c.source === target && c.target === source)
-    )
-    if (manualConn) {
-      // 更新手动连接参数
-      setManualConnectionConfig(prev => ({
-        ...prev,
-        connections: prev.connections.map(c =>
-          c.id === manualConn.id ? { ...c, bandwidth, latency } : c
-        ),
-      }))
-    } else {
-      // 更新自动连接参数
-      setTopology(prev => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          connections: prev.connections.map(c => {
-            if ((c.source === source && c.target === target) ||
-                (c.source === target && c.target === source)) {
-              return { ...c, bandwidth, latency }
-            }
-            return c
-          }),
-        }
-      })
-    }
-  }, [manualConnectionConfig.connections])
 
   // 拖拽处理
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -537,37 +68,24 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!isDragging) return
-
     const handleMouseMove = (e: MouseEvent) => {
       const delta = e.clientX - dragStartX.current
       const newWidth = Math.max(MIN_SIDER_WIDTH, Math.min(MAX_SIDER_WIDTH, dragStartWidth.current + delta))
       setSiderWidth(newWidth)
     }
-
     const handleMouseUp = () => {
       setIsDragging(false)
-      // 保存到localStorage
       localStorage.setItem(SIDER_WIDTH_KEY, siderWidth.toString())
     }
-
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-
     return () => {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
   }, [isDragging, siderWidth])
 
-  // 获取当前视图层级
-  const getCurrentLevel = () => {
-    if (navigation.currentBoard) return 'board'
-    if (navigation.currentRack) return 'rack'
-    if (navigation.currentPod) return 'pod'
-    return 'datacenter'
-  }
-
-  // 处理3D视图节点选择，转换为NodeDetail格式
+  // 3D视图节点选择处理
   const handleScene3DNodeSelect = useCallback((
     nodeType: 'pod' | 'rack' | 'board' | 'chip' | 'switch',
     nodeId: string,
@@ -575,10 +93,9 @@ const App: React.FC = () => {
     _info: Record<string, string | number>,
     subType?: string
   ) => {
-    // 查找与该节点相关的连接
     const connections: { id: string; label: string; bandwidth?: number }[] = []
-    if (topology?.connections) {
-      topology.connections.forEach(conn => {
+    if (topology.topology?.connections) {
+      topology.topology.connections.forEach(conn => {
         if (conn.source === nodeId) {
           connections.push({ id: conn.target, label: `→ ${conn.target}`, bandwidth: conn.bandwidth })
         } else if (conn.target === nodeId) {
@@ -586,75 +103,80 @@ const App: React.FC = () => {
         }
       })
     }
+    ui.setSelectedNode({ id: nodeId, label, type: nodeType, subType, connections })
+  }, [topology.topology, ui])
 
-    // 转换为NodeDetail格式
-    const nodeDetail: NodeDetail = {
-      id: nodeId,
-      label,
-      type: nodeType,
-      subType,
-      connections,
+  // 节点双击导航处理
+  const handleNodeDoubleClick = useCallback((nodeId: string, nodeType: string) => {
+    if (connection.multiLevelOptions.enabled) {
+      let newLevelPair: 'datacenter_pod' | 'pod_rack' | 'rack_board' | 'board_chip' = connection.multiLevelOptions.levelPair || 'datacenter_pod'
+      if (nodeType === 'pod') newLevelPair = 'datacenter_pod'
+      else if (nodeType === 'rack') newLevelPair = 'pod_rack'
+      else if (nodeType === 'board') newLevelPair = 'rack_board'
+      connection.setMultiLevelOptions({ ...connection.multiLevelOptions, levelPair: newLevelPair })
     }
-
-    setSelectedNode(nodeDetail)
-  }, [topology])
-
-  // 计算当前视图的连接
-  const currentViewConnections = useMemo(() => {
-    if (!topology) return []
-    const currentLevel = getCurrentLevel()
-
-    if (currentLevel === 'datacenter') {
-      // Datacenter层：Pod间连接
-      const podIds = new Set(topology.pods.map(p => p.id))
-      const dcSwitchIds = new Set(
-        (topology.switches || [])
-          .filter(s => s.hierarchy_level === 'inter_pod')
-          .map(s => s.id)
-      )
-      return topology.connections.filter(c => {
-        const sourceInDc = podIds.has(c.source) || dcSwitchIds.has(c.source)
-        const targetInDc = podIds.has(c.target) || dcSwitchIds.has(c.target)
-        return sourceInDc && targetInDc
-      })
-    } else if (currentLevel === 'pod' && navigation.currentPod) {
-      // Pod层：Rack间连接
-      const rackIds = new Set(navigation.currentPod.racks.map(r => r.id))
-      const podSwitchIds = new Set(
-        (topology.switches || [])
-          .filter(s => s.hierarchy_level === 'inter_rack' && s.parent_id === navigation.currentPod!.id)
-          .map(s => s.id)
-      )
-      return topology.connections.filter(c => {
-        const sourceInPod = rackIds.has(c.source) || podSwitchIds.has(c.source)
-        const targetInPod = rackIds.has(c.target) || podSwitchIds.has(c.target)
-        return sourceInPod && targetInPod
-      })
-    } else if (currentLevel === 'rack' && navigation.currentRack) {
-      // Rack层：Board间连接
-      const boardIds = new Set(navigation.currentRack.boards.map(b => b.id))
-      const rackSwitchIds = new Set(
-        (topology.switches || [])
-          .filter(s => s.hierarchy_level === 'inter_board' && s.parent_id === navigation.currentRack!.id)
-          .map(s => s.id)
-      )
-      return topology.connections.filter(c => {
-        const sourceInRack = boardIds.has(c.source) || rackSwitchIds.has(c.source)
-        const targetInRack = boardIds.has(c.target) || rackSwitchIds.has(c.target)
-        return sourceInRack && targetInRack
-      })
-    } else if (currentLevel === 'board' && navigation.currentBoard) {
-      // Board层：Chip间连接
-      const chipIds = new Set(navigation.currentBoard.chips.map(c => c.id))
-      return topology.connections.filter(c =>
-        chipIds.has(c.source) && chipIds.has(c.target)
-      )
+    const pathParts = nodeId.split('/')
+    if (nodeType === 'pod') {
+      navigation.navigateToPod(nodeId)
+    } else if (nodeType === 'rack') {
+      if (pathParts.length >= 2) {
+        navigation.navigateToRack(pathParts[0], nodeId)
+      } else if (navigation.currentPod) {
+        navigation.navigateToRack(navigation.currentPod.id, nodeId)
+      }
+    } else if (nodeType === 'board') {
+      if (pathParts.length >= 3) {
+        navigation.navigateToBoard(pathParts[0], `${pathParts[0]}/${pathParts[1]}`, nodeId)
+      } else {
+        navigation.navigateTo(nodeId)
+      }
     }
-    return []
-  }, [topology, navigation.currentPod, navigation.currentRack, navigation.currentBoard])
+  }, [connection, navigation])
+
+  // 导航返回处理
+  const handleNavigateBack = useCallback(() => {
+    if (connection.multiLevelOptions.enabled) {
+      const newPathLength = navigation.viewState.path.length - 1
+      let newLevelPair: 'datacenter_pod' | 'pod_rack' | 'rack_board' | 'board_chip' = 'datacenter_pod'
+      if (newPathLength <= 1) newLevelPair = 'datacenter_pod'
+      else if (newPathLength === 2) newLevelPair = 'pod_rack'
+      else if (newPathLength >= 3) newLevelPair = 'rack_board'
+      connection.setMultiLevelOptions({ ...connection.multiLevelOptions, levelPair: newLevelPair })
+    }
+    navigation.navigateBack()
+  }, [connection, navigation])
+
+  // 面包屑导航处理
+  const handleBreadcrumbClick = useCallback((index: number) => {
+    if (connection.multiLevelOptions.enabled) {
+      let newLevelPair: 'datacenter_pod' | 'pod_rack' | 'rack_board' | 'board_chip' = 'datacenter_pod'
+      if (index <= 1) newLevelPair = 'datacenter_pod'
+      else if (index === 2) newLevelPair = 'pod_rack'
+      else if (index === 3) newLevelPair = 'rack_board'
+      connection.setMultiLevelOptions({ ...connection.multiLevelOptions, levelPair: newLevelPair })
+    }
+    navigation.navigateToBreadcrumb(index)
+  }, [connection, navigation])
+
+  // 节点点击处理
+  const handleNodeClick = useCallback((node: NodeDetail | null) => {
+    ui.setSelectedNode(node)
+    if (node) {
+      ui.setSelectedLink(null)
+      const levelTypes = ['datacenter', 'pod', 'rack', 'board']
+      if (node.subType && levelTypes.includes(node.subType)) {
+        ui.setFocusedLevel(node.subType as 'datacenter' | 'pod' | 'rack' | 'board')
+      } else {
+        ui.setFocusedLevel(null)
+      }
+    } else {
+      ui.setFocusedLevel(null)
+    }
+  }, [ui])
 
   return (
     <Layout style={{ height: '100vh' }}>
+      {/* Header */}
       <Header style={{
         background: '#FFFFFF',
         borderBottom: '1px solid #E5E5E5',
@@ -669,13 +191,9 @@ const App: React.FC = () => {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
+            width: 32, height: 32, borderRadius: 8,
             background: 'linear-gradient(135deg, #5E6AD2 0%, #7C3AED 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
             boxShadow: '0 2px 6px rgba(94, 106, 210, 0.3)',
           }}>
             <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>T6+</span>
@@ -686,12 +204,13 @@ const App: React.FC = () => {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <Segmented
-            value={viewMode}
-            onChange={(v) => setViewMode(v as '3d' | 'topology' | 'analysis')}
+            value={ui.viewMode}
+            onChange={(v) => ui.setViewMode(v as '3d' | 'topology' | 'analysis' | 'knowledge')}
             options={[
               { value: '3d', label: '3D视图' },
               { value: 'topology', label: '拓扑图' },
               { value: 'analysis', label: '部署分析' },
+              { value: 'knowledge', label: '知识网络' },
             ]}
           />
           <span style={{ color: '#999999', fontSize: 12 }}>v{__APP_VERSION__}</span>
@@ -699,6 +218,7 @@ const App: React.FC = () => {
       </Header>
 
       <Layout>
+        {/* Sider */}
         <Sider
           width={siderWidth}
           style={{
@@ -713,65 +233,180 @@ const App: React.FC = () => {
           }}
         >
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-            <ConfigPanel
-            topology={topology}
-            onGenerate={handleGenerate}
-            loading={loading}
-            currentLevel={getCurrentLevel()}
-            manualConnectionConfig={manualConnectionConfig}
-            onManualConnectionConfigChange={handleManualConnectionConfigChange}
-            connectionMode={connectionMode}
-            onConnectionModeChange={handleConnectionModeChange}
-            selectedNodes={selectedNodes}
-            onSelectedNodesChange={handleSelectedNodesChange}
-            targetNodes={targetNodes}
-            onTargetNodesChange={handleTargetNodesChange}
-            onBatchConnect={handleBatchConnect}
-            onDeleteManualConnection={handleDeleteManualConnection}
-            currentViewConnections={currentViewConnections}
-            onDeleteConnection={handleDeleteConnection}
-            onUpdateConnectionParams={handleUpdateConnectionParams}
-            layoutType={layoutType}
-            onLayoutTypeChange={setLayoutType}
-            viewMode={viewMode}
-            focusedLevel={focusedLevel}
-            onTrafficResultChange={setTrafficResult}
-            onAnalysisDataChange={setDeploymentAnalysisData}
-            />
+            {ui.viewMode === 'knowledge' ? (
+              <Collapse
+                defaultActiveKey={['config']}
+                size="small"
+                items={[{
+                  key: 'config',
+                  label: '配置面板',
+                  children: (
+                    <ConfigPanel
+                      topology={topology.topology}
+                      onGenerate={topology.handleGenerate}
+                      loading={topology.loading}
+                      currentLevel={getCurrentLevel()}
+                      manualConnectionConfig={connection.manualConnectionConfig}
+                      onManualConnectionConfigChange={connection.setManualConnectionConfig}
+                      connectionMode={connection.connectionMode}
+                      onConnectionModeChange={connection.setConnectionMode}
+                      selectedNodes={connection.selectedNodes}
+                      onSelectedNodesChange={connection.setSelectedNodes}
+                      targetNodes={connection.targetNodes}
+                      onTargetNodesChange={connection.setTargetNodes}
+                      onBatchConnect={connection.handleBatchConnect}
+                      onDeleteManualConnection={connection.handleDeleteManualConnection}
+                      currentViewConnections={currentViewConnections}
+                      onDeleteConnection={connection.handleDeleteConnection}
+                      onUpdateConnectionParams={connection.handleUpdateConnectionParams}
+                      layoutType={connection.layoutType}
+                      onLayoutTypeChange={connection.setLayoutType}
+                      viewMode={ui.viewMode}
+                      focusedLevel={ui.focusedLevel}
+                      onTrafficResultChange={analysis.setTrafficResult}
+                      onAnalysisDataChange={analysis.setDeploymentAnalysisData}
+                    />
+                  ),
+                }]}
+              />
+            ) : (
+              <ConfigPanel
+                topology={topology.topology}
+                onGenerate={topology.handleGenerate}
+                loading={topology.loading}
+                currentLevel={getCurrentLevel()}
+                manualConnectionConfig={connection.manualConnectionConfig}
+                onManualConnectionConfigChange={connection.setManualConnectionConfig}
+                connectionMode={connection.connectionMode}
+                onConnectionModeChange={connection.setConnectionMode}
+                selectedNodes={connection.selectedNodes}
+                onSelectedNodesChange={connection.setSelectedNodes}
+                targetNodes={connection.targetNodes}
+                onTargetNodesChange={connection.setTargetNodes}
+                onBatchConnect={connection.handleBatchConnect}
+                onDeleteManualConnection={connection.handleDeleteManualConnection}
+                currentViewConnections={currentViewConnections}
+                onDeleteConnection={connection.handleDeleteConnection}
+                onUpdateConnectionParams={connection.handleUpdateConnectionParams}
+                layoutType={connection.layoutType}
+                onLayoutTypeChange={connection.setLayoutType}
+                viewMode={ui.viewMode}
+                focusedLevel={ui.focusedLevel}
+                onTrafficResultChange={analysis.setTrafficResult}
+                onAnalysisDataChange={analysis.setDeploymentAnalysisData}
+              />
+            )}
           </div>
 
-          {/* 节点详情卡片 - 固定在底部 */}
-          {selectedNode && (
+          {/* 知识图谱节点详情 */}
+          {ui.viewMode === 'knowledge' && ui.knowledgeSelectedNode && (() => {
+            const node = ui.knowledgeSelectedNode
+            // 计算相关节点
+            const relatedNodeIds = new Set<string>()
+            knowledgeData.relations.forEach(r => {
+              if (r.source === node.id) relatedNodeIds.add(r.target)
+              if (r.target === node.id) relatedNodeIds.add(r.source)
+            })
+            const relatedNodes = knowledgeData.nodes.filter(n => relatedNodeIds.has(n.id))
+            // 解析来源中的URL
+            const renderSource = (source: string) => {
+              const urlMatch = source.match(/(https?:\/\/[^\s]+)/g)
+              const doiMatch = source.match(/arXiv:(\d+\.\d+)/i)
+              const linkStyle: React.CSSProperties = { color: '#1677ff', cursor: 'pointer', textDecoration: 'underline' }
+              if (urlMatch) {
+                return <a href={urlMatch[0]} target="_blank" rel="noopener noreferrer" style={linkStyle}>{source}</a>
+              }
+              if (doiMatch) {
+                return <a href={`https://arxiv.org/abs/${doiMatch[1]}`} target="_blank" rel="noopener noreferrer" style={linkStyle}>{source}</a>
+              }
+              return source
+            }
+            return (
+              <Card
+                title={
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{
+                      width: 10, height: 10, borderRadius: '50%',
+                      background: CATEGORY_COLORS[node.category],
+                    }} />
+                    <span style={{ fontSize: 14 }}>{node.fullName || node.name}</span>
+                  </div>
+                }
+                size="small"
+                style={{ marginTop: 16 }}
+                extra={<a onClick={() => ui.setKnowledgeSelectedNode(null)}>关闭</a>}
+              >
+                <Tag color={CATEGORY_COLORS[node.category]} style={{ marginBottom: 12 }}>
+                  {CATEGORY_NAMES[node.category]}
+                </Tag>
+                <div style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>
+                  {node.definition}
+                </div>
+                {node.source && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontWeight: 500, marginBottom: 4 }}>来源</div>
+                    <div style={{ fontSize: 12, color: '#666' }}>{renderSource(node.source)}</div>
+                  </div>
+                )}
+                {node.notes && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontWeight: 500, marginBottom: 4 }}>备注</div>
+                    <div style={{ fontSize: 12, color: '#666' }}>{node.notes}</div>
+                  </div>
+                )}
+                {relatedNodes.length > 0 && (
+                  <div>
+                    <div style={{ fontWeight: 500, marginBottom: 6 }}>相关概念 ({relatedNodes.length})</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      {relatedNodes.map(n => (
+                        <Tag
+                          key={n.id}
+                          color={CATEGORY_COLORS[n.category as keyof typeof CATEGORY_COLORS]}
+                          style={{ cursor: 'pointer', margin: 0 }}
+                          onClick={() => ui.setKnowledgeSelectedNode(n as ForceKnowledgeNode)}
+                        >
+                          {n.name}
+                        </Tag>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </Card>
+            )
+          })()}
+
+          {/* 节点详情卡片 */}
+          {ui.viewMode !== 'knowledge' && ui.selectedNode && (
             <Card
-              title={`节点详情: ${selectedNode.label}`}
+              title={`节点详情: ${ui.selectedNode.label}`}
               size="small"
               style={{ marginTop: 16 }}
-              extra={<a onClick={() => setSelectedNode(null)}>关闭</a>}
+              extra={<a onClick={() => ui.setSelectedNode(null)}>关闭</a>}
             >
               <Descriptions column={1} size="small">
-                <Descriptions.Item label="ID">{selectedNode.id}</Descriptions.Item>
+                <Descriptions.Item label="ID">{ui.selectedNode.id}</Descriptions.Item>
                 <Descriptions.Item label="类型">
-                  <Tag color={selectedNode.type === 'switch' ? 'blue' : 'green'}>
-                    {selectedNode.subType?.toUpperCase() || selectedNode.type.toUpperCase()}
+                  <Tag color={ui.selectedNode.type === 'switch' ? 'blue' : 'green'}>
+                    {ui.selectedNode.subType?.toUpperCase() || ui.selectedNode.type.toUpperCase()}
                   </Tag>
                 </Descriptions.Item>
-                {selectedNode.portInfo && (
+                {ui.selectedNode.portInfo && (
                   <Descriptions.Item label="端口">
-                    上行: {selectedNode.portInfo.uplink} | 下行: {selectedNode.portInfo.downlink} | 互联: {selectedNode.portInfo.inter}
+                    上行: {ui.selectedNode.portInfo.uplink} | 下行: {ui.selectedNode.portInfo.downlink} | 互联: {ui.selectedNode.portInfo.inter}
                   </Descriptions.Item>
                 )}
-                <Descriptions.Item label="连接数">{selectedNode.connections.length}</Descriptions.Item>
+                <Descriptions.Item label="连接数">{ui.selectedNode.connections.length}</Descriptions.Item>
               </Descriptions>
-              {selectedNode.connections.length > 0 && (
+              {ui.selectedNode.connections.length > 0 && (
                 <Collapse
                   size="small"
                   style={{ marginTop: 8 }}
                   items={[{
                     key: 'connections',
-                    label: `连接列表 (${selectedNode.connections.length})`,
+                    label: `连接列表 (${ui.selectedNode.connections.length})`,
                     children: (
                       <div style={{ maxHeight: 150, overflow: 'auto' }}>
-                        {selectedNode.connections.map((conn, idx) => (
+                        {ui.selectedNode.connections.map((conn, idx) => (
                           <div key={idx} style={{ fontSize: 12, padding: '2px 0', borderBottom: '1px solid #f0f0f0' }}>
                             {conn.label}
                             {conn.bandwidth && <span style={{ color: '#999', marginLeft: 8 }}>{conn.bandwidth}Gbps</span>}
@@ -786,31 +421,31 @@ const App: React.FC = () => {
           )}
 
           {/* 连接详情卡片 */}
-          {selectedLink && (
+          {ui.viewMode !== 'knowledge' && ui.selectedLink && (
             <Card
               title="连接详情"
               size="small"
               style={{ marginTop: 16 }}
-              extra={<a onClick={() => setSelectedLink(null)}>关闭</a>}
+              extra={<a onClick={() => ui.setSelectedLink(null)}>关闭</a>}
             >
               <Descriptions column={1} size="small">
                 <Descriptions.Item label="源节点">
-                  <Tag color="green">{selectedLink.sourceLabel}</Tag>
-                  <span style={{ color: '#999', marginLeft: 4, fontSize: 12 }}>({selectedLink.sourceType.toUpperCase()})</span>
+                  <Tag color="green">{ui.selectedLink.sourceLabel}</Tag>
+                  <span style={{ color: '#999', marginLeft: 4, fontSize: 12 }}>({ui.selectedLink.sourceType.toUpperCase()})</span>
                 </Descriptions.Item>
                 <Descriptions.Item label="目标节点">
-                  <Tag color="blue">{selectedLink.targetLabel}</Tag>
-                  <span style={{ color: '#999', marginLeft: 4, fontSize: 12 }}>({selectedLink.targetType.toUpperCase()})</span>
+                  <Tag color="blue">{ui.selectedLink.targetLabel}</Tag>
+                  <span style={{ color: '#999', marginLeft: 4, fontSize: 12 }}>({ui.selectedLink.targetType.toUpperCase()})</span>
                 </Descriptions.Item>
-                {selectedLink.bandwidth && (
-                  <Descriptions.Item label="带宽">{selectedLink.bandwidth} Gbps</Descriptions.Item>
+                {ui.selectedLink.bandwidth && (
+                  <Descriptions.Item label="带宽">{ui.selectedLink.bandwidth} Gbps</Descriptions.Item>
                 )}
-                {selectedLink.latency && (
-                  <Descriptions.Item label="延迟">{selectedLink.latency} ns</Descriptions.Item>
+                {ui.selectedLink.latency && (
+                  <Descriptions.Item label="延迟">{ui.selectedLink.latency} ns</Descriptions.Item>
                 )}
                 <Descriptions.Item label="类型">
-                  <Tag color={selectedLink.isManual ? 'orange' : 'default'}>
-                    {selectedLink.isManual ? '手动连接' : '自动连接'}
+                  <Tag color={ui.selectedLink.isManual ? 'orange' : 'default'}>
+                    {ui.selectedLink.isManual ? '手动连接' : '自动连接'}
                   </Tag>
                 </Descriptions.Item>
               </Descriptions>
@@ -821,109 +456,71 @@ const App: React.FC = () => {
           <div
             onMouseDown={handleMouseDown}
             style={{
-              position: 'absolute',
-              top: 0,
-              right: 0,
-              width: 4,
-              height: '100%',
+              position: 'absolute', top: 0, right: 0, width: 4, height: '100%',
               cursor: 'col-resize',
               background: isDragging ? '#4f46e5' : 'transparent',
               transition: 'background 0.15s',
               zIndex: 10,
             }}
-            onMouseEnter={(e) => {
-              if (!isDragging) {
-                (e.target as HTMLElement).style.background = '#e2e8f0'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isDragging) {
-                (e.target as HTMLElement).style.background = 'transparent'
-              }
-            }}
+            onMouseEnter={(e) => { if (!isDragging) (e.target as HTMLElement).style.background = '#e2e8f0' }}
+            onMouseLeave={(e) => { if (!isDragging) (e.target as HTMLElement).style.background = 'transparent' }}
           />
         </Sider>
 
+        {/* Content */}
         <Content style={{ position: 'relative', background: '#ffffff', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {loading && !topology ? (
-            <div style={{
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              height: '100%',
-            }}>
+          {topology.loading && !topology.topology ? (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
               <Spin size="large" tip="加载中..." />
             </div>
-          ) : viewMode === 'analysis' ? (
-            /* 分析视图 - Dashboard 风格布局 */
-            <div style={{
-              flex: 1,
-              overflow: 'auto',
-              padding: 24,
-              background: '#fafafa',
-            }}>
-              <div style={{ maxWidth: 1400, margin: '0 auto' }}>
-                {/* 标题行 */}
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: 20,
-                }}>
-                  <div style={{ fontSize: 20, fontWeight: 600, color: '#1a1a1a' }}>
-                    LLM 部署分析结果
-                  </div>
-                  {analysisViewMode === 'detail' && (
-                    <Button
-                      type="primary"
-                      size="small"
-                      icon={<ArrowLeftOutlined />}
-                      onClick={() => setAnalysisViewMode('history')}
-                      style={{ fontSize: 13 }}
-                    >
+          ) : ui.viewMode === 'analysis' ? (
+            <div style={{ flex: 1, overflow: 'auto', padding: 24, background: '#fafafa' }}>
+              <div style={{ maxWidth: 1600, margin: '0 auto' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                  <div style={{ fontSize: 20, fontWeight: 600, color: '#1a1a1a' }}>LLM 部署分析结果</div>
+                  {analysis.analysisViewMode === 'detail' && (
+                    <Button type="primary" size="small" icon={<ArrowLeftOutlined />} onClick={() => analysis.setAnalysisViewMode('history')} style={{ fontSize: 13 }}>
                       历史记录
                     </Button>
                   )}
                 </div>
-
-                {/* 分析结果/历史记录 - 使用 App 级别的状态和回调确保始终可交互 */}
                 <AnalysisResultDisplay
-                  result={deploymentAnalysisData?.result ?? null}
-                  topKPlans={deploymentAnalysisData?.topKPlans ?? []}
-                  loading={deploymentAnalysisData?.loading ?? false}
-                  onSelectPlan={deploymentAnalysisData?.onSelectPlan}
-                  searchStats={deploymentAnalysisData?.searchStats ?? null}
-                  errorMsg={deploymentAnalysisData?.errorMsg ?? null}
-                  viewMode={analysisViewMode}
-                  onViewModeChange={setAnalysisViewMode}
-                  history={analysisHistory}
-                  onLoadFromHistory={handleLoadFromHistory}
-                  onDeleteHistory={handleDeleteHistory}
-                  onClearHistory={handleClearHistory}
-                  canMapToTopology={deploymentAnalysisData?.canMapToTopology}
-                  onMapToTopology={deploymentAnalysisData?.onMapToTopology}
-                  onClearTraffic={deploymentAnalysisData?.onClearTraffic}
-                  hardware={deploymentAnalysisData?.hardware}
-                  model={deploymentAnalysisData?.model}
-                  inference={deploymentAnalysisData?.inference}
+                  result={analysis.deploymentAnalysisData?.result ?? null}
+                  topKPlans={analysis.deploymentAnalysisData?.topKPlans ?? []}
+                  loading={analysis.deploymentAnalysisData?.loading ?? false}
+                  onSelectPlan={analysis.deploymentAnalysisData?.onSelectPlan}
+                  searchStats={analysis.deploymentAnalysisData?.searchStats ?? null}
+                  errorMsg={analysis.deploymentAnalysisData?.errorMsg ?? null}
+                  viewMode={analysis.analysisViewMode}
+                  onViewModeChange={analysis.setAnalysisViewMode}
+                  history={analysis.analysisHistory}
+                  onLoadFromHistory={analysis.handleLoadFromHistory}
+                  onDeleteHistory={analysis.handleDeleteHistory}
+                  onClearHistory={analysis.handleClearHistory}
+                  canMapToTopology={analysis.deploymentAnalysisData?.canMapToTopology}
+                  onMapToTopology={analysis.deploymentAnalysisData?.onMapToTopology}
+                  onClearTraffic={analysis.deploymentAnalysisData?.onClearTraffic}
+                  hardware={analysis.deploymentAnalysisData?.hardware}
+                  model={analysis.deploymentAnalysisData?.model}
+                  inference={analysis.deploymentAnalysisData?.inference}
                 />
-
-                {/* 图表区域 - 仅在详情视图且有结果时显示 */}
-                {deploymentAnalysisData?.result && analysisViewMode === 'detail' && (
+                {analysis.deploymentAnalysisData?.result && analysis.analysisViewMode === 'detail' && (
                   <ChartsPanel
-                    result={deploymentAnalysisData.result}
-                    topKPlans={deploymentAnalysisData.topKPlans}
-                    hardware={deploymentAnalysisData.hardware}
-                    model={deploymentAnalysisData.model}
-                    inference={deploymentAnalysisData.inference}
-                    topology={topology}
+                    result={analysis.deploymentAnalysisData.result}
+                    topKPlans={analysis.deploymentAnalysisData.topKPlans}
+                    hardware={analysis.deploymentAnalysisData.hardware}
+                    model={analysis.deploymentAnalysisData.model}
+                    inference={analysis.deploymentAnalysisData.inference}
+                    topology={topology.topology}
                   />
                 )}
               </div>
             </div>
-          ) : viewMode === '3d' ? (
+          ) : ui.viewMode === 'knowledge' ? (
+            <KnowledgeGraph />
+          ) : ui.viewMode === '3d' ? (
             <Scene3D
-              topology={topology}
+              topology={topology.topology}
               viewState={navigation.viewState}
               breadcrumbs={navigation.breadcrumbs}
               currentPod={navigation.currentPod}
@@ -940,133 +537,54 @@ const App: React.FC = () => {
           ) : (
             <TopologyGraph
               visible={true}
-              onClose={() => setViewMode('3d')}
-              topology={topology}
+              onClose={() => ui.setViewMode('3d')}
+              topology={topology.topology}
               currentLevel={getCurrentLevel()}
               currentPod={navigation.currentPod}
               currentRack={navigation.currentRack}
               currentBoard={navigation.currentBoard}
-              onNodeDoubleClick={(nodeId, nodeType) => {
-                // 双击进入时保持多层级视图，并根据新层级更新 levelPair
-                if (multiLevelOptions.enabled) {
-                  // 根据进入的层级确定新的 levelPair
-                  let newLevelPair: 'datacenter_pod' | 'pod_rack' | 'rack_board' | 'board_chip' = multiLevelOptions.levelPair || 'datacenter_pod'
-                  if (nodeType === 'pod') {
-                    newLevelPair = 'datacenter_pod'  // Pod 层级显示 Pod+Rack
-                  } else if (nodeType === 'rack') {
-                    newLevelPair = 'pod_rack'  // Rack 层级显示 Rack+Board
-                  } else if (nodeType === 'board') {
-                    newLevelPair = 'rack_board'  // Board 层级显示 Board+Chip
-                  }
-                  setMultiLevelOptions(prev => ({ ...prev, levelPair: newLevelPair }))
-                }
-                // 解析节点 ID 来获取完整路径（格式：pod_0/rack_0/board_0）
-                const pathParts = nodeId.split('/')
-                if (nodeType === 'pod') {
-                  navigation.navigateToPod(nodeId)
-                } else if (nodeType === 'rack') {
-                  // Rack ID 格式：pod_0/rack_0，需要提取 podId
-                  if (pathParts.length >= 2) {
-                    const podId = pathParts[0]
-                    navigation.navigateToRack(podId, nodeId)
-                  } else if (navigation.currentPod) {
-                    navigation.navigateToRack(navigation.currentPod.id, nodeId)
-                  }
-                } else if (nodeType === 'board') {
-                  // Board ID 格式：pod_0/rack_0/board_0，需要提取 podId 和 rackId
-                  if (pathParts.length >= 3) {
-                    const podId = pathParts[0]
-                    const rackId = `${pathParts[0]}/${pathParts[1]}`
-                    navigation.navigateToBoard(podId, rackId, nodeId)
-                  } else {
-                    navigation.navigateTo(nodeId)
-                  }
-                }
-              }}
-              onNodeClick={(node) => {
-                setSelectedNode(node)
-                if (node) {
-                  setSelectedLink(null)  // 点击节点时清除选中的连接
-                  // 如果点击的是容器（subType 是层级类型），切换左侧层级配置
-                  const levelTypes = ['datacenter', 'pod', 'rack', 'board']
-                  if (node.subType && levelTypes.includes(node.subType)) {
-                    setFocusedLevel(node.subType as 'datacenter' | 'pod' | 'rack' | 'board')
-                  } else {
-                    setFocusedLevel(null)
-                  }
-                } else {
-                  setFocusedLevel(null)
-                }
-              }}
-              onLinkClick={(link) => {
-                setSelectedLink(link)
-                if (link) setSelectedNode(null)  // 点击连接时清除选中的节点
-              }}
-              selectedNodeId={selectedNode?.id || null}
-              selectedLinkId={selectedLink?.id || null}
-              onNavigateBack={() => {
-                // 导航返回时保持多层级视图，并根据新层级更新 levelPair
-                if (multiLevelOptions.enabled) {
-                  // 返回后的层级 = 当前路径长度 - 1
-                  // path.length: 0=datacenter, 1=pod, 2=rack, 3=board
-                  const newPathLength = navigation.viewState.path.length - 1
-                  let newLevelPair: 'datacenter_pod' | 'pod_rack' | 'rack_board' | 'board_chip' = 'datacenter_pod'
-                  if (newPathLength <= 0) {
-                    newLevelPair = 'datacenter_pod'
-                  } else if (newPathLength === 1) {
-                    newLevelPair = 'datacenter_pod'  // Pod 层级显示 Pod+Rack
-                  } else if (newPathLength === 2) {
-                    newLevelPair = 'pod_rack'  // Rack 层级显示 Rack+Board
-                  } else if (newPathLength >= 3) {
-                    newLevelPair = 'rack_board'  // Board 层级显示 Board+Chip
-                  }
-                  setMultiLevelOptions(prev => ({ ...prev, levelPair: newLevelPair }))
-                }
-                navigation.navigateBack()
-              }}
-              onBreadcrumbClick={(index) => {
-                // 面包屑导航时保持多层级视图，并根据新层级更新 levelPair
-                if (multiLevelOptions.enabled) {
-                  // 根据目标层级确定新的 levelPair
-                  // index: 0=datacenter, 1=pod, 2=rack, 3=board
-                  let newLevelPair: 'datacenter_pod' | 'pod_rack' | 'rack_board' | 'board_chip' = 'datacenter_pod'
-                  if (index === 0) {
-                    newLevelPair = 'datacenter_pod'
-                  } else if (index === 1) {
-                    newLevelPair = 'datacenter_pod'  // Pod 层级显示 Pod+Rack
-                  } else if (index === 2) {
-                    newLevelPair = 'pod_rack'  // Rack 层级显示 Rack+Board
-                  } else if (index === 3) {
-                    newLevelPair = 'rack_board'  // Board 层级显示 Board+Chip
-                  }
-                  setMultiLevelOptions(prev => ({ ...prev, levelPair: newLevelPair }))
-                }
-                navigation.navigateToBreadcrumb(index)
-              }}
+              onNodeDoubleClick={handleNodeDoubleClick}
+              onNodeClick={handleNodeClick}
+              onLinkClick={(link) => { ui.setSelectedLink(link); if (link) ui.setSelectedNode(null) }}
+              selectedNodeId={ui.selectedNode?.id || null}
+              selectedLinkId={ui.selectedLink?.id || null}
+              onNavigateBack={handleNavigateBack}
+              onBreadcrumbClick={handleBreadcrumbClick}
               breadcrumbs={navigation.breadcrumbs}
               canGoBack={navigation.canGoBack}
               embedded={true}
-              connectionMode={connectionMode}
-              selectedNodes={selectedNodes}
-              onSelectedNodesChange={handleSelectedNodesChange}
-              targetNodes={targetNodes}
-              onTargetNodesChange={handleTargetNodesChange}
-              sourceNode={sourceNode}
-              onSourceNodeChange={handleSourceNodeChange}
-              onManualConnect={handleManualConnect}
-              manualConnections={manualConnectionConfig.connections}
-              onDeleteManualConnection={handleDeleteManualConnection}
-              onDeleteConnection={handleDeleteConnection}
-              layoutType={layoutType}
-              onLayoutTypeChange={setLayoutType}
-              multiLevelOptions={multiLevelOptions}
-              onMultiLevelOptionsChange={setMultiLevelOptions}
-              trafficResult={trafficResult}
+              connectionMode={connection.connectionMode}
+              selectedNodes={connection.selectedNodes}
+              onSelectedNodesChange={connection.setSelectedNodes}
+              targetNodes={connection.targetNodes}
+              onTargetNodesChange={connection.setTargetNodes}
+              sourceNode={connection.sourceNode}
+              onSourceNodeChange={connection.setSourceNode}
+              onManualConnect={connection.handleManualConnect}
+              manualConnections={connection.manualConnectionConfig.connections}
+              onDeleteManualConnection={connection.handleDeleteManualConnection}
+              onDeleteConnection={connection.handleDeleteConnection}
+              layoutType={connection.layoutType}
+              onLayoutTypeChange={connection.setLayoutType}
+              multiLevelOptions={connection.multiLevelOptions}
+              onMultiLevelOptionsChange={connection.setMultiLevelOptions}
+              trafficResult={analysis.trafficResult}
             />
           )}
         </Content>
       </Layout>
     </Layout>
+  )
+}
+
+/**
+ * App 根组件 - 提供 Context
+ */
+const App: React.FC = () => {
+  return (
+    <WorkbenchProvider>
+      <WorkbenchContent />
+    </WorkbenchProvider>
   )
 }
 

@@ -10,6 +10,8 @@ import logging
 import os
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
+from fractions import Fraction
+from math import lcm, gcd
 
 
 class DCINConfig:
@@ -82,9 +84,17 @@ class DCINConfig:
         self.DIE_TOPOLOGIES: Dict[int, str] = {}
         self.DIE_ROTATIONS: Dict[int, int] = {}
 
-        self.NETWORK_FREQUENCY: Optional[int] = None
+        self.NETWORK_FREQUENCY: Optional[float] = None
+        self.IP_FREQUENCY: Optional[float] = None
         self.FLIT_SIZE: Optional[int] = None
         self.BURST: Optional[int] = None
+
+        # 时间缩放参数（由 _calculate_time_scale 计算）
+        self.CYCLES_PER_NS: Optional[int] = None
+        self.NETWORK_SCALE: Optional[int] = None
+        self.IP_SCALE: Optional[int] = None
+        self.EFFECTIVE_NETWORK_FREQ: Optional[float] = None
+        self.EFFECTIVE_IP_FREQ: Optional[float] = None
 
         # D2D延迟配置 (原始ns值)
         self.D2D_AR_LATENCY_original: Optional[float] = None
@@ -460,7 +470,7 @@ class DCINConfig:
             d2d_latency_keys = ["D2D_AR_LATENCY", "D2D_R_LATENCY", "D2D_AW_LATENCY", "D2D_W_LATENCY", "D2D_B_LATENCY"]
 
             for key, value in dcin_config.items():
-                if key.startswith("D2D_") or key in ["NUM_DIES", "D2D_DIE_CONFIG", "DIE_POSITIONS", "DIE_TOPOLOGIES", "DIE_ROTATIONS", "NETWORK_FREQUENCY", "FLIT_SIZE", "BURST"]:
+                if key.startswith("D2D_") or key in ["NUM_DIES", "D2D_DIE_CONFIG", "DIE_POSITIONS", "DIE_TOPOLOGIES", "DIE_ROTATIONS", "NETWORK_FREQUENCY", "IP_FREQUENCY", "FLIT_SIZE", "BURST"]:
                     # D2D延迟配置保存为_original后缀
                     if key in d2d_latency_keys:
                         setattr(self, f"{key}_original", value)
@@ -800,23 +810,73 @@ class DCINConfig:
             self.die_layout_type = f"{num_rows}x{num_cols}"
             # print(f"Die布局类型: {self.die_layout_type}")
 
+    def _calculate_time_scale(self):
+        """根据网络频率和IP频率自动计算时间缩放参数
+
+        计算 CYCLES_PER_NS、NETWORK_SCALE、IP_SCALE，使得：
+        - 所有时间转换都使用整数运算
+        - 网络域操作每 NETWORK_SCALE 个仿真周期执行一次
+        - IP 域操作每 IP_SCALE 个仿真周期执行一次
+        """
+        if not self.NETWORK_FREQUENCY:
+            raise ValueError("必须先设置NETWORK_FREQUENCY才能计算时间缩放参数")
+
+        # 如果没有设置 IP_FREQUENCY，默认为 1GHz
+        if not self.IP_FREQUENCY:
+            self.IP_FREQUENCY = 1
+
+        max_denominator = 5  # 限制分母，避免仿真周期数过大
+
+        # 转换为分数
+        net_frac = Fraction(self.NETWORK_FREQUENCY).limit_denominator(max_denominator)
+        ip_frac = Fraction(self.IP_FREQUENCY).limit_denominator(max_denominator)
+
+        # 通分
+        common_denom = lcm(net_frac.denominator, ip_frac.denominator)
+        net_num = net_frac.numerator * (common_denom // net_frac.denominator)
+        ip_num = ip_frac.numerator * (common_denom // ip_frac.denominator)
+
+        # 计算最小 CYCLES_PER_NS
+        net_divisor = net_num // gcd(net_num, common_denom)
+        ip_divisor = ip_num // gcd(ip_num, common_denom)
+        self.CYCLES_PER_NS = lcm(net_divisor, ip_divisor)
+
+        # 计算各域的缩放因子
+        self.NETWORK_SCALE = self.CYCLES_PER_NS * common_denom // net_num
+        self.IP_SCALE = self.CYCLES_PER_NS * common_denom // ip_num
+
+        # 计算实际生效的频率
+        self.EFFECTIVE_NETWORK_FREQ = self.CYCLES_PER_NS / self.NETWORK_SCALE
+        self.EFFECTIVE_IP_FREQ = self.CYCLES_PER_NS / self.IP_SCALE
+
+        # 精度检查
+        net_error = abs(self.EFFECTIVE_NETWORK_FREQ - self.NETWORK_FREQUENCY) / self.NETWORK_FREQUENCY
+        ip_error = abs(self.EFFECTIVE_IP_FREQ - self.IP_FREQUENCY) / self.IP_FREQUENCY
+        if net_error > 0.02:
+            print(f"警告: 网络频率 {self.NETWORK_FREQUENCY}GHz 近似为 {self.EFFECTIVE_NETWORK_FREQ:.4f}GHz")
+        if ip_error > 0.02:
+            print(f"警告: IP频率 {self.IP_FREQUENCY}GHz 近似为 {self.EFFECTIVE_IP_FREQ:.4f}GHz")
+
     def update_latency(self):
         """将D2D延迟配置从ns转换为cycles
 
-        转换公式: latency_cycles = latency_ns * NETWORK_FREQUENCY
-        其中NETWORK_FREQUENCY为GHz，例如2表示2GHz
+        转换公式: latency_cycles = latency_ns * CYCLES_PER_NS
         """
         if not self.NETWORK_FREQUENCY:
             raise ValueError("必须先设置NETWORK_FREQUENCY才能转换延迟配置")
 
+        # 先计算时间缩放参数
+        if self.CYCLES_PER_NS is None:
+            self._calculate_time_scale()
+
         # 转换各个延迟配置
         if self.D2D_AR_LATENCY_original is not None:
-            self.D2D_AR_LATENCY = int(self.D2D_AR_LATENCY_original * self.NETWORK_FREQUENCY)
+            self.D2D_AR_LATENCY = int(self.D2D_AR_LATENCY_original * self.CYCLES_PER_NS)
         if self.D2D_R_LATENCY_original is not None:
-            self.D2D_R_LATENCY = int(self.D2D_R_LATENCY_original * self.NETWORK_FREQUENCY)
+            self.D2D_R_LATENCY = int(self.D2D_R_LATENCY_original * self.CYCLES_PER_NS)
         if self.D2D_AW_LATENCY_original is not None:
-            self.D2D_AW_LATENCY = int(self.D2D_AW_LATENCY_original * self.NETWORK_FREQUENCY)
+            self.D2D_AW_LATENCY = int(self.D2D_AW_LATENCY_original * self.CYCLES_PER_NS)
         if self.D2D_W_LATENCY_original is not None:
-            self.D2D_W_LATENCY = int(self.D2D_W_LATENCY_original * self.NETWORK_FREQUENCY)
+            self.D2D_W_LATENCY = int(self.D2D_W_LATENCY_original * self.CYCLES_PER_NS)
         if self.D2D_B_LATENCY_original is not None:
-            self.D2D_B_LATENCY = int(self.D2D_B_LATENCY_original * self.NETWORK_FREQUENCY)
+            self.D2D_B_LATENCY = int(self.D2D_B_LATENCY_original * self.CYCLES_PER_NS)

@@ -1,5 +1,5 @@
 {
-  "ce106ae2-9488-4f77-91c1-ba0177f90f98": {
+  "9df8aef5-39cc-488b-b0d4-818ebb42a983": {
     "source_ip": [
       "节点0-gdma_0",
       "节点0-gdma_1",
@@ -70,12 +70,12 @@
     ],
     "speed_gbps": 128.0,
     "burst_length": 4,
-    "request_type": "R",
+    "request_type": "W",
     "end_time_ns": 6000,
-    "id": "ce106ae2-9488-4f77-91c1-ba0177f90f98",
+    "id": "9df8aef5-39cc-488b-b0d4-818ebb42a983",
     "topology": "4x4",
     "mode": "kcin",
-    "created_at": "2025-12-02T14:27:46.206844",
+    "created_at": "2026-01-06T16:03:14.813121",
     "source_die": null,
     "target_die": null,
     "die_pairs": null

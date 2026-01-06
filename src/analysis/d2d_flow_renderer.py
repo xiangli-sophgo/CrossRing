@@ -637,9 +637,9 @@ class D2DFlowRenderer(BaseFlowRenderer):
 
         # 从dies中获取仿真周期
         sim_end_cycle = next(iter(dies.values())).cycle
-        network_frequency = config.NETWORK_FREQUENCY
+        cycles_per_ns = config.CYCLES_PER_NS
         flit_size = config.FLIT_SIZE
-        time_ns = sim_end_cycle / network_frequency
+        time_ns = sim_end_cycle / cycles_per_ns
 
         for die_id, die_model in dies.items():
             d2d_sys_bandwidth[die_id] = {}

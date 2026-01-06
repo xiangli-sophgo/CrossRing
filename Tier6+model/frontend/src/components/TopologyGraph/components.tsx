@@ -416,7 +416,7 @@ export const renderExternalEdge = (
       <g transform={`translate(${anchorX}, ${anchorY})`}>
         <circle r={6} fill={isLinkSelected ? '#52c41a' : '#faad14'} opacity={0.9} />
         <text y={edge.externalDirection === 'upper' ? -10 : 16} textAnchor="middle"
-          fontSize={9} fill="#666" fontWeight={500}>
+          fontSize={11} fill="#666" fontWeight={500}>
           {edge.externalNodeLabel || '上层'}
         </text>
       </g>
@@ -493,7 +493,7 @@ export const renderIndirectEdge = (
         style={{ pointerEvents: 'none' }} />
       <g transform={`translate(${ctrlX}, ${ctrlY})`}>
         <circle r={5} fill={isLinkSelected ? '#52c41a' : '#722ed1'} opacity={0.7} />
-        <text y={-8} textAnchor="middle" fontSize={8} fill="#666" fontWeight={500}>
+        <text y={-8} textAnchor="middle" fontSize={11} fill="#666" fontWeight={500}>
           via {edge.viaNodeLabel || '上层'}
         </text>
       </g>

@@ -106,7 +106,7 @@ class TrafficFileReader:
             # 解析请求
             t, src, src_t, dst, dst_t, op, burst = parts
             # t是纳秒，time_offset也是纳秒，都需要转换为网络周期数
-            t = (int(t) + self.time_offset) * self.config.NETWORK_FREQUENCY
+            t = (int(t) + self.time_offset) * self.config.CYCLES_PER_NS
             src, dst, burst = int(src), int(dst), int(burst)
 
             req_tuple = (t, src, src_t, dst, dst_t, op, burst, self.traffic_id)
@@ -390,15 +390,14 @@ class TrafficScheduler:
 
         # 为每个IP实例创建TokenBucket
         # rate: 基于flit数量计算，每个flit消耗1个token
-        # IP侧工作在1GHz，网络侧工作在NETWORK_FREQUENCY(2GHz)
-        # TrafficScheduler使用网络周期计数，所以需要转换到网络频率
+        # TrafficScheduler使用仿真周期计数，所以需要转换到仿真周期频率
         #
         # bw_limit (GB/s) = 带宽限制
         # FLIT_SIZE (bytes) = 每个flit的字节数
         # 每秒flit数 = bw_limit * 10^9 / FLIT_SIZE
-        # 每IP周期(1GHz)的flit数 = bw_limit / FLIT_SIZE
-        # 每网络周期(NETWORK_FREQUENCY)的flit数 = (bw_limit / FLIT_SIZE) / NETWORK_FREQUENCY
-        token_rate = bw_limit / self.config.FLIT_SIZE / self.config.NETWORK_FREQUENCY
+        # 每ns的flit数 = bw_limit / FLIT_SIZE
+        # 每仿真周期的flit数 = (bw_limit / FLIT_SIZE) / CYCLES_PER_NS
+        token_rate = bw_limit / self.config.FLIT_SIZE / self.config.CYCLES_PER_NS
         bucket_size = token_rate * 100  # 允许100周期的burst
 
         for ip_key in ip_instances:
@@ -434,8 +433,8 @@ class TrafficScheduler:
             print(f"  Traffic ID: {traffic_id}, Requests: {total_req}, Flits: {total_flit}")
             print(f"  Time offset: {chain.chain_time_offset}ns")
             if requests:
-                first_time_ns = requests[0][0] // self.config.NETWORK_FREQUENCY
-                last_time_ns = requests[-1][0] // self.config.NETWORK_FREQUENCY
+                first_time_ns = requests[0][0] // self.config.CYCLES_PER_NS
+                last_time_ns = requests[-1][0] // self.config.CYCLES_PER_NS
                 print(f"  First request time: {first_time_ns}ns ({requests[0][0]} cycles)")
                 print(f"  Last request time: {last_time_ns}ns ({requests[-1][0]} cycles)")
 
@@ -466,8 +465,8 @@ class TrafficScheduler:
 
                 # 解析原始数据
                 t, src, src_t, dst, dst_t, op, burst = parts
-                # t是纳秒，time_offset也是纳秒，都需要转换为网络周期数
-                t = (int(t) + time_offset) * self.config.NETWORK_FREQUENCY
+                # t是纳秒，time_offset也是纳秒，都需要转换为仿真周期数
+                t = (int(t) + time_offset) * self.config.CYCLES_PER_NS
                 src, dst, burst = int(src), int(dst), int(burst)
 
                 # 创建带traffic_id的请求元组
@@ -557,7 +556,7 @@ class TrafficScheduler:
                 state.update_received_flit()
                 # 记录实际结束时间（纳秒）
                 if state.received_flit >= state.total_flit:
-                    state.actual_end_time = self.current_cycle // self.config.NETWORK_FREQUENCY
+                    state.actual_end_time = self.current_cycle // self.config.CYCLES_PER_NS
 
     def check_and_advance_chains(self, current_cycle: int) -> List[str]:
         """检查traffic完成情况并推进链

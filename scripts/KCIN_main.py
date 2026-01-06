@@ -25,7 +25,8 @@ def main():
             # "data_burst4_W_1111.txt"
             # "test.txt"
             # "simple_case_W.txt"
-            "simple_case_R.txt"
+            "CWM_R.txt"
+            # "simple_case_R.txt"
             # "traffic_20251119_152813.txt"
         ],
     ]
@@ -39,6 +40,7 @@ def main():
     kcin_config_map = {
         "3x3": r"../config/topologies/kcin_3x3.yaml",
         "4x4": r"../config/topologies/kcin_4x4.yaml",
+        "4x4_CWM": r"../config/topologies/kcin_4x4_CWM.yaml",
         "5x2": r"../config/topologies/kcin_5x2.yaml",
         "5x4": r"../config/topologies/kcin_5x4.yaml",
         "5x4_v2": r"../config/topologies/kcin_5x4_v2.yaml",  # v2 RingStation 架构
@@ -47,8 +49,8 @@ def main():
     }
 
     # kcin_type = "5x4"  # SG2262 v1 架构
-    kcin_type = "5x4_v2"  # SG2262 v2 RingStation 架构
-    # kcin_type = "4x4"
+    # kcin_type = "5x4_v2"  # SG2262 v2 RingStation 架构
+    kcin_type = "4x4_CWM"
     # kcin_type = "5x2"
     # kcin_type = "3x3"
     # kcin_type = "6x5"  # SG2260
@@ -92,11 +94,11 @@ def main():
         result_save_path=f"../Result/CrossRing/{model_type}/",
         show_result_analysis=1,
     )
-    # sim.setup_debug(print_trace=1, show_trace_id=[3], update_interval=0.1)
-    # sim.setup_visualization(plot_link_state=1, plot_start_cycle=1, show_node_id=1)
-    # np.random.seed(801)
+    # sim.setup_debug(print_trace=1, show_trace_id=[1], update_interval=0.1)
+    sim.setup_visualization(plot_link_state=1, plot_start_cycle=500, show_node_id=1)
+    np.random.seed(801)
 
-    sim.run_simulation(max_time=500, print_interval=200)
+    sim.run_simulation(max_time=5000, print_interval=200)
 
     # ==================== 保存结果到数据库 ====================
     # sim.save_to_database(experiment_name="KCIN 仿真")

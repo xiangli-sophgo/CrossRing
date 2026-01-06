@@ -753,15 +753,15 @@ class BaseModel(StatsMixin, DataflowMixin):
                     break
 
                 self.cycle += 1
-                self.cycle_mod = self.cycle % self.config.NETWORK_FREQUENCY
+                self.cycle_mod = self.cycle % self.config.CYCLES_PER_NS
 
                 # Execute one step
                 self.step()
 
-                if self.cycle / self.config.NETWORK_FREQUENCY % self.print_interval == 0:
+                if self.cycle / self.config.CYCLES_PER_NS % self.print_interval == 0:
                     self.log_summary()
 
-                if self.is_completed() or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY:
+                if self.is_completed() or self.cycle > self.end_time * self.config.CYCLES_PER_NS:
                     if tail_time == 0:
                         if self.verbose:
                             print("Finish!")
@@ -804,7 +804,7 @@ class BaseModel(StatsMixin, DataflowMixin):
             print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
-        current_time = self.cycle // self.config.NETWORK_FREQUENCY
+        current_time = self.cycle // self.config.CYCLES_PER_NS
         total_req = getattr(self, 'read_req', 0) + getattr(self, 'write_req', 0)
         total_flits = getattr(self, 'read_flit', 0) + getattr(self, 'write_flit', 0)
         summary_data = {

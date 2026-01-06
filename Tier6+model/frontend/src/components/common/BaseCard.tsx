@@ -66,14 +66,14 @@ const STYLES = {
     minWidth: 0,
   } as React.CSSProperties,
   title: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: 600,
     color: '#1f2937',
     margin: 0,
     lineHeight: 1.4,
   } as React.CSSProperties,
   subtitle: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#6b7280',
     marginTop: 2,
     lineHeight: 1.4,

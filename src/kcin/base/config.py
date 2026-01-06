@@ -13,6 +13,8 @@ import copy
 from pathlib import Path
 from typing import Dict, Any, Optional
 from collections import defaultdict
+from fractions import Fraction
+from math import lcm, gcd
 
 
 class KCINConfigBase:
@@ -78,6 +80,10 @@ class KCINConfigBase:
         self.FLIT_SIZE = config.get("FLIT_SIZE", 64)
         self.BURST = config.get("BURST", 4)
         self.NETWORK_FREQUENCY = config.get("NETWORK_FREQUENCY", 2)
+        self.IP_FREQUENCY = config.get("IP_FREQUENCY", 1)
+
+        # 计算时间缩放参数
+        self._calculate_time_scale()
 
         # KCIN 版本
         self.KCIN_VERSION = config.get("KCIN_VERSION", "v1")
@@ -228,16 +234,56 @@ class KCINConfigBase:
             return databuffer_size // burst
         return int(tracker_value)
 
+    def _calculate_time_scale(self):
+        """根据网络频率和IP频率自动计算时间缩放参数
+
+        计算 CYCLES_PER_NS、NETWORK_SCALE、IP_SCALE，使得：
+        - 所有时间转换都使用整数运算
+        - 网络域操作每 NETWORK_SCALE 个仿真周期执行一次
+        - IP 域操作每 IP_SCALE 个仿真周期执行一次
+        """
+        max_denominator = 5  # 限制分母，避免仿真周期数过大
+
+        # 转换为分数
+        net_frac = Fraction(self.NETWORK_FREQUENCY).limit_denominator(max_denominator)
+        ip_frac = Fraction(self.IP_FREQUENCY).limit_denominator(max_denominator)
+
+        # 通分
+        common_denom = lcm(net_frac.denominator, ip_frac.denominator)
+        net_num = net_frac.numerator * (common_denom // net_frac.denominator)
+        ip_num = ip_frac.numerator * (common_denom // ip_frac.denominator)
+
+        # 计算最小 CYCLES_PER_NS
+        net_divisor = net_num // gcd(net_num, common_denom)
+        ip_divisor = ip_num // gcd(ip_num, common_denom)
+        self.CYCLES_PER_NS = lcm(net_divisor, ip_divisor)
+
+        # 计算各域的缩放因子
+        self.NETWORK_SCALE = self.CYCLES_PER_NS * common_denom // net_num
+        self.IP_SCALE = self.CYCLES_PER_NS * common_denom // ip_num
+
+        # 计算实际生效的频率
+        self.EFFECTIVE_NETWORK_FREQ = self.CYCLES_PER_NS / self.NETWORK_SCALE
+        self.EFFECTIVE_IP_FREQ = self.CYCLES_PER_NS / self.IP_SCALE
+
+        # 精度检查
+        net_error = abs(self.EFFECTIVE_NETWORK_FREQ - self.NETWORK_FREQUENCY) / self.NETWORK_FREQUENCY
+        ip_error = abs(self.EFFECTIVE_IP_FREQ - self.IP_FREQUENCY) / self.IP_FREQUENCY
+        if net_error > 0.02:
+            print(f"警告: 网络频率 {self.NETWORK_FREQUENCY}GHz 近似为 {self.EFFECTIVE_NETWORK_FREQ:.4f}GHz")
+        if ip_error > 0.02:
+            print(f"警告: IP频率 {self.IP_FREQUENCY}GHz 近似为 {self.EFFECTIVE_IP_FREQ:.4f}GHz")
+
     def update_latency(self):
         """将延迟配置从 ns 转换为 cycles"""
-        self.DDR_R_LATENCY = int(self.DDR_R_LATENCY_original * self.NETWORK_FREQUENCY)
-        self.DDR_R_LATENCY_VAR = int(self.DDR_R_LATENCY_VAR_original * self.NETWORK_FREQUENCY)
-        self.DDR_W_LATENCY = int(self.DDR_W_LATENCY_original * self.NETWORK_FREQUENCY)
-        self.L2M_R_LATENCY = int(self.L2M_R_LATENCY_original * self.NETWORK_FREQUENCY)
-        self.L2M_W_LATENCY = int(self.L2M_W_LATENCY_original * self.NETWORK_FREQUENCY)
-        self.SN_PROCESSING_LATENCY = int(self.SN_PROCESSING_LATENCY_original * self.NETWORK_FREQUENCY)
-        self.RN_PROCESSING_LATENCY = int(self.RN_PROCESSING_LATENCY_original * self.NETWORK_FREQUENCY)
-        self.SN_TRACKER_RELEASE_LATENCY = int(self.SN_TRACKER_RELEASE_LATENCY_original * self.NETWORK_FREQUENCY)
+        self.DDR_R_LATENCY = int(self.DDR_R_LATENCY_original * self.CYCLES_PER_NS)
+        self.DDR_R_LATENCY_VAR = int(self.DDR_R_LATENCY_VAR_original * self.CYCLES_PER_NS)
+        self.DDR_W_LATENCY = int(self.DDR_W_LATENCY_original * self.CYCLES_PER_NS)
+        self.L2M_R_LATENCY = int(self.L2M_R_LATENCY_original * self.CYCLES_PER_NS)
+        self.L2M_W_LATENCY = int(self.L2M_W_LATENCY_original * self.CYCLES_PER_NS)
+        self.SN_PROCESSING_LATENCY = int(self.SN_PROCESSING_LATENCY_original * self.CYCLES_PER_NS)
+        self.RN_PROCESSING_LATENCY = int(self.RN_PROCESSING_LATENCY_original * self.CYCLES_PER_NS)
+        self.SN_TRACKER_RELEASE_LATENCY = int(self.SN_TRACKER_RELEASE_LATENCY_original * self.CYCLES_PER_NS)
 
     def update_channel_list_from_ips(self, ip_types):
         """从 IP 类型列表更新 CH_NAME_LIST

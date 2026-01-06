@@ -277,7 +277,9 @@ class TopologyParser:
             self.build_interconnect_graph()
 
         if len(group_chips) <= 1:
-            return float('inf'), 0.0
+            # 单芯片不需要通信，返回最大带宽和零延迟
+            # 避免使用 float('inf')，因为它无法 JSON 序列化
+            return self.hardware.node.intra_node_bandwidth_gbps, 0.0
 
         # 找到组内所有芯片的位置
         chip_locations = {}

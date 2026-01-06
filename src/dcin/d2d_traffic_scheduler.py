@@ -85,8 +85,8 @@ class D2DTrafficFileReader(TrafficFileReader):
                 req_type = parts[7].upper()
                 burst_length = int(parts[8])
 
-                # 转换时间为网络周期数
-                t = (inject_time + self.time_offset) * self.config.NETWORK_FREQUENCY
+                # 转换时间为仿真周期数
+                t = (inject_time + self.time_offset) * self.config.CYCLES_PER_NS
 
                 # 创建D2D请求元组 - 扩展格式包含die信息
                 req_tuple = (t, src_die, src_node, src_ip, dst_die, dst_node, dst_ip, req_type, burst_length, self.traffic_id)

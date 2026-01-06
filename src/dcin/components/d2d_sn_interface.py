@@ -48,11 +48,11 @@ class D2D_SN_Interface(IPInterface):
             from src.utils.flit import TokenBucket
 
             self.tx_token_bucket = TokenBucket(
-                rate=d2d_sn_bw_limit / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
+                rate=d2d_sn_bw_limit / config.CYCLES_PER_NS / config.FLIT_SIZE,
                 bucket_size=d2d_sn_bw_limit,
             )
             self.rx_token_bucket = TokenBucket(
-                rate=d2d_sn_bw_limit / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
+                rate=d2d_sn_bw_limit / config.CYCLES_PER_NS / config.FLIT_SIZE,
                 bucket_size=d2d_sn_bw_limit,
             )
 
@@ -140,7 +140,7 @@ class D2D_SN_Interface(IPInterface):
 
         # 设置departure_cycle，与普通IP的create_rsp保持一致
         cycle = getattr(self, "current_cycle", 0)
-        response.departure_cycle = cycle + self.config.NETWORK_FREQUENCY + self.sn_processing_latency
+        response.departure_cycle = cycle + self.config.CYCLES_PER_NS + self.sn_processing_latency
 
         return response
 

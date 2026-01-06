@@ -18,8 +18,6 @@ import {
 import {
   calculateLayerFlopsPrefill,
   calculateLayerFlopsDecode,
-  calculateModelMemory,
-  calculateKVCacheMemory,
 } from '../modelCalculator'
 import { getBytesPerElement } from '../types'
 import { EventQueue } from './eventQueue'

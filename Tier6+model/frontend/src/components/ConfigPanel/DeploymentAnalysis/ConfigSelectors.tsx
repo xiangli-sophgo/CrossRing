@@ -612,7 +612,7 @@ export const InferenceConfigSelector: React.FC<InferenceConfigSelectorProps> = (
         </div>
         <div style={configRowStyle}>
           <Tooltip title="输入提示词的 Token 数量（Prefill 阶段处理）">
-            <Text style={{ fontSize: 12, cursor: 'help' }}>Input Length</Text>
+            <Text style={{ fontSize: 12, cursor: 'help' }}>Input SeqLen</Text>
           </Tooltip>
           <InputNumber
             size="small"
@@ -625,7 +625,7 @@ export const InferenceConfigSelector: React.FC<InferenceConfigSelectorProps> = (
         </div>
         <div style={configRowStyle}>
           <Tooltip title="生成输出的 Token 数量（Decode 阶段逐个生成）">
-            <Text style={{ fontSize: 12, cursor: 'help' }}>Output Length</Text>
+            <Text style={{ fontSize: 12, cursor: 'help' }}>Output SeqLen</Text>
           </Tooltip>
           <InputNumber
             size="small"
@@ -638,7 +638,7 @@ export const InferenceConfigSelector: React.FC<InferenceConfigSelectorProps> = (
         </div>
         <div style={configRowStyle}>
           <Tooltip title="KV Cache 预分配的最大长度，通常 ≥ 输入长度 + 输出长度">
-            <Text style={{ fontSize: 12, cursor: 'help' }}>Max Seq Length</Text>
+            <Text style={{ fontSize: 12, cursor: 'help' }}>Max SeqLen</Text>
           </Tooltip>
           <InputNumber
             size="small"

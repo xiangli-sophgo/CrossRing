@@ -526,6 +526,97 @@ async def get_config_content(config_path: str):
         # 合并配置：用户配置覆盖默认配置
         merged_content = {**default_content, **user_content}
 
+        # KCIN 参数默认值（确保所有参数都有值）
+        kcin_defaults = {
+            # Basic Parameters
+            "TOPO_TYPE": "5x4",
+            "FLIT_SIZE": 128,
+            "BURST": 4,
+            "NETWORK_FREQUENCY": 2.0,
+            "IP_FREQUENCY": 1.0,
+            # Buffer Size
+            "RN_RDB_SIZE": 256,
+            "RN_WDB_SIZE": 256,
+            "SN_DDR_RDB_SIZE": 256,
+            "SN_DDR_WDB_SIZE": 256,
+            "SN_L2M_RDB_SIZE": 256,
+            "SN_L2M_WDB_SIZE": 256,
+            "RN_R_TRACKER_OSTD": "auto",
+            "RN_W_TRACKER_OSTD": "auto",
+            "SN_DDR_R_TRACKER_OSTD": "auto",
+            "SN_DDR_W_TRACKER_OSTD": "auto",
+            "SN_L2M_R_TRACKER_OSTD": "auto",
+            "SN_L2M_W_TRACKER_OSTD": "auto",
+            # Slice Per Link
+            "SLICE_PER_LINK_HORIZONTAL": 9,
+            "SLICE_PER_LINK_VERTICAL": 9,
+            "SLICE_PER_LINK_SELF": 2,
+            # FIFO Depth (v1)
+            "IQ_CH_FIFO_DEPTH": 4,
+            "EQ_CH_FIFO_DEPTH": 4,
+            "IQ_OUT_FIFO_DEPTH_HORIZONTAL": 8,
+            "IQ_OUT_FIFO_DEPTH_VERTICAL": 8,
+            "IQ_OUT_FIFO_DEPTH_EQ": 8,
+            "RB_OUT_FIFO_DEPTH": 8,
+            "RB_IN_FIFO_DEPTH": 8,
+            "EQ_IN_FIFO_DEPTH": 8,
+            # FIFO Depth (v2)
+            "RS_IN_CH_BUFFER": 4,
+            "RS_OUT_CH_BUFFER": 4,
+            "RS_IN_FIFO_DEPTH": 8,
+            "RS_OUT_FIFO_DEPTH": 8,
+            # IP Interface FIFO
+            "IP_L2H_FIFO_DEPTH": 16,
+            "IP_H2L_H_FIFO_DEPTH": 16,
+            "IP_H2L_L_FIFO_DEPTH": 16,
+            # Latency
+            "DDR_R_LATENCY": 50,
+            "DDR_R_LATENCY_VAR": 0,
+            "DDR_W_LATENCY": 10,
+            "L2M_R_LATENCY": 10,
+            "L2M_W_LATENCY": 5,
+            "SN_TRACKER_RELEASE_LATENCY": 0,
+            "SN_PROCESSING_LATENCY": 0,
+            "RN_PROCESSING_LATENCY": 0,
+            # Bandwidth Limit
+            "GDMA_BW_LIMIT": 128,
+            "SDMA_BW_LIMIT": 128,
+            "CDMA_BW_LIMIT": 128,
+            "DDR_BW_LIMIT": 128,
+            "L2M_BW_LIMIT": 128,
+            # ETag
+            "TL_Etag_T2_UE_MAX": 16,
+            "TL_Etag_T1_UE_MAX": 8,
+            "TR_Etag_T2_UE_MAX": 16,
+            "TU_Etag_T2_UE_MAX": 16,
+            "TU_Etag_T1_UE_MAX": 8,
+            "TD_Etag_T2_UE_MAX": 16,
+            # ITag
+            "ITag_TRIGGER_Th_H": 4,
+            "ITag_TRIGGER_Th_V": 4,
+            "ITag_MAX_Num_H": 8,
+            "ITag_MAX_Num_V": 8,
+            # Feature Config
+            "UNIFIED_RW_TRACKER": False,
+            "ETAG_T1_ENABLED": False,
+            "ETAG_BOTHSIDE_UPGRADE": False,
+            "ORDERING_PRESERVATION_MODE": 0,
+            "ORDERING_ETAG_UPGRADE_MODE": 0,
+            "ORDERING_GRANULARITY": 0,
+            "REVERSE_DIRECTION_ENABLED": 0,
+            "REVERSE_DIRECTION_THRESHOLD": 0.5,
+            "ENABLE_CROSSPOINT_CONFLICT_CHECK": 0,
+        }
+
+        # 用默认值填充缺失参数
+        for key, default_val in kcin_defaults.items():
+            if key not in merged_content:
+                merged_content[key] = default_val
+
+        # IP_FREQUENCY 特殊处理：如果未设置，默认为 NETWORK_FREQUENCY / 2
+        if merged_content.get('IP_FREQUENCY') == 1.0 and merged_content.get('NETWORK_FREQUENCY', 2.0) != 2.0:
+            merged_content['IP_FREQUENCY'] = merged_content['NETWORK_FREQUENCY'] / 2
+
         return _sanitize_for_json(merged_content)
     except yaml.YAMLError as e:
         logger.error(f"YAML解析错误: {config_path} - {e}")
@@ -590,9 +681,10 @@ def _format_config_with_comments(content: dict) -> str:
         # KCIN配置分类
         categories = {
             "Basic Parameters": {
-                "keys": ["TOPO_TYPE", "FLIT_SIZE", "BURST", "NETWORK_FREQUENCY"],
+                "keys": ["TOPO_TYPE", "FLIT_SIZE", "BURST", "NETWORK_FREQUENCY", "IP_FREQUENCY"],
                 "comments": {
                     "TOPO_TYPE": "格式 AxB，自动计算拓扑参数",
+                    "IP_FREQUENCY": "IP核频率(GHz)，默认为网络频率的一半",
                 }
             },
             "Buffer Size": {
@@ -756,6 +848,7 @@ def _format_config_with_comments(content: dict) -> str:
         "DIE_ROTATIONS",  # 自动生成
         "DIE_TOPOLOGIES",  # 由运行时根据选择的KCIN配置自动确定
         "NETWORK_FREQUENCY",  # 从KCIN获取
+        "IP_FREQUENCY",  # 从KCIN获取
         "FLIT_SIZE",  # 从KCIN获取
         "BURST",  # 从KCIN获取
         "SLICE_PER_LINK_HORIZONTAL",  # 从KCIN获取

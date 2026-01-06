@@ -69,6 +69,7 @@ export const CONFIG_TOOLTIPS: Record<string, string> = {
   FLIT_SIZE: 'Size of a single flit in bits',
   BURST: 'Number of flits per burst transfer',
   NETWORK_FREQUENCY: 'Network operating frequency in GHz',
+  IP_FREQUENCY: 'IP core operating frequency in GHz (default: NETWORK_FREQUENCY / 2)',
   SLICE_PER_LINK_HORIZONTAL: 'Slice number per horizontal link',
   SLICE_PER_LINK_VERTICAL: 'Slice number per vertical link',
   SLICE_PER_LINK_SELF: 'Slice number per self-loop link',

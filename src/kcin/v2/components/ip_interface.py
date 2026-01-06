@@ -156,22 +156,22 @@ class IPInterface:
             # DDR通道限速
             tx_limit = rx_limit = self.config.DDR_BW_LIMIT
             self.tx_token_bucket = TokenBucket(
-                rate=tx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                rate=tx_limit / self.config.CYCLES_PER_NS / self.config.FLIT_SIZE,
                 bucket_size=tx_limit,
             )
             self.rx_token_bucket = TokenBucket(
-                rate=rx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                rate=rx_limit / self.config.CYCLES_PER_NS / self.config.FLIT_SIZE,
                 bucket_size=rx_limit,
             )
         elif ip_type.startswith("l2m"):
             # L2M通道限速
             tx_limit = rx_limit = self.config.L2M_BW_LIMIT
             self.tx_token_bucket = TokenBucket(
-                rate=tx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                rate=tx_limit / self.config.CYCLES_PER_NS / self.config.FLIT_SIZE,
                 bucket_size=tx_limit,
             )
             self.rx_token_bucket = TokenBucket(
-                rate=rx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                rate=rx_limit / self.config.CYCLES_PER_NS / self.config.FLIT_SIZE,
                 bucket_size=rx_limit,
             )
         elif ip_type[:4] in ("sdma", "gdma", "cdma"):
@@ -375,7 +375,7 @@ class IPInterface:
             if flit is None:
                 return  # 所有队列都空或都未到发送时间
 
-            flit.set_position("IP_TX", self.current_cycle - self.config.NETWORK_FREQUENCY)
+            flit.set_position("IP_TX", self.current_cycle - self.config.CYCLES_PER_NS)
             flit.set_position("L2H", self.current_cycle)
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = flit
@@ -391,7 +391,7 @@ class IPInterface:
         if network_type == "req":
             if flit.req_attr == "new" and not self._check_and_reserve_resources(flit):
                 return  # 资源不足，保持在inject_fifo中
-            flit.set_position("IP_TX", self.current_cycle - self.config.NETWORK_FREQUENCY)
+            flit.set_position("IP_TX", self.current_cycle - self.config.CYCLES_PER_NS)
             flit.set_position("L2H", self.current_cycle)
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
@@ -406,7 +406,7 @@ class IPInterface:
                 if not self.tx_token_bucket.consume():
                     return
             flit: Flit = net_info["inject_fifo"].popleft()
-            flit.set_position("IP_TX", current_cycle - self.config.NETWORK_FREQUENCY)
+            flit.set_position("IP_TX", current_cycle - self.config.CYCLES_PER_NS)
             flit.set_position("L2H", current_cycle)
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = flit
@@ -1088,17 +1088,17 @@ class IPInterface:
     def inject_step(self, cycle):
         """根据周期和频率调用inject相应的方法"""
         self.current_cycle = cycle
-        cycle_mod = cycle % self.config.NETWORK_FREQUENCY
 
-        # 1GHz 操作（每个网络周期执行一次）
-        if cycle_mod == 0:
+        # IP域操作（每IP_SCALE个仿真周期执行一次）
+        if cycle % self.config.IP_SCALE == 0:
             # 对三个网络分别执行inject_to_l2h_pre
             for net_type in ["req", "rsp", "data"]:
                 self.inject_to_l2h_pre(net_type)
 
-        # 2GHz 操作（每半个网络周期执行一次）
-        for net_type in ["req", "rsp", "data"]:
-            self.l2h_to_tx_channel_buffer(net_type)
+        # 网络域操作（每NETWORK_SCALE个仿真周期执行一次）
+        if cycle % self.config.NETWORK_SCALE == 0:
+            for net_type in ["req", "rsp", "data"]:
+                self.l2h_to_tx_channel_buffer(net_type)
 
     def move_pre_to_fifo(self):
         # pre → fifo 的移动（每个周期都执行）
@@ -1122,18 +1122,18 @@ class IPInterface:
     def eject_step(self, cycle):
         """根据周期和频率调用eject相应的方法"""
         self.current_cycle = cycle
-        cycle_mod = cycle % self.config.NETWORK_FREQUENCY
 
         # Initialize list to collect ejected flits
         ejected_flits = []
 
-        # 2GHz 操作（每半个网络周期执行一次）
-        for net_type in ["req", "rsp", "data"]:
-            self.rx_channel_buffer_to_h2l_pre(net_type)
-            self.h2l_h_to_h2l_l_pre(net_type)
+        # 网络域操作（每NETWORK_SCALE个仿真周期执行一次）
+        if cycle % self.config.NETWORK_SCALE == 0:
+            for net_type in ["req", "rsp", "data"]:
+                self.rx_channel_buffer_to_h2l_pre(net_type)
+                self.h2l_h_to_h2l_l_pre(net_type)
 
-        # 1GHz 操作（每个网络周期执行一次）
-        if cycle_mod == 0:
+        # IP域操作（每IP_SCALE个仿真周期执行一次）
+        if cycle % self.config.IP_SCALE == 0:
             # 对三个网络分别执行h2l_to_eject_fifo，收集被eject的flit
             for net_type in ["req", "rsp", "data"]:
                 flit = self.h2l_l_to_eject_fifo(net_type)
@@ -1156,9 +1156,9 @@ class IPInterface:
             # 根据目标IP类型选择延迟
             dest_type = get_original_destination_type(req)
             flit.departure_cycle = (
-                cycle + self.config.DDR_W_LATENCY + i * self.config.NETWORK_FREQUENCY + self.rn_processing_latency
+                cycle + self.config.DDR_W_LATENCY + i * self.config.IP_SCALE + self.rn_processing_latency
                 if dest_type and dest_type.startswith("ddr")
-                else cycle + self.config.L2M_W_LATENCY + i * self.config.NETWORK_FREQUENCY + self.rn_processing_latency
+                else cycle + self.config.L2M_W_LATENCY + i * self.config.IP_SCALE + self.rn_processing_latency
             )
             flit.req_departure_cycle = req.departure_cycle
             flit.entry_db_cycle = req.entry_db_cycle
@@ -1206,7 +1206,7 @@ class IPInterface:
                 latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
             else:
                 latency = self.config.L2M_R_LATENCY
-            flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY + self.sn_processing_latency
+            flit.departure_cycle = cycle + latency + i * self.config.IP_SCALE + self.sn_processing_latency
             flit.entry_db_cycle = cycle
             flit.req_departure_cycle = req.departure_cycle
             flit.source_type = getattr(req, "destination_type", None)
@@ -1250,7 +1250,7 @@ class IPInterface:
 
         # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
         rsp.packet_id = req.packet_id
-        rsp.departure_cycle = cycle + self.config.NETWORK_FREQUENCY + self.sn_processing_latency
+        rsp.departure_cycle = cycle + self.config.CYCLES_PER_NS + self.sn_processing_latency
         rsp.req_departure_cycle = req.departure_cycle
         rsp.source_type = req.destination_type
         rsp.destination_type = req.source_type
