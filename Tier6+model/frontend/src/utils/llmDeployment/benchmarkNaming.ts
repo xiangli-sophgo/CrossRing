@@ -22,7 +22,8 @@ function formatSeqLen(len: number): string {
  * 格式化数据类型为数字
  * "fp16" → "16", "bf16" → "16", "int8" → "8", "int4" → "4", "fp8" → "8"
  */
-function formatDtype(dtype: string): string {
+function formatDtype(dtype: string | undefined): string {
+  if (!dtype) return '16'
   const match = dtype.match(/\d+/)
   return match ? match[0] : '16'
 }
@@ -132,8 +133,8 @@ export function parseBenchmarkParts(
   // 数据精度
   const weightBits = formatDtype(model.weight_dtype)
   const actBits = formatDtype(model.activation_dtype)
-  const weightDtypeUpper = model.weight_dtype.toUpperCase()
-  const actDtypeUpper = model.activation_dtype.toUpperCase()
+  const weightDtypeUpper = (model.weight_dtype || 'fp16').toUpperCase()
+  const actDtypeUpper = (model.activation_dtype || 'fp16').toUpperCase()
   parts.push({
     key: `W${weightBits}A${actBits}`,
     label: '精度',

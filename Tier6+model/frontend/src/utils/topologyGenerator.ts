@@ -19,12 +19,12 @@ import {
   SwitchTypeConfig,
 } from '../types';
 
-// 各层级连接的默认参数配置
+// 各层级连接的默认参数配置 (带宽: GB/s, 延迟: us)
 export const LEVEL_CONNECTION_DEFAULTS = {
-  datacenter: { bandwidth: 400.0, latency: 300.0 },   // Pod间: 400Gbps, 300ns
-  pod: { bandwidth: 100.0, latency: 200.0 },          // Rack间: 100Gbps, 200ns
-  rack: { bandwidth: 100.0, latency: 100.0 },         // Board间: 100Gbps, 100ns
-  board: { bandwidth: 400.0, latency: 50.0 },         // Chip间: 400Gbps, 50ns
+  datacenter: { bandwidth: 50.0, latency: 5.0 },      // Pod间: 50 GB/s, 5 us
+  pod: { bandwidth: 50.0, latency: 2.0 },             // Rack间: 50 GB/s, 2 us (InfiniBand)
+  rack: { bandwidth: 64.0, latency: 15.0 },           // Board间: 64 GB/s, 15 us (PCIe)
+  board: { bandwidth: 900.0, latency: 1.0 },          // Chip间: 900 GB/s, 1 us (NVLink)
 };
 
 // 直连拓扑类型

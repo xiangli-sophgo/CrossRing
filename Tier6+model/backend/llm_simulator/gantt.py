@@ -43,6 +43,13 @@ TASK_COLORS = {
     GanttTaskType.PP_COMM: "#722ed1",
     GanttTaskType.EP_COMM: "#eb2f96",
 
+    # SP 通信 - 蓝色系 (序列并行)
+    GanttTaskType.SP_ALLGATHER: "#2f54eb",
+    GanttTaskType.SP_REDUCE_SCATTER: "#1d39c4",
+
+    # DP 通信 - 深紫色 (数据并行梯度同步)
+    GanttTaskType.DP_GRADIENT_SYNC: "#531dab",
+
     # MLA细粒度 - 青色系 (DeepSeek特有)
     GanttTaskType.RMSNORM_Q_LORA: "#13c2c2",
     GanttTaskType.RMSNORM_KV_LORA: "#36cfc9",
@@ -94,6 +101,13 @@ TASK_LABELS = {
     GanttTaskType.TP_COMM: "TP 通信",
     GanttTaskType.PP_COMM: "PP 通信",
     GanttTaskType.EP_COMM: "EP 通信",
+
+    # SP 通信 (序列并行)
+    GanttTaskType.SP_ALLGATHER: "SP AllGather",
+    GanttTaskType.SP_REDUCE_SCATTER: "SP ReduceScatter",
+
+    # DP 通信 (数据并行)
+    GanttTaskType.DP_GRADIENT_SYNC: "DP 梯度同步",
 
     # MLA细粒度 (DeepSeek特有)
     GanttTaskType.RMSNORM_Q_LORA: "RMSNorm Q",
@@ -186,7 +200,9 @@ class GanttChartBuilder:
 
         # 确定资源行
         if task_type in (GanttTaskType.TP_COMM, GanttTaskType.PP_COMM, GanttTaskType.EP_COMM,
-                         GanttTaskType.EP_DISPATCH, GanttTaskType.EP_COMBINE):
+                         GanttTaskType.EP_DISPATCH, GanttTaskType.EP_COMBINE,
+                         GanttTaskType.SP_ALLGATHER, GanttTaskType.SP_REDUCE_SCATTER,
+                         GanttTaskType.DP_GRADIENT_SYNC):
             resource = f"stage{pp_stage}_network"
         else:
             resource = f"stage{pp_stage}_compute"

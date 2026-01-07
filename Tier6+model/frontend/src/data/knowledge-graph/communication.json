@@ -1,0 +1,155 @@
+[
+  {
+    "id": "内存语义",
+    "name": "内存语义",
+    "definition": "Memory Semantics（内存语义）是一种单边通信模式，发起方可直接对远程节点的内存进行Load/Store/Atomic操作，无需远程CPU参与，是RDMA的核心特性。具体包括三种操作：RDMA Write（将本地数据写入远程内存）、RDMA Read（从远程内存读取数据到本地）、Atomic（对远程内存执行原子操作如CAS、FAA）。内存语义的优势是极低延迟（无需远程CPU处理）和高吞吐（绕过远程软件栈）。实现内存语义需要：1）发起方预先获得远程内存地址和访问密钥（rkey）；2）网卡直接进行DMA操作；3）通过硬件保证操作完成通知。内存语义适合单向大数据传输和远程数据结构访问，是GPU Direct RDMA和高性能存储的基础。",
+    "category": "communication",
+    "source": "InfiniBand Architecture Specification Volume 1, Release 1.4",
+    "url": "https://www.infinibandta.org/ibta-specification/",
+    "notes": "RDMA Write/Read即为内存语义操作，绕过远程CPU"
+  },
+  {
+    "id": "消息语义",
+    "name": "消息语义",
+    "definition": "Message Semantics（消息语义）是一种双边通信模式，需要发送方和接收方协同完成数据传输。发送方执行Send操作发出消息，接收方必须预先Post Receive（提交接收请求）准备好接收缓冲区，否则消息将被丢弃或导致错误。消息语义的特点是：1）双边操作，接收方CPU必须参与准备缓冲区；2）消息边界保留，每次Send对应一次Receive；3）支持任意长度消息；4）接收方无需事先知道数据大小。消息语义适合请求-响应模式的RPC通信、控制消息传递等场景。与内存语义相比，消息语义更灵活（无需共享内存地址）但延迟稍高（需要接收方配合）。MPI的Send/Recv、gRPC等都是消息语义的应用。",
+    "category": "communication",
+    "source": "InfiniBand Architecture Specification Volume 1, Release 1.4",
+    "url": "https://www.infinibandta.org/ibta-specification/",
+    "notes": "MPI Send/Recv即为消息语义，需要双边操作配合"
+  },
+  {
+    "id": "urpc_华为",
+    "name": "URPC（华为）",
+    "definition": "URPC（Unified Remote Procedure Call）是华为开发的统一远程过程调用框架，支持同步/异步调用和多种传输协议。用于华为AI系统中模块间高效通信。",
+    "category": "communication",
+    "source": "Huawei MindSpore Documentation",
+    "url": "https://www.mindspore.cn/docs/en/master/index.html",
+    "notes": "URPC针对AI场景优化，支持RDMA传输"
+  },
+  {
+    "id": "通信原语",
+    "name": "通信原语",
+    "definition": "Communication Primitive（通信原语）是分布式计算中预定义的集合通信操作模式，提供标准化的多进程数据交换接口。主要分为三类：1）一对多操作：Broadcast（广播）、Scatter（分发）；2）多对一操作：Reduce（规约）、Gather（收集）；3）多对多操作：AllReduce（全规约）、AllGather（全收集）、AllToAll（全交换）、ReduceScatter（规约分发）。不同的并行策略依赖不同的通信原语：数据并行使用AllReduce同步梯度，张量并行使用AllGather和ReduceScatter，专家并行使用AllToAll。通信原语的实现算法（如Ring、Tree、Recursive Halving-Doubling）针对不同消息大小和网络拓扑优化。NCCL、MPI、Gloo等通信库提供高效的通信原语实现，是分布式深度学习框架的基础设施。",
+    "category": "communication",
+    "source": "MPI Forum. MPI: A Message-Passing Interface Standard",
+    "url": "https://www.mpi-forum.org/docs/",
+    "notes": "不同并行策略使用不同通信原语：DP用AllReduce，EP用AllToAll"
+  },
+  {
+    "id": "allreduce",
+    "name": "AllReduce",
+    "definition": "AllReduce是分布式计算中最重要的集合通信原语之一，实现所有参与节点数据的全局规约并将结果分发给每个节点。在深度学习训练中，AllReduce主要用于数据并行时的梯度同步：每个GPU独立计算本地梯度后，通过AllReduce求和（或平均）得到全局梯度，所有GPU获得相同结果用于更新参数。AllReduce有多种实现算法：Ring AllReduce将数据分块在环形拓扑中传递，通信量为2(N-1)/N × 数据量，接近理论下界；Tree AllReduce适合延迟敏感场景；Recursive Halving-Doubling适合小消息。NCCL针对NVLink和InfiniBand优化了AllReduce实现。AllReduce的效率直接影响大规模训练的可扩展性。",
+    "category": "communication",
+    "source": "MPI Forum. MPI: A Message-Passing Interface Standard",
+    "url": "https://en.wikipedia.org/wiki/Collective_operation#All-Reduce",
+    "notes": "Ring AllReduce通信量为2(N-1)/N × 数据量，接近带宽下界"
+  },
+  {
+    "id": "allgather",
+    "name": "AllGather",
+    "definition": "AllGather是集合通信原语，功能是收集所有进程的数据并分发给每个进程，操作完成后每个进程都拥有所有数据的完整副本。假设有N个进程，每个进程持有数据块D_i，AllGather后每个进程都持有[D_0, D_1, ..., D_{N-1}]的拼接结果。通信量为(N-1)×每进程数据量。AllGather在Tensor Parallelism中应用广泛：TP将激活或权重切分到多卡，计算时需要先通过AllGather收集完整数据（如Sequence Parallelism在TP区域边界使用AllGather收集完整激活）。常见实现算法包括Ring AllGather（将数据在环形拓扑中逐步传递，N-1步完成）和Recursive Doubling（适合小消息，log(N)步完成）。NCCL针对NVLink和InfiniBand拓扑优化了AllGather实现。",
+    "category": "communication",
+    "source": "MPI Forum. MPI: A Message-Passing Interface Standard",
+    "url": "https://www.mpi-forum.org/docs/",
+    "notes": "AllGather通信量为(N-1) × 每进程数据量"
+  },
+  {
+    "id": "alltoall",
+    "name": "AllToAll",
+    "definition": "AllToAll是集合通信原语，实现所有进程间的全排列数据交换：每个进程将数据分成N块，第i块发给进程i，同时从每个进程接收一块。可以理解为矩阵转置操作。通信模式是全对全的，每对进程间都有数据传输，这对网络的双分带宽（bisection bandwidth）要求很高。AllToAll是Expert Parallelism的核心通信操作：MoE模型中每个token可能被路由到任意GPU上的专家，需要通过AllToAll将token重分布到对应专家所在的GPU，计算完成后再通过AllToAll将结果送回。AllToAll的效率严重依赖网络拓扑：Fat-Tree提供良好的双分带宽，适合AllToAll；而Torus/Dragonfly等拓扑在AllToAll上效率较低。这也是为什么EP的扩展性受限于网络架构。",
+    "category": "communication",
+    "source": "MPI Forum. MPI: A Message-Passing Interface Standard",
+    "url": "https://www.mpi-forum.org/docs/",
+    "notes": "AllToAll对网络双分带宽要求高，Fat-Tree拓扑更适合"
+  },
+  {
+    "id": "reduce_scatter",
+    "name": "ReduceScatter",
+    "definition": "ReduceScatter是集合通信原语，先对所有进程的数据进行规约，再将结果分散到各进程。是AllReduce的分解操作之一（AllReduce = ReduceScatter + AllGather）。",
+    "category": "communication",
+    "source": "MPI Forum. MPI: A Message-Passing Interface Standard",
+    "url": "https://www.mpi-forum.org/docs/",
+    "notes": "ZeRO-2/3使用ReduceScatter分散优化器状态"
+  },
+  {
+    "id": "broadcast",
+    "name": "Broadcast",
+    "definition": "Broadcast是集合通信原语，一个根进程将数据发送给所有其他进程。常用于模型参数初始化分发和配置同步。",
+    "category": "communication",
+    "source": "MPI Forum. MPI: A Message-Passing Interface Standard",
+    "url": "https://en.wikipedia.org/wiki/Broadcast_(parallel_pattern)",
+    "notes": "树形Broadcast可将延迟降至O(log N)"
+  },
+  {
+    "id": "reduce",
+    "name": "Reduce",
+    "definition": "Reduce是集合通信原语，所有进程的数据规约到一个根进程。与AllReduce区别是结果只在根进程可用，其他进程不获得结果。",
+    "category": "communication",
+    "source": "MPI Forum. MPI: A Message-Passing Interface Standard",
+    "url": "https://en.wikipedia.org/wiki/Reduction_operator",
+    "notes": "Reduce+Broadcast = AllReduce"
+  },
+  {
+    "id": "scatter",
+    "name": "Scatter",
+    "definition": "Scatter是集合通信原语，根进程将数据分块发送给所有进程，每个进程收到不同的数据块。是数据分发的基本操作。",
+    "category": "communication",
+    "source": "MPI Forum. MPI: A Message-Passing Interface Standard",
+    "url": "https://www.mpi-forum.org/docs/",
+    "notes": "Scatter与Gather互为逆操作"
+  },
+  {
+    "id": "gather",
+    "name": "Gather",
+    "definition": "Gather是集合通信原语，所有进程将各自的数据发送到根进程汇总。用于收集分布式计算的结果。",
+    "category": "communication",
+    "source": "MPI Forum. MPI: A Message-Passing Interface Standard",
+    "url": "https://www.mpi-forum.org/docs/",
+    "notes": "AllGather = Gather + Broadcast"
+  },
+  {
+    "id": "nccl",
+    "name": "NCCL",
+    "definition": "NCCL（NVIDIA Collective Communications Library）是NVIDIA开发的多GPU集合通信库，针对NVLink和InfiniBand优化。是PyTorch/TensorFlow分布式训练的默认后端。",
+    "category": "communication",
+    "source": "NVIDIA. NCCL Documentation",
+    "url": "https://developer.nvidia.com/nccl",
+    "notes": "NCCL支持AllReduce、AllGather、ReduceScatter等全部集合操作"
+  },
+  {
+    "id": "gloo",
+    "name": "Gloo",
+    "definition": "Gloo是Facebook开发的集合通信库，支持CPU和GPU，提供TCP和共享内存传输。是PyTorch分布式训练的CPU后端，也支持GPU（但性能低于NCCL）。",
+    "category": "communication",
+    "source": "Facebook. Gloo GitHub Repository",
+    "url": "https://github.com/facebookincubator/gloo",
+    "notes": "Gloo可在无InfiniBand环境下使用TCP进行分布式训练"
+  },
+  {
+    "id": "mpi",
+    "name": "MPI",
+    "definition": "MPI（Message Passing Interface）是分布式计算的标准通信接口规范，定义了点对点和集合通信原语。OpenMPI和MPICH是主要实现。",
+    "category": "communication",
+    "source": "MPI Forum. MPI: A Message-Passing Interface Standard",
+    "url": "https://www.mpi-forum.org/",
+    "notes": "MPI定义了200+接口，是HPC领域的事实标准"
+  },
+  {
+    "id": "rdma",
+    "name": "RDMA",
+    "definition": "RDMA（Remote Direct Memory Access，远程直接内存访问）是一种革命性的网络通信技术，允许一台计算机直接读写另一台计算机的内存，完全绕过双方的操作系统内核和远程CPU。这带来三大优势：1）超低延迟（1-2微秒，而传统TCP/IP需50-100微秒）；2）高吞吐（接近线路速率）；3）零CPU开销（网卡硬件直接执行DMA）。RDMA有三种主流实现：InfiniBand（原生支持，性能最佳）、RoCE（基于以太网，需要无损网络支持）、iWARP（基于TCP，部署简单但性能稍逊）。在分布式AI训练中，RDMA是集合通信的基础，NCCL等通信库直接使用RDMA接口。GPUDirect RDMA更进一步，允许网卡直接访问GPU显存。",
+    "category": "communication",
+    "source": "InfiniBand Trade Association. InfiniBand Architecture Specification",
+    "url": "https://en.wikipedia.org/wiki/Remote_direct_memory_access",
+    "notes": "RDMA有三种实现：InfiniBand、RoCE、iWARP"
+  },
+  {
+    "id": "gpudirect",
+    "name": "GPUDirect",
+    "definition": "GPUDirect是NVIDIA的GPU直接通信技术族，包括P2P（GPU间直接传输）、RDMA（GPU直接访问网络）和Storage（GPU直接访问存储）。消除CPU中转开销。",
+    "category": "communication",
+    "source": "NVIDIA. GPUDirect Technology Overview",
+    "url": "https://developer.nvidia.com/gpudirect",
+    "notes": "GPUDirect RDMA允许网卡直接读写GPU内存"
+  }
+]

@@ -1,0 +1,119 @@
+[
+  {
+    "id": "ras",
+    "name": "RAS",
+    "definition": "RAS（Reliability, Availability, Serviceability）是衡量系统健壮性的三个属性：可靠性（无故障运行能力）、可用性（持续服务能力）、可维护性（故障诊断和修复能力）。是企业级系统的核心设计目标。",
+    "category": "system",
+    "source": "IBM System/360 RAS Architecture (1964); IEEE Std 1413-2010",
+    "url": "https://en.wikipedia.org/wiki/Reliability,_availability_and_serviceability",
+    "notes": "ECC内存、热插拔、故障预测等都是RAS技术"
+  },
+  {
+    "id": "事务",
+    "name": "事务",
+    "definition": "Transaction（事务）是系统中一组被视为不可分割的操作集合，具有ACID特性：原子性、一致性、隔离性、持久性。在总线协议中，事务指一次完整的请求-响应交互。",
+    "category": "system",
+    "source": "Gray & Reuter (1993). Transaction Processing: Concepts and Techniques. Morgan Kaufmann",
+    "url": "https://en.wikipedia.org/wiki/Database_transaction",
+    "notes": "PCIe/AXI中的Transaction包含地址、命令和数据的完整交换"
+  },
+  {
+    "id": "内存池化",
+    "name": "内存池化",
+    "definition": "Memory Pooling（内存池化）是将分布式节点的内存资源汇聚为统一可管理的共享内存池，由控制器动态分配给各计算节点使用。CXL 3.0的核心特性之一。",
+    "category": "system",
+    "source": "CXL Consortium. Compute Express Link Specification 3.0",
+    "url": "https://www.computeexpresslink.org/spec-landing",
+    "notes": "内存池化解耦计算与内存，提高资源利用率"
+  },
+  {
+    "id": "超节点",
+    "name": "超节点",
+    "definition": "Super Node（超节点）是由多台计算节点通过高带宽、低延迟互连紧密耦合形成的逻辑计算单元，对上层呈现为近似单机的计算语义。典型如NVIDIA DGX SuperPOD。",
+    "category": "system",
+    "source": "NVIDIA DGX SuperPOD Architecture Guide",
+    "url": "https://docs.nvidia.com/dgx-superpod/index.html",
+    "notes": "超节点内部使用NVLink/NVSwitch，外部使用InfiniBand"
+  },
+  {
+    "id": "同步访问",
+    "name": "同步访问",
+    "definition": "Synchronous Access（同步访问）是发起访问请求后，调用方阻塞等待直到操作完成的访问模式。简单可靠但可能导致CPU空等，适用于对延迟敏感的场景。",
+    "category": "system",
+    "source": "Hennessy & Patterson (2017). Computer Architecture: A Quantitative Approach",
+    "url": "https://en.wikipedia.org/wiki/Synchronization_(computer_science)",
+    "notes": "同步I/O会阻塞进程，影响CPU利用率"
+  },
+  {
+    "id": "异步访问",
+    "name": "异步访问",
+    "definition": "Asynchronous Access（异步访问）是发起请求后立即返回，通过回调、轮询或信号通知获取结果的访问模式。允许CPU与I/O操作重叠，提高系统吞吐量。",
+    "category": "system",
+    "source": "Hennessy & Patterson (2017). Computer Architecture: A Quantitative Approach",
+    "url": "https://en.wikipedia.org/wiki/Asynchronous_I/O",
+    "notes": "CUDA流、DMA传输均为异步操作的典型应用"
+  },
+  {
+    "id": "post方案_pcie",
+    "name": "Posted方案（PCIe）",
+    "definition": "Posted Transaction是PCIe中发送方不等待接收方响应即可继续的事务类型。Memory Write是Posted事务，可提高写入效率；Memory Read是Non-Posted事务，必须等待响应。",
+    "category": "system",
+    "source": "PCI Express Base Specification 5.0",
+    "url": "https://pcisig.com/specifications",
+    "notes": "Posted事务提高吞吐但无法确认写入完成，需用Flush机制"
+  },
+  {
+    "id": "网络隔离",
+    "name": "网络隔离",
+    "definition": "Network Isolation（网络隔离）是将网络划分为多个独立子网的设计策略，可通过VLAN、VRF或物理隔离实现。用于提高安全性、故障隔离和服务质量保证。",
+    "category": "system",
+    "source": "IEEE 802.1Q VLAN Standard; RFC 4364 (BGP/MPLS VPN)",
+    "url": "https://en.wikipedia.org/wiki/Network_segmentation",
+    "notes": "AI集群通常将管理网、存储网、计算网物理隔离"
+  },
+  {
+    "id": "gva",
+    "name": "GVA",
+    "definition": "GVA（Guest Virtual Address）是虚拟机内进程使用的虚拟地址，需经过两级地址转换（GVA→GPA→HPA）才能访问物理内存。是虚拟化环境下的用户态地址空间。",
+    "category": "system",
+    "source": "Intel 64 and IA-32 Architectures Software Developer's Manual Vol.3",
+    "url": "https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html",
+    "notes": "GVA到HPA需经过Guest页表和EPT/NPT两级转换"
+  },
+  {
+    "id": "spa",
+    "name": "SPA",
+    "definition": "SPA（System Physical Address）是多节点系统中全局统一的物理地址空间，用于跨节点寻址。每个节点的NPA通过地址映射转换为全局SPA。",
+    "category": "system",
+    "source": "AMD EPYC Processor Architecture; Intel Xeon Scalable Platform",
+    "url": "https://en.wikipedia.org/wiki/Non-uniform_memory_access",
+    "notes": "SPA实现多插槽NUMA系统的统一寻址"
+  },
+  {
+    "id": "npa",
+    "name": "NPA",
+    "definition": "NPA（Node Physical Address）是单个节点或芯片内部使用的本地物理地址，仅在该节点内有效。需要通过地址映射转换为SPA才能被其他节点访问。",
+    "category": "system",
+    "source": "AMD EPYC Processor Architecture; CXL Specification",
+    "url": "https://www.amd.com/en/technologies/epyc",
+    "notes": "NPA到SPA的映射由系统固件或BIOS配置"
+  },
+  {
+    "id": "mmu",
+    "name": "MMU",
+    "definition": "MMU（Memory Management Unit）是处理器中负责虚拟地址到物理地址转换的硬件单元，同时实现内存保护和缓存控制。通过TLB加速页表查询。",
+    "category": "system",
+    "source": "Hennessy & Patterson (2017). Computer Architecture: A Quantitative Approach",
+    "url": "https://en.wikipedia.org/wiki/Memory_management_unit",
+    "notes": "现代MMU支持多级页表和大页(2MB/1GB)"
+  },
+  {
+    "id": "虚拟化",
+    "name": "虚拟化",
+    "definition": "Virtualization（虚拟化）是通过软件抽象层将物理资源（计算、存储、网络）模拟为多个隔离的虚拟实例的技术。实现资源整合、隔离和灵活调度。",
+    "category": "system",
+    "source": "Popek & Goldberg (1974). Formal Requirements for Virtualizable Third Generation Architectures. CACM",
+    "url": "https://en.wikipedia.org/wiki/Virtualization",
+    "notes": "硬件辅助虚拟化（VT-x/AMD-V）大幅提升虚拟机性能"
+  }
+]

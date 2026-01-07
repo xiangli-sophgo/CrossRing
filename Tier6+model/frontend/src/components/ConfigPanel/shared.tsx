@@ -145,6 +145,7 @@ export interface FlexBoardChipConfig {
   compute_tflops_fp16?: number      // FP16算力 (TFLOPs)
   memory_gb?: number                // 显存容量 (GB)
   memory_bandwidth_gbps?: number    // 显存带宽 (GB/s)
+  memory_bandwidth_utilization?: number  // 带宽利用率 (0-1)
 }
 
 export interface FlexBoardConfig {
@@ -206,6 +207,11 @@ export interface ConfigPanelProps {
   onTrafficResultChange?: (result: TopologyTrafficResult | null) => void
   // 部署分析结果（用于右侧图表）
   onAnalysisDataChange?: (data: DeploymentAnalysisData | null) => void
+  // 历史记录 (由 WorkbenchContext 统一管理)
+  analysisHistory?: AnalysisHistoryItem[]
+  onAddToHistory?: (item: Omit<AnalysisHistoryItem, 'id' | 'timestamp'>) => void
+  onDeleteHistory?: (id: string) => void
+  onClearHistory?: () => void
 }
 
 // ============================================
@@ -226,7 +232,7 @@ export const DEFAULT_BOARD_CONFIGS: BoardConfigs = {
 export const DEFAULT_RACK_CONFIG: RackConfig = {
   total_u: 42,
   boards: [
-    { id: 'board_1', name: 'GPU Board', u_height: 2, count: 8, chips: [{ name: 'H100-SXM', count: 8, preset_id: 'h100-sxm' }] },
+    { id: 'board_1', name: 'Board', u_height: 2, count: 8, chips: [{ name: 'H100-SXM', count: 8, preset_id: 'h100-sxm' }] },
   ],
 }
 

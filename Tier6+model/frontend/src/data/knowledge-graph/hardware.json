@@ -1,0 +1,101 @@
+[
+  {
+    "id": "pod",
+    "name": "Pod",
+    "definition": "Pod是数据中心中由多台机架（Rack）组成的模块化部署单元，通常包含统一的网络、电力和制冷设计。典型AI Pod包含数十到数百个GPU，形成独立的计算域。",
+    "category": "hardware",
+    "source": "Google Data Center Design; NVIDIA DGX SuperPOD Reference Architecture",
+    "url": "https://www.nvidia.com/en-us/data-center/dgx-superpod/",
+    "notes": "NVIDIA SuperPOD由多个DGX节点组成，是大模型训练的基本单元"
+  },
+  {
+    "id": "rack",
+    "name": "Rack",
+    "definition": "Rack（机架）是用于安装服务器、网络和存储设备的标准化结构，遵循EIA-310标准（19英寸宽度）。提供统一的物理尺寸、供电和布线承载能力，是数据中心最基本的物理部署单元。",
+    "category": "hardware",
+    "source": "EIA-310-E Standard; ANSI/TIA-942 Data Center Standards",
+    "url": "https://en.wikipedia.org/wiki/19-inch_rack",
+    "notes": "标准机架高度42U，可容纳约40台1U服务器"
+  },
+  {
+    "id": "server",
+    "name": "Server",
+    "definition": "Server（服务器）是提供计算、存储或网络服务的专用计算机系统，具备高可靠性、远程管理和持续运行能力。AI服务器通常配备多GPU和高带宽网卡。",
+    "category": "hardware",
+    "source": "IEEE Computer Society; Data Center Infrastructure Standards",
+    "url": "https://en.wikipedia.org/wiki/Server_(computing)",
+    "notes": "典型AI服务器如NVIDIA DGX配备8×H100 GPU和NVSwitch"
+  },
+  {
+    "id": "1u_2u_4u",
+    "name": "1U/2U/4U",
+    "definition": "U（Rack Unit）是机架高度单位，1U=1.75英寸（44.45mm）。1U服务器适合高密度计算，4U及以上适合配置多GPU和扩展卡的AI服务器。",
+    "category": "hardware",
+    "source": "EIA-310-E Standard",
+    "url": "https://en.wikipedia.org/wiki/Rack_unit",
+    "notes": "AI服务器通常为4U-8U以容纳多GPU和散热系统"
+  },
+  {
+    "id": "flops",
+    "name": "FLOPs",
+    "definition": "FLOPs（Floating Point Operations）是指算法或模型执行一次所需的浮点运算次数。是衡量模型计算复杂度的标准指标，与FLOPS（每秒浮点运算数）不同。",
+    "category": "hardware",
+    "source": "MLPerf Benchmark Methodology",
+    "url": "https://en.wikipedia.org/wiki/FLOPS",
+    "notes": "Transformer前向FLOPs约为2×参数量×token数"
+  },
+  {
+    "id": "hbm",
+    "name": "HBM",
+    "definition": "HBM（High Bandwidth Memory，高带宽内存）是一种革命性的3D堆叠内存技术，由JEDEC标准化。其核心创新是将多个DRAM die垂直堆叠，通过硅通孔（TSV）互联，并通过硅中介层（interposer）与处理器紧密连接。这种架构提供了极高的内存带宽（HBM3可达3.35TB/s）和较低的功耗。HBM是现代AI加速器的标配显存：NVIDIA H100配备80GB HBM3，H200升级到141GB HBM3e（4.8TB/s）。在LLM推理中，Decode阶段严重受限于HBM带宽（memory-bound），因此HBM带宽直接决定了推理TPS上限。HBM的缺点是成本高、供应紧张（主要由SK海力士、三星、美光生产）。",
+    "category": "hardware",
+    "source": "JEDEC. High Bandwidth Memory (HBM) DRAM Standard",
+    "url": "https://en.wikipedia.org/wiki/High_Bandwidth_Memory",
+    "notes": "H100使用HBM3(80GB, 3.35TB/s)，H200使用HBM3e(141GB, 4.8TB/s)"
+  },
+  {
+    "id": "npu",
+    "name": "NPU",
+    "definition": "NPU（Neural Processing Unit）是专门为神经网络计算优化的AI加速芯片，通常包含大规模矩阵乘法单元和片上内存。典型如华为Ascend、寒武纪MLU。",
+    "category": "hardware",
+    "source": "IEEE Computer Society. AI Accelerator Architecture Survey",
+    "url": "https://en.wikipedia.org/wiki/AI_accelerator",
+    "notes": "NPU针对推理优化，强调能效比；GPU更通用"
+  },
+  {
+    "id": "gpu",
+    "name": "GPU",
+    "definition": "GPU（Graphics Processing Unit，图形处理单元）最初为图形渲染设计，因其大规模并行计算能力成为深度学习的核心硬件。现代AI GPU（如NVIDIA H100）包含数千个CUDA核心和专用Tensor Core，可高效执行矩阵乘法等AI运算。GPU的架构特点包括：高带宽显存（HBM）提供TB/s级内存带宽；SM（流多处理器）组织的计算单元支持大规模并行；Tensor Core支持FP16/FP8/INT8等低精度高效计算。NVIDIA凭借CUDA生态在AI GPU市场占据主导地位，H100单卡FP16算力达1979 TFLOPS。AMD的MI300X和Intel的Gaudi等也在追赶。GPU是构建AI训练集群和推理服务的基础硬件。",
+    "category": "hardware",
+    "source": "NVIDIA. GPU Architecture Whitepapers",
+    "url": "https://www.nvidia.com/en-us/data-center/",
+    "notes": "H100有132个SM，16896个CUDA核心，FP16性能1979 TFLOPS"
+  },
+  {
+    "id": "tpu",
+    "name": "TPU",
+    "definition": "TPU（Tensor Processing Unit）是Google为机器学习设计的ASIC加速器，采用脉动阵列架构优化矩阵运算。TPU v5e的BF16性能197 TFLOPS。",
+    "category": "hardware",
+    "source": "Jouppi et al. (2017). In-Datacenter Performance Analysis of a Tensor Processing Unit. ISCA",
+    "url": "https://cloud.google.com/tpu",
+    "notes": "TPU通过ICI互联组成Pod，最大支持数千TPU"
+  },
+  {
+    "id": "systolic_array",
+    "name": "Systolic Array",
+    "definition": "Systolic Array（脉动阵列）是一种高效的矩阵乘法硬件架构，数据在处理单元阵列中有规律地流动，每个PE执行乘加操作并传递结果。是TPU核心计算单元。",
+    "category": "hardware",
+    "source": "Kung (1982). Why Systolic Architectures? IEEE Computer",
+    "url": "https://en.wikipedia.org/wiki/Systolic_array",
+    "notes": "脉动阵列数据复用率高，适合矩阵密集计算"
+  },
+  {
+    "id": "roofline",
+    "name": "Roofline Model",
+    "definition": "Roofline Model（屋顶线模型）是用于分析程序性能瓶颈的可视化模型，横轴为算术强度(FLOPs/Byte)，纵轴为性能(FLOPS)。性能受限于计算峰值和内存带宽中较低者。",
+    "category": "hardware",
+    "source": "Williams et al. (2009). Roofline: An Insightful Visual Performance Model for Multicore Architectures. CACM",
+    "url": "https://en.wikipedia.org/wiki/Roofline_model",
+    "notes": "Decode阶段算术强度低，是memory-bound；Prefill阶段算术强度高，接近compute-bound"
+  }
+]

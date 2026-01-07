@@ -4,7 +4,7 @@
  * 提供模型配置、推理配置、硬件配置、并行策略配置和分析结果展示
  */
 
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback } from 'react'
 import {
   Typography,
   Button,
@@ -41,9 +41,8 @@ import { searchWithFixedChips } from '../../../utils/llmDeployment/planSearcher'
 import { analyzeTopologyTraffic } from '../../../utils/llmDeployment/trafficMapper'
 import {
   extractChipGroupsFromConfig,
-  generateHardwareConfig,
+  generateHardwareConfigFromPanelConfig,
   ChipGroupInfo,
-  TopologyHardwareSummary,
 } from '../../../utils/llmDeployment/topologyHardwareExtractor'
 import { RackConfig, DeploymentAnalysisData, AnalysisHistoryItem, AnalysisViewMode } from '../shared'
 import {
@@ -60,72 +59,6 @@ import { AnalysisResultDisplay } from './AnalysisResultDisplay'
 const { Text } = Typography
 
 // ============================================
-// 历史记录存储
-// ============================================
-
-const HISTORY_STORAGE_KEY = 'llm-deployment-analysis-history'
-const MAX_HISTORY_ITEMS = 20
-
-// 从 localStorage 加载历史记录
-function loadHistory(): AnalysisHistoryItem[] {
-  try {
-    const stored = localStorage.getItem(HISTORY_STORAGE_KEY)
-    if (stored) {
-      return JSON.parse(stored)
-    }
-  } catch (e) {
-    console.error('加载历史记录失败:', e)
-  }
-  return []
-}
-
-// 保存历史记录到 localStorage
-function saveHistory(history: AnalysisHistoryItem[]): void {
-  try {
-    // 只保留最新的 MAX_HISTORY_ITEMS 条
-    const trimmed = history.slice(0, MAX_HISTORY_ITEMS)
-    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(trimmed))
-  } catch (e) {
-    console.error('保存历史记录失败:', e)
-  }
-}
-
-// 添加新记录到历史
-function addToHistory(
-  result: PlanAnalysisResult,
-  modelConfig: LLMModelConfig,
-  inferenceConfig: InferenceConfig,
-  hardwareConfig: HardwareConfig,
-  topKPlans?: PlanAnalysisResult[],
-  searchMode: 'manual' | 'auto' = 'manual'
-): AnalysisHistoryItem[] {
-  const history = loadHistory()
-  const newItem: AnalysisHistoryItem = {
-    id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-    timestamp: Date.now(),
-    modelName: modelConfig.model_name,
-    parallelism: result.plan.parallelism,
-    score: result.score.overall_score,
-    ttft: result.latency.prefill_total_latency_ms,
-    tpot: result.latency.decode_per_token_latency_ms,
-    throughput: result.throughput.tokens_per_second,
-    mfu: result.throughput.model_flops_utilization,
-    mbu: result.throughput.memory_bandwidth_utilization,
-    cost: result.cost?.cost_per_million_tokens ?? null,
-    chips: result.plan.total_chips,
-    result,
-    topKPlans: searchMode === 'auto' ? topKPlans?.slice(0, 5) : undefined,
-    searchMode,
-    modelConfig,
-    inferenceConfig,
-    hardwareConfig,
-  }
-  const updated = [newItem, ...history]
-  saveHistory(updated)
-  return updated.slice(0, MAX_HISTORY_ITEMS)
-}
-
-// ============================================
 // 主面板组件
 // ============================================
 
@@ -136,6 +69,11 @@ interface DeploymentAnalysisPanelProps {
   rackConfig?: RackConfig
   podCount?: number
   racksPerPod?: number
+  // 历史记录 (由 WorkbenchContext 统一管理)
+  history?: AnalysisHistoryItem[]
+  onAddToHistory?: (item: Omit<AnalysisHistoryItem, 'id' | 'timestamp'>) => void
+  onDeleteHistory?: (id: string) => void
+  onClearHistory?: () => void
 }
 
 export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = ({
@@ -145,6 +83,11 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
   rackConfig,
   podCount = 1,
   racksPerPod = 1,
+  // 历史记录 props
+  history = [],
+  onAddToHistory,
+  onDeleteHistory,
+  onClearHistory,
 }) => {
   // 模型配置状态
   const [modelConfig, setModelConfig] = useState<LLMModelConfig>(
@@ -192,52 +135,38 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
     // 如果使用拓扑配置模式，立即更新硬件配置
     if (hardwareSource === 'topology' && groups.length > 0) {
       const currentSelectedType = selectedChipType || groups[0].presetId || groups[0].chipType
-      const summary: TopologyHardwareSummary = {
-        chipGroups: groups.map(g => ({
-          ...g,
-          boardCount: g.boardCount * podCount * racksPerPod,
-          totalCount: g.totalCount * podCount * racksPerPod,
-        })),
-        totalPods: podCount,
-        totalRacks: podCount * racksPerPod,
-        totalBoards: rackConfig.boards.reduce((sum, b) => sum + b.count, 0) * podCount * racksPerPod,
-        totalChips: groups.reduce((sum, g) => sum + g.totalCount, 0) * podCount * racksPerPod,
-        intraNodeBandwidthGbps: 900,
-        interNodeBandwidthGbps: 400,
-        intraNodeLatencyUs: 1,
-        interNodeLatencyUs: 2,
-      }
-      const config = generateHardwareConfig(summary, currentSelectedType)
+      // 使用 generateHardwareConfigFromPanelConfig 从连接配置中提取带宽和延迟
+      const connections = topology?.connections || []
+      const config = generateHardwareConfigFromPanelConfig(
+        podCount,
+        racksPerPod,
+        rackConfig.boards.map(b => ({ chips: b.chips, count: b.count })),
+        connections,
+        currentSelectedType
+      )
       if (config) {
         setHardwareConfig(config)
       }
     }
-  }, [rackConfigJson, hardwareSource, podCount, racksPerPod])
+  }, [rackConfigJson, hardwareSource, podCount, racksPerPod, topology?.connections])
 
   // 当选择的芯片类型变化时，更新硬件配置
   React.useEffect(() => {
     if (hardwareSource === 'topology' && rackConfig && chipGroups.length > 0 && selectedChipType) {
-      const summary: TopologyHardwareSummary = {
-        chipGroups: chipGroups.map(g => ({
-          ...g,
-          boardCount: g.boardCount * podCount * racksPerPod,
-          totalCount: g.totalCount * podCount * racksPerPod,
-        })),
-        totalPods: podCount,
-        totalRacks: podCount * racksPerPod,
-        totalBoards: rackConfig.boards.reduce((sum, b) => sum + b.count, 0) * podCount * racksPerPod,
-        totalChips: chipGroups.reduce((sum, g) => sum + g.totalCount, 0) * podCount * racksPerPod,
-        intraNodeBandwidthGbps: 900,
-        interNodeBandwidthGbps: 400,
-        intraNodeLatencyUs: 1,
-        interNodeLatencyUs: 2,
-      }
-      const config = generateHardwareConfig(summary, selectedChipType)
+      // 使用 generateHardwareConfigFromPanelConfig 从连接配置中提取带宽和延迟
+      const connections = topology?.connections || []
+      const config = generateHardwareConfigFromPanelConfig(
+        podCount,
+        racksPerPod,
+        rackConfig.boards.map(b => ({ chips: b.chips, count: b.count })),
+        connections,
+        selectedChipType
+      )
       if (config) {
         setHardwareConfig(config)
       }
     }
-  }, [selectedChipType, hardwareSource, rackConfig, chipGroups, podCount, racksPerPod])
+  }, [selectedChipType, hardwareSource, rackConfig, chipGroups, podCount, racksPerPod, topology?.connections])
 
   // 并行策略状态
   const [parallelismMode, setParallelismMode] = useState<'manual' | 'auto'>('manual')
@@ -259,20 +188,12 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // 历史记录状态
-  const [history, setHistory] = useState<AnalysisHistoryItem[]>([])
-
   // 视图模式状态（历史列表 或 详情）
   const [viewMode, setViewMode] = useState<AnalysisViewMode>('history')
 
   // 当前显示的分析结果对应的配置（区分于配置面板的当前选择）
   const [displayModelConfig, setDisplayModelConfig] = useState<LLMModelConfig | null>(null)
   const [displayInferenceConfig, setDisplayInferenceConfig] = useState<InferenceConfig | null>(null)
-
-  // 加载历史记录
-  useEffect(() => {
-    setHistory(loadHistory())
-  }, [])
 
   // 映射到拓扑的回调
   const handleMapToTopology = React.useCallback(() => {
@@ -308,20 +229,17 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
     message.success(`已加载历史记录${plansCount > 1 ? `（含 ${plansCount} 个候选方案）` : ''}`)
   }, [])
 
-  // 删除历史记录
+  // 删除历史记录 (使用 props 回调)
   const handleDeleteHistory = useCallback((id: string) => {
-    const updated = history.filter(h => h.id !== id)
-    saveHistory(updated)
-    setHistory(updated)
+    onDeleteHistory?.(id)
     message.success('已删除')
-  }, [history])
+  }, [onDeleteHistory])
 
-  // 清空历史记录
+  // 清空历史记录 (使用 props 回调)
   const handleClearHistory = useCallback(() => {
-    saveHistory([])
-    setHistory([])
+    onClearHistory?.()
     message.success('已清空历史记录')
-  }, [])
+  }, [onClearHistory])
 
   // 当分析状态变化时，通知父组件
   React.useEffect(() => {
@@ -364,10 +282,13 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
     setLoading(true)
     try {
       let result: PlanAnalysisResult | null = null
+      // 使用局部变量捕获新的topKPlans，避免React状态更新延迟导致保存到历史时为空
+      let newTopKPlans: PlanAnalysisResult[] = []
       if (parallelismMode === 'manual') {
         result = analyzePlan(modelConfig, inferenceConfig, manualStrategy, hardwareConfig)
         setAnalysisResult(result)
-        setTopKPlans([result])
+        newTopKPlans = [result]
+        setTopKPlans(newTopKPlans)
       } else {
         const searchResult = searchWithFixedChips(
           modelConfig,
@@ -380,7 +301,8 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
         if (searchResult.top_k_plans.length > 0) {
           result = searchResult.optimal_plan
           setAnalysisResult(result)
-          setTopKPlans(searchResult.top_k_plans)
+          newTopKPlans = searchResult.top_k_plans
+          setTopKPlans(newTopKPlans)
           setSearchStats({
             evaluated: searchResult.search_stats.evaluated_count,
             feasible: searchResult.search_stats.feasible_count,
@@ -400,16 +322,28 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
         // 设置显示配置（分析时使用的配置，不随配置面板变化）
         setDisplayModelConfig(modelConfig)
         setDisplayInferenceConfig(inferenceConfig)
-        const currentTopKPlans = parallelismMode === 'auto' ? topKPlans : undefined
-        const updatedHistory = addToHistory(
+        // 使用局部变量newTopKPlans而不是状态变量topKPlans
+        const currentTopKPlans = parallelismMode === 'auto' ? newTopKPlans : undefined
+        const searchMode = parallelismMode === 'auto' ? 'auto' : 'manual'
+        // 通过 props 回调添加历史记录
+        onAddToHistory?.({
+          modelName: modelConfig.model_name,
+          parallelism: result.plan.parallelism,
+          score: result.score.overall_score,
+          ttft: result.latency.prefill_total_latency_ms,
+          tpot: result.latency.decode_per_token_latency_ms,
+          throughput: result.throughput.tokens_per_second,
+          mfu: result.throughput.model_flops_utilization,
+          mbu: result.throughput.memory_bandwidth_utilization,
+          cost: result.cost?.cost_per_million_tokens ?? null,
+          chips: result.plan.total_chips,
           result,
+          topKPlans: searchMode === 'auto' ? currentTopKPlans?.slice(0, 5) : undefined,
+          searchMode,
           modelConfig,
           inferenceConfig,
           hardwareConfig,
-          currentTopKPlans,
-          parallelismMode === 'auto' ? 'auto' : 'manual'
-        )
-        setHistory(updatedHistory)
+        })
         setViewMode('detail')  // 分析完成后切换到详情视图
         const plansCount = currentTopKPlans ? Math.min(5, currentTopKPlans.length) : 1
         message.success(`分析完成，已保存${plansCount}个方案到历史记录`)
@@ -421,7 +355,7 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
     } finally {
       setLoading(false)
     }
-  }, [modelConfig, inferenceConfig, hardwareConfig, parallelismMode, manualStrategy, searchConstraints, maxChips, scoreWeights])
+  }, [modelConfig, inferenceConfig, hardwareConfig, parallelismMode, manualStrategy, searchConstraints, maxChips, scoreWeights, onAddToHistory])
 
   return (
     <div style={{ padding: 0 }}>

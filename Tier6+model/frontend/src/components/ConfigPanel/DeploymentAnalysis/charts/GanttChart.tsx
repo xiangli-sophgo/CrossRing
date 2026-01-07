@@ -45,6 +45,11 @@ const TASK_COLORS: Record<string, string> = {
   tp_comm: '#1890ff',
   pp_comm: '#722ed1',
   ep_comm: '#eb2f96',
+  // SP 通信 - 蓝色系 (序列并行)
+  sp_allgather: '#2f54eb',
+  sp_reduce_scatter: '#1d39c4',
+  // DP 通信 - 深紫色 (数据并行梯度同步)
+  dp_gradient_sync: '#531dab',
   // MLA - 青色系
   rmsnorm_q_lora: '#13c2c2',
   rmsnorm_kv_lora: '#36cfc9',
@@ -88,6 +93,9 @@ const TASK_LABELS: Record<string, string> = {
   tp_comm: 'TP',
   pp_comm: 'PP',
   ep_comm: 'EP',
+  sp_allgather: 'SP AG',
+  sp_reduce_scatter: 'SP RS',
+  dp_gradient_sync: 'DP Sync',
   moe_gate: 'MoE Gate',
   moe_expert: 'Expert',
   moe_shared_expert: 'Shared',
@@ -101,7 +109,7 @@ const TASK_LABELS: Record<string, string> = {
 const LEGEND_GROUPS = [
   { name: '计算', types: ['compute', 'attention_qkv', 'ffn_gate', 'lm_head'] },
   { name: '数据搬运', types: ['pcie_h2d', 'weight_load', 'kv_cache_read'] },
-  { name: '通信', types: ['tp_comm', 'pp_comm', 'ep_comm'] },
+  { name: '通信', types: ['tp_comm', 'pp_comm', 'ep_comm', 'sp_allgather', 'dp_gradient_sync'] },
   { name: 'MoE', types: ['moe_gate', 'moe_expert', 'ep_dispatch'] },
   { name: '其他', types: ['bubble', 'idle'] },
 ]
@@ -278,7 +286,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
       if (task.end < start || task.start > end) continue
 
       // 确定资源行
-      const isNetworkTask = ['tp_comm', 'pp_comm', 'ep_comm', 'ep_dispatch', 'ep_combine'].includes(task.type)
+      const isNetworkTask = ['tp_comm', 'pp_comm', 'ep_comm', 'ep_dispatch', 'ep_combine', 'sp_allgather', 'sp_reduce_scatter', 'dp_gradient_sync'].includes(task.type)
       const resourceId = `stage${task.ppStage}_${isNetworkTask ? 'network' : 'compute'}`
 
       const resourceBins = bins.get(resourceId)

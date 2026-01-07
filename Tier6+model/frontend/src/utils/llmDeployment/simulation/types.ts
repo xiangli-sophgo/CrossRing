@@ -164,6 +164,26 @@ export type GanttTaskType =
   | 'tp_comm'
   | 'pp_comm'
   | 'ep_comm'
+  // SP 通信 (序列并行)
+  | 'sp_allgather'
+  | 'sp_reduce_scatter'
+  // DP 通信 (数据并行梯度同步)
+  | 'dp_gradient_sync'
+  // MLA细粒度 (DeepSeek特有)
+  | 'rmsnorm_q_lora'
+  | 'rmsnorm_kv_lora'
+  | 'mm_q_lora_a'
+  | 'mm_q_lora_b'
+  | 'mm_kv_lora_a'
+  | 'attn_fc'
+  | 'bmm_qk'
+  | 'bmm_sv'
+  // MoE (专家并行)
+  | 'moe_gate'
+  | 'moe_expert'
+  | 'moe_shared_expert'
+  | 'ep_dispatch'
+  | 'ep_combine'
   // 其他
   | 'bubble'
   | 'idle'

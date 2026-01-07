@@ -16,23 +16,25 @@ import {
   RELATION_STYLES,
 } from './types'
 import { useWorkbench } from '../../contexts/WorkbenchContext'
-import knowledgeData from '../../data/knowledge-graph.json'
+import knowledgeData from '../../data/knowledge-graph'
 
 const { Text } = Typography
 
-// 力导向布局参数
+// 力导向布局参数 - 优化版
 const FORCE_CONFIG = {
-  chargeStrength: -400,
-  linkDistance: 100,
-  linkStrength: 0.3,
-  collisionRadius: 35,
-  centerStrength: 0.02,
+  chargeStrength: -800,      // 增加斥力让节点分散
+  chargeDistanceMax: 800,    // 斥力作用距离
+  linkDistance: 80,         // 连接距离
+  linkStrength: 0.5,         // 增加连接强度，让相连节点靠近
+  collisionIterations: 6,    // 碰撞检测迭代次数
   alphaDecay: 0.02,
-  velocityDecay: 0.4,
+  alphaMin: 0.001,
+  velocityDecay: 0.3,
 }
 
-// 节点半径
-const NODE_RADIUS = 24
+// 节点半径范围
+const NODE_RADIUS_MIN = 20
+const NODE_RADIUS_MAX = 40
 
 export const KnowledgeGraph: React.FC = () => {
   const { ui } = useWorkbench()
@@ -41,10 +43,12 @@ export const KnowledgeGraph: React.FC = () => {
     knowledgeVisibleCategories: visibleCategories,
     knowledgeNodes,
     knowledgeInitialized,
+    knowledgeViewBox: savedViewBox,
     setKnowledgeSelectedNode: setSelectedNode,
     setKnowledgeVisibleCategories: setVisibleCategories,
     setKnowledgeNodes,
     setKnowledgeInitialized,
+    setKnowledgeViewBox: saveViewBox,
     resetKnowledgeCategories,
   } = ui
 
@@ -60,18 +64,31 @@ export const KnowledgeGraph: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null)
   const simulationRef = useRef<d3Force.Simulation<ForceKnowledgeNode, d3Force.SimulationLinkDatum<ForceKnowledgeNode>> | null>(null)
 
-  // 视口状态
-  const [viewBox, setViewBox] = useState({ x: 0, y: 0, width: 1200, height: 800 })
+  // 视口状态 - 优先使用保存的viewBox，避免切换页面时视口跳变
+  const [viewBox, setViewBoxLocal] = useState(() =>
+    savedViewBox || { x: 0, y: 0, width: 1200, height: 800 }
+  )
+  // 更新viewBox时同时保存到context
+  const setViewBox = useCallback((newViewBox: typeof viewBox | ((prev: typeof viewBox) => typeof viewBox)) => {
+    setViewBoxLocal(prev => {
+      const next = typeof newViewBox === 'function' ? newViewBox(prev) : newViewBox
+      saveViewBox(next)
+      return next
+    })
+  }, [saveViewBox])
   const [isPanning, setIsPanning] = useState(false)
   const panStartRef = useRef({ x: 0, y: 0, viewX: 0, viewY: 0 })
 
   // 加载数据（只在首次加载时初始化，避免切换视图重复计算）
   useEffect(() => {
+    const data = knowledgeData as KnowledgeGraphData
+    // relations 是静态数据，每次组件挂载都需要加载
+    setRelations(data.relations)
+
     if (knowledgeInitialized) {
       setLoading(false)
       return
     }
-    const data = knowledgeData as KnowledgeGraphData
 
     // 初始化节点位置
     const centerX = viewBox.width / 2
@@ -84,16 +101,41 @@ export const KnowledgeGraph: React.FC = () => {
     }))
 
     setKnowledgeNodes(initialNodes)
-    setRelations(data.relations)
     setKnowledgeInitialized(true)
     setLoading(false)
   }, [knowledgeInitialized, viewBox.width, viewBox.height, setKnowledgeNodes, setKnowledgeInitialized])
 
-  // 初始化力导向模拟（只在节点/关系/过滤变化时重新计算，不受缩放影响）
-  useEffect(() => {
+  // 计算适合所有节点的视口
+  const fitViewToNodes = useCallback(() => {
     if (knowledgeNodes.length === 0) return
 
-    // 过滤可见节点
+    const visibleNodes = knowledgeNodes.filter(n => visibleCategories.has(n.category))
+    if (visibleNodes.length === 0) return
+
+    const padding = 100
+    const minX = Math.min(...visibleNodes.map(n => n.x ?? 0)) - padding
+    const maxX = Math.max(...visibleNodes.map(n => n.x ?? 0)) + padding
+    const minY = Math.min(...visibleNodes.map(n => n.y ?? 0)) - padding
+    const maxY = Math.max(...visibleNodes.map(n => n.y ?? 0)) + padding
+
+    const width = Math.max(maxX - minX, 400)
+    const height = Math.max(maxY - minY, 300)
+
+    setViewBox({ x: minX, y: minY, width, height })
+  }, [knowledgeNodes, visibleCategories])
+
+  // 记录上一次的分类，用于检测分类切换
+  const prevCategoriesRef = useRef<Set<KnowledgeCategory> | null>(null)
+
+  // 初始化力导向模拟
+  useEffect(() => {
+    if (knowledgeNodes.length === 0 || relations.length === 0) return
+
+    // 使用固定的中心点
+    const centerX = 600
+    const centerY = 400
+
+    // 过滤可见节点和关系
     const visibleNodeIds = new Set(
       knowledgeNodes.filter(n => visibleCategories.has(n.category)).map(n => n.id)
     )
@@ -101,15 +143,37 @@ export const KnowledgeGraph: React.FC = () => {
       r => visibleNodeIds.has(r.source) && visibleNodeIds.has(r.target)
     )
 
-    // 使用固定的中心点（初始viewBox尺寸）
-    const centerX = 600
-    const centerY = 400
+    // 检测是否是分类切换
+    const isCategoryChange = prevCategoriesRef.current !== null &&
+      (prevCategoriesRef.current.size !== visibleCategories.size ||
+       ![...visibleCategories].every(c => prevCategoriesRef.current!.has(c)))
+    prevCategoriesRef.current = new Set(visibleCategories)
 
-    // 创建力模拟
+    // 如果已有simulation，更新link并根据情况重启
+    if (simulationRef.current) {
+      const linkForce = simulationRef.current.force('link') as d3Force.ForceLink<ForceKnowledgeNode, d3Force.SimulationLinkDatum<ForceKnowledgeNode>>
+      if (linkForce) {
+        linkForce.links(visibleRelations.map(r => ({ source: r.source, target: r.target })))
+      }
+      // 分类切换时用适当的动画
+      if (isCategoryChange) {
+        simulationRef.current.alpha(0.3).restart()
+      }
+      forceUpdate(n => n + 1)
+      return
+    }
+
+    // 检查节点是否已有稳定位置（从context恢复）
+    const hasStablePositions = knowledgeNodes.every(n =>
+      n.x !== undefined && n.y !== undefined &&
+      n.vx !== undefined && n.vy !== undefined
+    )
+
+    // 首次创建simulation - 优化布局
     const simulation = d3Force.forceSimulation<ForceKnowledgeNode>(knowledgeNodes)
       .force('charge', d3Force.forceManyBody<ForceKnowledgeNode>()
         .strength(FORCE_CONFIG.chargeStrength)
-        .distanceMax(400)
+        .distanceMax(FORCE_CONFIG.chargeDistanceMax)
       )
       .force('link', d3Force.forceLink<ForceKnowledgeNode, d3Force.SimulationLinkDatum<ForceKnowledgeNode>>(
         visibleRelations.map(r => ({ source: r.source, target: r.target }))
@@ -118,15 +182,26 @@ export const KnowledgeGraph: React.FC = () => {
         .distance(FORCE_CONFIG.linkDistance)
         .strength(FORCE_CONFIG.linkStrength)
       )
-      .force('center', d3Force.forceCenter(centerX, centerY)
-        .strength(FORCE_CONFIG.centerStrength)
-      )
+      // 只用弱中心力防止飘太远，不用 x/y 约束
+      .force('center', d3Force.forceCenter(centerX, centerY))
       .force('collision', d3Force.forceCollide<ForceKnowledgeNode>()
-        .radius(FORCE_CONFIG.collisionRadius)
-        .strength(0.8)
+        .radius(NODE_RADIUS_MAX + 15)
+        .strength(1)
+        .iterations(FORCE_CONFIG.collisionIterations)
       )
       .alphaDecay(FORCE_CONFIG.alphaDecay)
+      .alphaMin(FORCE_CONFIG.alphaMin)
       .velocityDecay(FORCE_CONFIG.velocityDecay)
+
+    // 如果已有稳定位置，用很低的alpha微调，不会大幅抖动
+    if (hasStablePositions) {
+      simulation.alpha(0.05)
+      // 自动调整视口
+      setTimeout(fitViewToNodes, 100)
+    } else {
+      // 首次布局完成后自动调整视口
+      simulation.on('end', fitViewToNodes)
+    }
 
     simulation.on('tick', () => {
       forceUpdate(n => n + 1)
@@ -136,8 +211,29 @@ export const KnowledgeGraph: React.FC = () => {
 
     return () => {
       simulation.stop()
+      simulationRef.current = null
     }
-  }, [knowledgeNodes.length, relations, visibleCategories])
+  }, [knowledgeNodes, relations, visibleCategories, fitViewToNodes])
+
+  // 计算每个节点的连接数（度数）
+  const nodeDegrees = useMemo(() => {
+    const degrees = new Map<string, number>()
+    knowledgeNodes.forEach(n => degrees.set(n.id, 0))
+    relations.forEach(r => {
+      degrees.set(r.source, (degrees.get(r.source) || 0) + 1)
+      degrees.set(r.target, (degrees.get(r.target) || 0) + 1)
+    })
+    return degrees
+  }, [knowledgeNodes, relations])
+
+  // 根据度数计算节点半径
+  const getNodeRadius = useCallback((nodeId: string): number => {
+    const degree = nodeDegrees.get(nodeId) || 0
+    const maxDegree = Math.max(...nodeDegrees.values(), 1)
+    // 使用平方根缩放，让差异不会太大
+    const ratio = Math.sqrt(degree / maxDegree)
+    return NODE_RADIUS_MIN + ratio * (NODE_RADIUS_MAX - NODE_RADIUS_MIN)
+  }, [nodeDegrees])
 
   // 获取相邻节点
   const getAdjacentNodeIds = useCallback((nodeId: string): Set<string> => {
@@ -246,6 +342,8 @@ export const KnowledgeGraph: React.FC = () => {
       const style = RELATION_STYLES[rel.type] || RELATION_STYLES.related_to
       const isHighlighted = selectedNode && (rel.source === selectedNode.id || rel.target === selectedNode.id)
       const isFiltered = matchedNodeIds && (!matchedNodeIds.has(rel.source) || !matchedNodeIds.has(rel.target))
+      // 当有选中节点时，非高亮的边变灰
+      const isDimmed = selectedNode && !isHighlighted
 
       return (
         <line
@@ -254,9 +352,9 @@ export const KnowledgeGraph: React.FC = () => {
           y1={source.y}
           x2={target.x}
           y2={target.y}
-          stroke={style.stroke}
+          stroke={isDimmed ? '#ddd' : style.stroke}
           strokeWidth={isHighlighted ? 2.5 : 1.5}
-          opacity={isFiltered ? 0.15 : isHighlighted ? 1 : 0.6}
+          opacity={isFiltered ? 0.15 : isDimmed ? 0.2 : isHighlighted ? 1 : 0.6}
         />
       )
     })
@@ -267,12 +365,17 @@ export const KnowledgeGraph: React.FC = () => {
     return knowledgeNodes.map(node => {
       if (!visibleCategories.has(node.category)) return null
 
+      const radius = getNodeRadius(node.id)
       const color = CATEGORY_COLORS[node.category]
       const isSelected = selectedNode?.id === node.id
       const isHovered = hoveredNode === node.id
       const isAdjacent = selectedNode ? getAdjacentNodeIds(selectedNode.id).has(node.id) : false
       const isMatched = matchedNodeIds ? matchedNodeIds.has(node.id) : true
       const isFiltered = matchedNodeIds && !isMatched
+      // 当有选中节点时，非选中且非相邻的节点变灰
+      const isDimmed = selectedNode && !isSelected && !isAdjacent
+      // 根据节点大小调整字体
+      const fontSize = Math.max(10, Math.min(14, radius * 0.5))
 
       return (
         <g
@@ -286,7 +389,7 @@ export const KnowledgeGraph: React.FC = () => {
           {/* 选中/高亮外圈 */}
           {(isSelected || isAdjacent) && (
             <circle
-              r={NODE_RADIUS + 6}
+              r={radius + 6}
               fill="none"
               stroke={color}
               strokeWidth={3}
@@ -296,13 +399,13 @@ export const KnowledgeGraph: React.FC = () => {
 
           {/* 主圆形 */}
           <circle
-            r={NODE_RADIUS}
-            fill={isFiltered ? `${color}40` : color}
-            stroke="#fff"
+            r={radius}
+            fill={isDimmed ? '#ccc' : isFiltered ? `${color}40` : color}
+            stroke={isDimmed ? '#999' : '#fff'}
             strokeWidth={2}
             style={{
-              filter: isHovered ? `drop-shadow(0 0 8px ${color})` : 'none',
-              opacity: isFiltered ? 0.4 : 1,
+              filter: isHovered && !isDimmed ? `drop-shadow(0 0 8px ${color})` : 'none',
+              opacity: isDimmed ? 0.3 : isFiltered ? 0.4 : 1,
               transition: 'filter 0.2s, opacity 0.2s',
             }}
           />
@@ -311,17 +414,17 @@ export const KnowledgeGraph: React.FC = () => {
           <text
             y={4}
             textAnchor="middle"
-            fill="#fff"
-            fontSize={11}
+            fill={isDimmed ? '#999' : '#fff'}
+            fontSize={fontSize}
             fontWeight={600}
-            style={{ pointerEvents: 'none', userSelect: 'none' }}
+            style={{ pointerEvents: 'none', userSelect: 'none', opacity: isDimmed ? 0.5 : 1 }}
           >
             {node.name.length > 5 ? node.name.slice(0, 4) + '..' : node.name}
           </text>
 
           {/* Hover Tooltip */}
           {isHovered && (
-            <g transform="translate(0, -40)">
+            <g transform={`translate(0, ${-radius - 20})`}>
               <rect
                 x={-60}
                 y={-12}
@@ -425,13 +528,14 @@ export const KnowledgeGraph: React.FC = () => {
           viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
           style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
         >
-          {/* 背景 */}
+          {/* 背景 - 点击取消选中 */}
           <rect
             x={viewBox.x - 1000}
             y={viewBox.y - 1000}
             width={viewBox.width + 2000}
             height={viewBox.height + 2000}
             fill="#fafafa"
+            onClick={() => setSelectedNode(null)}
           />
 
           {/* 边 */}

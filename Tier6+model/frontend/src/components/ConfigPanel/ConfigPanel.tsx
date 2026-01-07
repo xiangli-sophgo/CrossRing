@@ -77,6 +77,11 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onTrafficResultChange,
   // 部署分析结果
   onAnalysisDataChange,
+  // 历史记录
+  analysisHistory,
+  onAddToHistory,
+  onDeleteHistory,
+  onClearHistory,
 }) => {
   void _layoutType
   void _onLayoutTypeChange
@@ -276,7 +281,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     if (!primaryInterconnect) return
 
     const newBandwidth = primaryInterconnect.intra_node_bandwidth_gbps
-    const newLatency = primaryInterconnect.intra_node_latency_us * 1000 // us -> ns
+    const newLatency = primaryInterconnect.intra_node_latency_us // us
 
     // 更新层级默认参数和手动连接
     if (onManualConnectionConfigChange) {
@@ -305,7 +310,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     }
 
     // 提示用户
-    message.info(`已根据 ${primaryInterconnect.interconnect_type} 更新 Board 层连接参数: ${newBandwidth} Gbps, ${newLatency} ns`)
+    message.info(`已根据 ${primaryInterconnect.interconnect_type} 更新 Board 层连接参数: ${newBandwidth} GB/s, ${newLatency} us`)
   }, [manualConnectionConfig, onManualConnectionConfigChange])
 
   // 层级配置Tab key
@@ -764,11 +769,13 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                       const currentTflops = chip.compute_tflops_fp16 ?? presetConfig?.compute_tflops_fp16 ?? 100
                       const currentMemory = chip.memory_gb ?? presetConfig?.memory_gb ?? 32
                       const currentBandwidth = chip.memory_bandwidth_gbps ?? presetConfig?.memory_bandwidth_gbps ?? 1000
+                      const currentBwUtil = chip.memory_bandwidth_utilization ?? presetConfig?.memory_bandwidth_utilization ?? 0.9
                       // 检查参数是否被修改过
                       const isModified = presetConfig && (
                         (chip.compute_tflops_fp16 !== undefined && chip.compute_tflops_fp16 !== presetConfig.compute_tflops_fp16) ||
                         (chip.memory_gb !== undefined && chip.memory_gb !== presetConfig.memory_gb) ||
-                        (chip.memory_bandwidth_gbps !== undefined && chip.memory_bandwidth_gbps !== presetConfig.memory_bandwidth_gbps)
+                        (chip.memory_bandwidth_gbps !== undefined && chip.memory_bandwidth_gbps !== presetConfig.memory_bandwidth_gbps) ||
+                        (chip.memory_bandwidth_utilization !== undefined && chip.memory_bandwidth_utilization !== presetConfig.memory_bandwidth_utilization)
                       )
                       const isCustomPreset = chipPresetList.find(c => c.id === chip.preset_id)?.isCustom
                       return (
@@ -813,9 +820,9 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                               options={[
                                 ...chipPresetList.map(c => ({
                                   value: c.id,
-                                  label: c.isCustom ? `⭐ ${c.name}` : c.name,
+                                  label: c.name,
                                 })),
-                                { value: 'custom', label: '➕ 自定义...' },
+                                { value: 'custom', label: '自定义...' },
                               ]}
                             />
                             <Button
@@ -832,6 +839,25 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                               disabled={board.chips.length <= 1}
                             />
                           </div>
+                          {/* 自定义类型时显示名称输入 */}
+                          {!chip.preset_id && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                              <Text style={{ fontSize: 12, width: 60, flexShrink: 0 }}>名称:</Text>
+                              <Input
+                                size="small"
+                                placeholder="芯片名称"
+                                value={chip.name}
+                                onChange={(e) => {
+                                  const newBoards = [...rackConfig.boards]
+                                  const newChips = [...newBoards[boardIndex].chips]
+                                  newChips[chipIndex] = { ...newChips[chipIndex], name: e.target.value }
+                                  newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                  setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                }}
+                                style={{ flex: 1 }}
+                              />
+                            </div>
+                          )}
                           {/* 数量 */}
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                             <Text style={{ fontSize: 12, width: 60, flexShrink: 0 }}>数量:</Text>
@@ -853,26 +879,10 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                           </div>
                           {/* 第二行：芯片参数（可编辑） */}
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {!chip.preset_id && (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <Text style={{ fontSize: 12, width: 60, flexShrink: 0 }}>名称:</Text>
-                                <Input
-                                  size="small"
-                                  placeholder="芯片名称"
-                                  value={chip.name}
-                                  onChange={(e) => {
-                                    const newBoards = [...rackConfig.boards]
-                                    const newChips = [...newBoards[boardIndex].chips]
-                                    newChips[chipIndex] = { ...newChips[chipIndex], name: e.target.value }
-                                    newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
-                                    setRackConfig(prev => ({ ...prev, boards: newBoards }))
-                                  }}
-                                  style={{ flex: 1 }}
-                                />
-                              </div>
-                            )}
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <Text style={{ fontSize: 12, width: 60, flexShrink: 0 }}>算力:</Text>
+                              <Tooltip title="FP16 精度的理论峰值算力">
+                                <Text style={{ fontSize: 12, width: 60, flexShrink: 0, cursor: 'help' }}>算力:</Text>
+                              </Tooltip>
                               <InputNumber
                                 size="small"
                                 min={1}
@@ -889,7 +899,9 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                               />
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <Text style={{ fontSize: 12, width: 60, flexShrink: 0 }}>显存:</Text>
+                              <Tooltip title="DRAM 存储容量">
+                                <Text style={{ fontSize: 12, width: 60, flexShrink: 0, cursor: 'help' }}>显存:</Text>
+                              </Tooltip>
                               <InputNumber
                                 size="small"
                                 min={1}
@@ -906,7 +918,9 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                               />
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <Text style={{ fontSize: 12, width: 60, flexShrink: 0 }}>带宽:</Text>
+                              <Tooltip title="DRAM 理论带宽">
+                                <Text style={{ fontSize: 12, width: 60, flexShrink: 0, cursor: 'help' }}>带宽:</Text>
+                              </Tooltip>
                               <InputNumber
                                 size="small"
                                 min={1}
@@ -920,6 +934,28 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                                 }}
                                 style={{ flex: 1 }}
                                 addonAfter="GB/s"
+                              />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <Tooltip title="显存带宽的实际利用率，通常为0.8-0.95">
+                                <Text style={{ fontSize: 12, width: 70, flexShrink: 0, cursor: 'help' }}>带宽利用率:</Text>
+                              </Tooltip>
+                              <InputNumber
+                                size="small"
+                                min={0.1}
+                                max={1}
+                                step={0.01}
+                                value={currentBwUtil}
+                                onChange={(v) => {
+                                  const newBoards = [...rackConfig.boards]
+                                  const newChips = [...newBoards[boardIndex].chips]
+                                  newChips[chipIndex] = { ...newChips[chipIndex], memory_bandwidth_utilization: v || undefined }
+                                  newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                  setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                }}
+                                style={{ flex: 1 }}
+                                formatter={(value) => value ? `${(value * 100).toFixed(0)}%` : ''}
+                                parser={(value) => value ? parseFloat(value.replace('%', '')) / 100 : 0.9}
                               />
                             </div>
                           </div>
@@ -939,6 +975,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                                       compute_tflops_fp16: undefined,
                                       memory_gb: undefined,
                                       memory_bandwidth_gbps: undefined,
+                                      memory_bandwidth_utilization: undefined,
                                     }
                                     newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
                                     setRackConfig(prev => ({ ...prev, boards: newBoards }))
@@ -964,6 +1001,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                                         compute_tflops_fp16: currentTflops,
                                         memory_gb: currentMemory,
                                         memory_bandwidth_gbps: currentBandwidth,
+                                        memory_bandwidth_utilization: currentBwUtil,
                                       }
                                       saveCustomChipPreset(presetId, config)
                                       // 更新当前芯片使用新预设
@@ -976,6 +1014,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                                         compute_tflops_fp16: undefined,
                                         memory_gb: undefined,
                                         memory_bandwidth_gbps: undefined,
+                                        memory_bandwidth_utilization: undefined,
                                       }
                                       newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
                                       setRackConfig(prev => ({ ...prev, boards: newBoards }))
@@ -1002,6 +1041,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                                       compute_tflops_fp16: currentTflops,
                                       memory_gb: currentMemory,
                                       memory_bandwidth_gbps: currentBandwidth,
+                                      memory_bandwidth_utilization: currentBwUtil,
                                     }
                                     newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
                                     setRackConfig(prev => ({ ...prev, boards: newBoards }))
@@ -1305,6 +1345,10 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           rackConfig={rackConfig}
           podCount={podCount}
           racksPerPod={racksPerPod}
+          history={analysisHistory}
+          onAddToHistory={onAddToHistory}
+          onDeleteHistory={onDeleteHistory}
+          onClearHistory={onClearHistory}
         />
       </div>
 

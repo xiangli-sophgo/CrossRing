@@ -389,7 +389,7 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
               style={{ width: 80 }}
               placeholder="未设置"
             />
-            <Text style={{ fontSize: 11, color: '#999' }}>Gbps</Text>
+            <Text style={{ fontSize: 11, color: '#999' }}>GB/s</Text>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <Text style={{ fontSize: 12 }}>延迟:</Text>
@@ -401,7 +401,7 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
               style={{ width: 80 }}
               placeholder="未设置"
             />
-            <Text style={{ fontSize: 11, color: '#999' }}>ns</Text>
+            <Text style={{ fontSize: 11, color: '#999' }}>us</Text>
           </div>
         </div>
       </div>
@@ -613,7 +613,7 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
                           value={displayBandwidth}
                           onChange={(v) => updateManualConnectionParams(conn.id, v ?? undefined, conn.latency)}
                           style={{ width: 80, color: useDefaultBandwidth ? '#999' : undefined }}
-                          placeholder="Gbps"
+                          placeholder="GB/s"
                         />
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -624,7 +624,7 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
                           value={displayLatency}
                           onChange={(v) => updateManualConnectionParams(conn.id, conn.bandwidth, v ?? undefined)}
                           style={{ width: 80, color: useDefaultLatency ? '#999' : undefined }}
-                          placeholder="ns"
+                          placeholder="us"
                         />
                       </div>
                     </div>
@@ -701,7 +701,7 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
                           value={displayBandwidth}
                           onChange={(v) => onUpdateConnectionParams?.(conn.source, conn.target, v ?? undefined, conn.latency)}
                           style={{ width: 80, color: useDefaultBandwidth ? '#999' : undefined }}
-                          placeholder="Gbps"
+                          placeholder="GB/s"
                         />
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -712,7 +712,7 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
                           value={displayLatency}
                           onChange={(v) => onUpdateConnectionParams?.(conn.source, conn.target, conn.bandwidth, v ?? undefined)}
                           style={{ width: 80, color: useDefaultLatency ? '#999' : undefined }}
-                          placeholder="ns"
+                          placeholder="us"
                         />
                       </div>
                     </div>

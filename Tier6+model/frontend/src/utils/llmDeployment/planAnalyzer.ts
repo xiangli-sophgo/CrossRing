@@ -50,6 +50,10 @@ export function generatePlanId(parallelism: ParallelismStrategy): string {
   if (parallelism.pp > 1) parts.push(`pp${parallelism.pp}`);
   if (parallelism.ep > 1) parts.push(`ep${parallelism.ep}`);
   if (parallelism.sp > 1) parts.push(`sp${parallelism.sp}`);
+  // MoE 专家内张量并行 (当与 Attention TP 不同时显示)
+  if (parallelism.moe_tp !== undefined && parallelism.moe_tp > 1 && parallelism.moe_tp !== parallelism.tp) {
+    parts.push(`moe_tp${parallelism.moe_tp}`);
+  }
   // 如果全是 1，显示 single
   return parts.length > 0 ? parts.join('_') : 'single';
 }
@@ -99,9 +103,41 @@ export function checkFeasibility(
         reason: `EP(${parallelism.ep}) 无法整除 experts(${model.moe_config.num_experts})`,
       };
     }
+    // MoE TP: 每个专家内 FFN 的 intermediate_size 必须能被 moe_tp 整除
+    const moeTp = parallelism.moe_tp ?? 1;
+    if (moeTp > 1 && model.moe_config.expert_intermediate_size) {
+      if (model.moe_config.expert_intermediate_size % moeTp !== 0) {
+        return {
+          isFeasible: false,
+          reason: `MOE_TP(${moeTp}) 无法整除 expert_intermediate_size(${model.moe_config.expert_intermediate_size})`,
+        };
+      }
+    }
   }
 
-  // 5. 显存检查
+  // 5. MLA: 独立并行度检查 (DeepSeek V3/R1)
+  if (model.attention_type === 'mla' && model.mla_config) {
+    const mlaTp = model.mla_config.mla_tp ?? parallelism.tp;  // 默认使用全局 tp
+    const mlaDp = model.mla_config.mla_dp ?? parallelism.dp;  // 默认使用全局 dp
+
+    // 5.1 芯片数一致性: mla_tp * mla_dp = tp * dp
+    if (mlaTp * mlaDp !== parallelism.tp * parallelism.dp) {
+      return {
+        isFeasible: false,
+        reason: `MLA 芯片数不一致: mla_tp(${mlaTp}) × mla_dp(${mlaDp}) ≠ tp(${parallelism.tp}) × dp(${parallelism.dp})`,
+      };
+    }
+
+    // 5.2 MLA TP 必须整除 attention_heads
+    if (model.num_attention_heads % mlaTp !== 0) {
+      return {
+        isFeasible: false,
+        reason: `MLA_TP(${mlaTp}) 无法整除 attention_heads(${model.num_attention_heads})`,
+      };
+    }
+  }
+
+  // 6. 显存检查
   const memoryAnalysis = analyzeMemory(
     model,
     inference,
@@ -129,6 +165,26 @@ export function checkFeasibility(
   // 7. TP 应在节点内 (推荐但不强制)
   if (parallelism.tp > hardware.node.chips_per_node) {
     // 警告但不阻止
+  }
+
+  // 8. SLO 约束检查
+  const latency = analyzeLatency(model, inference, parallelism, hardware);
+
+  // Decode SLO: TPS per batch ≥ 10 (即 DecodeTime ≤ 100ms)
+  if (latency.decode_per_token_latency_ms > 100) {
+    return {
+      isFeasible: false,
+      reason: `Decode 延迟 ${latency.decode_per_token_latency_ms.toFixed(1)}ms > 100ms (TPS per batch < 10)`,
+    };
+  }
+
+  // Prefill SLO: FTL 根据输入长度约束 (4K→3s, 8K+→5s)
+  const fltLimitMs = inference.input_seq_length <= 4096 ? 3000 : 5000;
+  if (latency.prefill_total_latency_ms > fltLimitMs) {
+    return {
+      isFeasible: false,
+      reason: `Prefill 延迟 ${latency.prefill_total_latency_ms.toFixed(0)}ms > ${fltLimitMs}ms (FTL SLO)`,
+    };
   }
 
   return { isFeasible: true };

@@ -8,7 +8,7 @@ import { ChartsPanel } from './components/ConfigPanel/DeploymentAnalysis/charts'
 import { AnalysisResultDisplay } from './components/ConfigPanel/DeploymentAnalysis'
 import { WorkbenchProvider, useWorkbench } from './contexts/WorkbenchContext'
 import { KnowledgeGraph, CATEGORY_COLORS, CATEGORY_NAMES, ForceKnowledgeNode } from './components/KnowledgeGraph'
-import knowledgeData from './data/knowledge-graph.json'
+import knowledgeData from './data/knowledge-graph'
 
 const { Header, Sider, Content } = Layout
 const { Title } = Typography
@@ -233,7 +233,8 @@ const WorkbenchContent: React.FC = () => {
           }}
         >
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-            {ui.viewMode === 'knowledge' ? (
+            {/* 知识网络模式且选中节点时，隐藏配置面板 */}
+            {ui.viewMode === 'knowledge' && ui.knowledgeSelectedNode ? null : ui.viewMode === 'knowledge' ? (
               <Collapse
                 defaultActiveKey={['config']}
                 size="small"
@@ -265,6 +266,10 @@ const WorkbenchContent: React.FC = () => {
                       focusedLevel={ui.focusedLevel}
                       onTrafficResultChange={analysis.setTrafficResult}
                       onAnalysisDataChange={analysis.setDeploymentAnalysisData}
+                      analysisHistory={analysis.analysisHistory}
+                      onAddToHistory={analysis.handleAddToHistory}
+                      onDeleteHistory={analysis.handleDeleteHistory}
+                      onClearHistory={analysis.handleClearHistory}
                     />
                   ),
                 }]}
@@ -294,6 +299,10 @@ const WorkbenchContent: React.FC = () => {
                 focusedLevel={ui.focusedLevel}
                 onTrafficResultChange={analysis.setTrafficResult}
                 onAnalysisDataChange={analysis.setDeploymentAnalysisData}
+                analysisHistory={analysis.analysisHistory}
+                onAddToHistory={analysis.handleAddToHistory}
+                onDeleteHistory={analysis.handleDeleteHistory}
+                onClearHistory={analysis.handleClearHistory}
               />
             )}
           </div>
@@ -308,16 +317,11 @@ const WorkbenchContent: React.FC = () => {
               if (r.target === node.id) relatedNodeIds.add(r.source)
             })
             const relatedNodes = knowledgeData.nodes.filter(n => relatedNodeIds.has(n.id))
-            // 解析来源中的URL
-            const renderSource = (source: string) => {
-              const urlMatch = source.match(/(https?:\/\/[^\s]+)/g)
-              const doiMatch = source.match(/arXiv:(\d+\.\d+)/i)
+            // 渲染来源链接（使用节点的url字段）
+            const renderSource = (source: string, url?: string) => {
               const linkStyle: React.CSSProperties = { color: '#1677ff', cursor: 'pointer', textDecoration: 'underline' }
-              if (urlMatch) {
-                return <a href={urlMatch[0]} target="_blank" rel="noopener noreferrer" style={linkStyle}>{source}</a>
-              }
-              if (doiMatch) {
-                return <a href={`https://arxiv.org/abs/${doiMatch[1]}`} target="_blank" rel="noopener noreferrer" style={linkStyle}>{source}</a>
+              if (url) {
+                return <a href={url} target="_blank" rel="noopener noreferrer" style={linkStyle}>{source}</a>
               }
               return source
             }
@@ -345,13 +349,7 @@ const WorkbenchContent: React.FC = () => {
                 {node.source && (
                   <div style={{ marginBottom: 8 }}>
                     <div style={{ fontWeight: 500, marginBottom: 4 }}>来源</div>
-                    <div style={{ fontSize: 12, color: '#666' }}>{renderSource(node.source)}</div>
-                  </div>
-                )}
-                {node.notes && (
-                  <div style={{ marginBottom: 8 }}>
-                    <div style={{ fontWeight: 500, marginBottom: 4 }}>备注</div>
-                    <div style={{ fontSize: 12, color: '#666' }}>{node.notes}</div>
+                    <div style={{ fontSize: 12, color: '#666' }}>{renderSource(node.source, (node as any).url)}</div>
                   </div>
                 )}
                 {relatedNodes.length > 0 && (
@@ -409,7 +407,7 @@ const WorkbenchContent: React.FC = () => {
                         {ui.selectedNode.connections.map((conn, idx) => (
                           <div key={idx} style={{ fontSize: 12, padding: '2px 0', borderBottom: '1px solid #f0f0f0' }}>
                             {conn.label}
-                            {conn.bandwidth && <span style={{ color: '#999', marginLeft: 8 }}>{conn.bandwidth}Gbps</span>}
+                            {conn.bandwidth && <span style={{ color: '#999', marginLeft: 8 }}>{conn.bandwidth} GB/s</span>}
                           </div>
                         ))}
                       </div>
@@ -438,10 +436,10 @@ const WorkbenchContent: React.FC = () => {
                   <span style={{ color: '#999', marginLeft: 4, fontSize: 12 }}>({ui.selectedLink.targetType.toUpperCase()})</span>
                 </Descriptions.Item>
                 {ui.selectedLink.bandwidth && (
-                  <Descriptions.Item label="带宽">{ui.selectedLink.bandwidth} Gbps</Descriptions.Item>
+                  <Descriptions.Item label="带宽">{ui.selectedLink.bandwidth} GB/s</Descriptions.Item>
                 )}
                 {ui.selectedLink.latency && (
-                  <Descriptions.Item label="延迟">{ui.selectedLink.latency} ns</Descriptions.Item>
+                  <Descriptions.Item label="延迟">{ui.selectedLink.latency} us</Descriptions.Item>
                 )}
                 <Descriptions.Item label="类型">
                   <Tag color={ui.selectedLink.isManual ? 'orange' : 'default'}>

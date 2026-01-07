@@ -138,11 +138,11 @@ function extractBandwidthFromConnections(connections: ConnectionConfig[]): {
       if (conn.type === 'intra') {
         // 节点内连接 (Board内或Chip间)
         intraBandwidths.push(conn.bandwidth)
-        if (conn.latency) intraLatencies.push(conn.latency / 1000) // ns -> us
+        if (conn.latency) intraLatencies.push(conn.latency) // us
       } else if (conn.type === 'inter') {
         // 节点间连接 (Rack间或Pod间)
         interBandwidths.push(conn.bandwidth)
-        if (conn.latency) interLatencies.push(conn.latency / 1000) // ns -> us
+        if (conn.latency) interLatencies.push(conn.latency) // us
       }
     }
   }

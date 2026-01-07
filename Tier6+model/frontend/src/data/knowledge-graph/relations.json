@@ -1,0 +1,734 @@
+[
+  {
+    "source": "tp",
+    "target": "sp",
+    "type": "complements",
+    "label": "配合使用"
+  },
+  {
+    "source": "tp",
+    "target": "dp",
+    "type": "combines_with",
+    "label": "组合使用"
+  },
+  {
+    "source": "tp",
+    "target": "pp",
+    "type": "combines_with",
+    "label": "组合使用"
+  },
+  {
+    "source": "ep",
+    "target": "moe",
+    "type": "enables",
+    "label": "支持"
+  },
+  {
+    "source": "dp",
+    "target": "allreduce",
+    "type": "uses",
+    "label": "梯度同步"
+  },
+  {
+    "source": "tp",
+    "target": "allreduce",
+    "type": "uses",
+    "label": "激活同步"
+  },
+  {
+    "source": "tp",
+    "target": "allgather",
+    "type": "uses",
+    "label": "激活收集"
+  },
+  {
+    "source": "ep",
+    "target": "alltoall",
+    "type": "uses",
+    "label": "专家路由"
+  },
+  {
+    "source": "scale_up",
+    "target": "nvlink",
+    "type": "implemented_by",
+    "label": "典型实现"
+  },
+  {
+    "source": "scale_out",
+    "target": "infiniband",
+    "type": "implemented_by",
+    "label": "典型实现"
+  },
+  {
+    "source": "scale_out",
+    "target": "ethernet",
+    "type": "implemented_by",
+    "label": "典型实现"
+  },
+  {
+    "source": "nvlink",
+    "target": "nvswitch",
+    "type": "connects_via",
+    "label": "交换芯片"
+  },
+  {
+    "source": "nvlink",
+    "target": "gpu",
+    "type": "connects",
+    "label": "连接"
+  },
+  {
+    "source": "pcie",
+    "target": "cxl",
+    "type": "basis_for",
+    "label": "物理层基础"
+  },
+  {
+    "source": "infiniband",
+    "target": "rdma",
+    "type": "supports",
+    "label": "原生支持"
+  },
+  {
+    "source": "roce",
+    "target": "rdma",
+    "type": "implements",
+    "label": "以太网实现"
+  },
+  {
+    "source": "roce",
+    "target": "ethernet",
+    "type": "runs_on",
+    "label": "运行于"
+  },
+  {
+    "source": "ethernet",
+    "target": "pfc",
+    "type": "uses",
+    "label": "无损流控"
+  },
+  {
+    "source": "torus",
+    "target": "mesh",
+    "type": "extends",
+    "label": "首尾相连"
+  },
+  {
+    "source": "fat_tree",
+    "target": "pod",
+    "type": "used_in",
+    "label": "数据中心"
+  },
+  {
+    "source": "ring",
+    "target": "allreduce",
+    "type": "optimizes",
+    "label": "Ring AllReduce"
+  },
+  {
+    "source": "dragonfly",
+    "target": "fat_tree",
+    "type": "alternative_to",
+    "label": "替代方案"
+  },
+  {
+    "source": "allreduce",
+    "target": "reduce_scatter",
+    "type": "decomposes_to",
+    "label": "分解"
+  },
+  {
+    "source": "allreduce",
+    "target": "allgather",
+    "type": "decomposes_to",
+    "label": "分解"
+  },
+  {
+    "source": "reduce",
+    "target": "allreduce",
+    "type": "part_of",
+    "label": "组成"
+  },
+  {
+    "source": "broadcast",
+    "target": "allreduce",
+    "type": "part_of",
+    "label": "组成"
+  },
+  {
+    "source": "gather",
+    "target": "scatter",
+    "type": "inverse_of",
+    "label": "逆操作"
+  },
+  {
+    "source": "transformer",
+    "target": "attention",
+    "type": "contains",
+    "label": "核心组件"
+  },
+  {
+    "source": "transformer",
+    "target": "ffn",
+    "type": "contains",
+    "label": "核心组件"
+  },
+  {
+    "source": "mha",
+    "target": "attention",
+    "type": "implements",
+    "label": "多头实现"
+  },
+  {
+    "source": "mqa",
+    "target": "mha",
+    "type": "variant_of",
+    "label": "变体"
+  },
+  {
+    "source": "gqa",
+    "target": "mha",
+    "type": "variant_of",
+    "label": "变体"
+  },
+  {
+    "source": "mla",
+    "target": "mha",
+    "type": "variant_of",
+    "label": "变体"
+  },
+  {
+    "source": "moe",
+    "target": "ffn",
+    "type": "replaces",
+    "label": "替代FFN"
+  },
+  {
+    "source": "kv_cache",
+    "target": "attention",
+    "type": "caches",
+    "label": "缓存KV"
+  },
+  {
+    "source": "kv_cache",
+    "target": "decode",
+    "type": "accelerates",
+    "label": "加速"
+  },
+  {
+    "source": "rope",
+    "target": "attention",
+    "type": "enhances",
+    "label": "位置编码"
+  },
+  {
+    "source": "flash_attention",
+    "target": "attention",
+    "type": "optimizes",
+    "label": "IO优化"
+  },
+  {
+    "source": "flash_attention",
+    "target": "hbm",
+    "type": "reduces_access",
+    "label": "减少访问"
+  },
+  {
+    "source": "paged_attention",
+    "target": "kv_cache",
+    "type": "manages",
+    "label": "内存管理"
+  },
+  {
+    "source": "speculative_decoding",
+    "target": "decode",
+    "type": "accelerates",
+    "label": "加速"
+  },
+  {
+    "source": "continuous_batching",
+    "target": "decode",
+    "type": "optimizes",
+    "label": "批处理优化"
+  },
+  {
+    "source": "quantization",
+    "target": "权重",
+    "type": "compresses",
+    "label": "压缩"
+  },
+  {
+    "source": "quantization",
+    "target": "激活",
+    "type": "compresses",
+    "label": "压缩"
+  },
+  {
+    "source": "zero",
+    "target": "dp",
+    "type": "optimizes",
+    "label": "内存优化"
+  },
+  {
+    "source": "gradient_checkpointing",
+    "target": "激活",
+    "type": "trades_off",
+    "label": "内存换计算"
+  },
+  {
+    "source": "hbm",
+    "target": "gpu",
+    "type": "memory_of",
+    "label": "显存"
+  },
+  {
+    "source": "hbm",
+    "target": "npu",
+    "type": "memory_of",
+    "label": "显存"
+  },
+  {
+    "source": "tpu",
+    "target": "systolic_array",
+    "type": "uses",
+    "label": "核心架构"
+  },
+  {
+    "source": "roofline",
+    "target": "hbm",
+    "type": "analyzes",
+    "label": "带宽分析"
+  },
+  {
+    "source": "roofline",
+    "target": "flops",
+    "type": "analyzes",
+    "label": "算力分析"
+  },
+  {
+    "source": "nccl",
+    "target": "allreduce",
+    "type": "implements",
+    "label": "实现"
+  },
+  {
+    "source": "nccl",
+    "target": "nvlink",
+    "type": "optimized_for",
+    "label": "优化"
+  },
+  {
+    "source": "nccl",
+    "target": "gpu",
+    "type": "runs_on",
+    "label": "运行于"
+  },
+  {
+    "source": "gloo",
+    "target": "mpi",
+    "type": "similar_to",
+    "label": "类似接口"
+  },
+  {
+    "source": "rdma",
+    "target": "gpudirect",
+    "type": "enables",
+    "label": "支持"
+  },
+  {
+    "source": "gpudirect",
+    "target": "gpu",
+    "type": "accelerates",
+    "label": "加速通信"
+  },
+  {
+    "source": "ecc",
+    "target": "汉明码",
+    "type": "based_on",
+    "label": "基础算法"
+  },
+  {
+    "source": "fec",
+    "target": "ecc",
+    "type": "type_of",
+    "label": "前向纠错"
+  },
+  {
+    "source": "pfc",
+    "target": "cbfc",
+    "type": "similar_to",
+    "label": "流控机制"
+  },
+  {
+    "source": "fecn",
+    "target": "pfc",
+    "type": "works_with",
+    "label": "配合"
+  },
+  {
+    "source": "prefill",
+    "target": "decode",
+    "type": "precedes",
+    "label": "阶段顺序"
+  },
+  {
+    "source": "prefill",
+    "target": "kv_cache",
+    "type": "builds",
+    "label": "构建缓存"
+  },
+  {
+    "source": "decode",
+    "target": "token",
+    "type": "generates",
+    "label": "生成"
+  },
+  {
+    "source": "decode",
+    "target": "tps",
+    "type": "measured_by",
+    "label": "性能指标"
+  },
+  {
+    "source": "gva",
+    "target": "mmu",
+    "type": "translated_by",
+    "label": "地址转换"
+  },
+  {
+    "source": "spa",
+    "target": "npa",
+    "type": "maps_to",
+    "label": "地址映射"
+  },
+  {
+    "source": "mmu",
+    "target": "虚拟化",
+    "type": "enables",
+    "label": "支持"
+  },
+  {
+    "source": "pod",
+    "target": "rack",
+    "type": "contains",
+    "label": "包含"
+  },
+  {
+    "source": "rack",
+    "target": "server",
+    "type": "contains",
+    "label": "包含"
+  },
+  {
+    "source": "server",
+    "target": "gpu",
+    "type": "contains",
+    "label": "包含"
+  },
+  {
+    "source": "1u_2u_4u",
+    "target": "rack",
+    "type": "unit_of",
+    "label": "高度单位"
+  },
+  {
+    "source": "cbfc",
+    "target": "rdma",
+    "type": "used_by",
+    "label": "流控"
+  },
+  {
+    "source": "cbfc",
+    "target": "pcie",
+    "type": "used_by",
+    "label": "流控"
+  },
+  {
+    "source": "icrc",
+    "target": "infiniband",
+    "type": "used_by",
+    "label": "校验"
+  },
+  {
+    "source": "icrc",
+    "target": "roce",
+    "type": "used_by",
+    "label": "校验"
+  },
+  {
+    "source": "psn",
+    "target": "infiniband",
+    "type": "used_by",
+    "label": "序列号"
+  },
+  {
+    "source": "内存语义",
+    "target": "rdma",
+    "type": "feature_of",
+    "label": "核心特性"
+  },
+  {
+    "source": "消息语义",
+    "target": "mpi",
+    "type": "feature_of",
+    "label": "核心特性"
+  },
+  {
+    "source": "ras",
+    "target": "ecc",
+    "type": "includes",
+    "label": "包含技术"
+  },
+  {
+    "source": "ras",
+    "target": "server",
+    "type": "requirement_of",
+    "label": "设计要求"
+  },
+  {
+    "source": "内存池化",
+    "target": "cxl",
+    "type": "enabled_by",
+    "label": "CXL支持"
+  },
+  {
+    "source": "超节点",
+    "target": "pod",
+    "type": "type_of",
+    "label": "类型"
+  },
+  {
+    "source": "超节点",
+    "target": "nvlink",
+    "type": "uses",
+    "label": "内部互联"
+  },
+  {
+    "source": "同步访问",
+    "target": "异步访问",
+    "type": "contrast_with",
+    "label": "对比"
+  },
+  {
+    "source": "pcs",
+    "target": "pam4",
+    "type": "implements",
+    "label": "编码实现"
+  },
+  {
+    "source": "pcs",
+    "target": "nrz",
+    "type": "implements",
+    "label": "编码实现"
+  },
+  {
+    "source": "pcs",
+    "target": "ethernet",
+    "type": "part_of",
+    "label": "物理层"
+  },
+  {
+    "source": "pam4",
+    "target": "nrz",
+    "type": "succeeds",
+    "label": "取代"
+  },
+  {
+    "source": "网络隔离",
+    "target": "pod",
+    "type": "used_in",
+    "label": "应用场景"
+  },
+  {
+    "source": "go_back_n",
+    "target": "go_back_0",
+    "type": "extends",
+    "label": "扩展"
+  },
+  {
+    "source": "post方案_pcie",
+    "target": "pcie",
+    "type": "feature_of",
+    "label": "事务类型"
+  },
+  {
+    "source": "post方案_pcie",
+    "target": "事务",
+    "type": "type_of",
+    "label": "事务类型"
+  },
+  {
+    "source": "通信原语",
+    "target": "allreduce",
+    "type": "includes",
+    "label": "包含"
+  },
+  {
+    "source": "通信原语",
+    "target": "allgather",
+    "type": "includes",
+    "label": "包含"
+  },
+  {
+    "source": "通信原语",
+    "target": "alltoall",
+    "type": "includes",
+    "label": "包含"
+  },
+  {
+    "source": "通信原语",
+    "target": "broadcast",
+    "type": "includes",
+    "label": "包含"
+  },
+  {
+    "source": "mpi",
+    "target": "通信原语",
+    "type": "defines",
+    "label": "定义标准"
+  },
+  {
+    "source": "transformer",
+    "target": "注意力机制",
+    "type": "based_on",
+    "label": "基于"
+  },
+  {
+    "source": "attention",
+    "target": "注意力机制",
+    "type": "implements",
+    "label": "实现"
+  },
+  {
+    "source": "mqa",
+    "target": "kv_cache",
+    "type": "reduces",
+    "label": "减少内存"
+  },
+  {
+    "source": "gqa",
+    "target": "kv_cache",
+    "type": "reduces",
+    "label": "减少内存"
+  },
+  {
+    "source": "mla",
+    "target": "kv_cache",
+    "type": "reduces",
+    "label": "大幅减少"
+  },
+  {
+    "source": "kv_cache",
+    "target": "token",
+    "type": "stores_for",
+    "label": "存储"
+  },
+  {
+    "source": "fp4_int8",
+    "target": "quantization",
+    "type": "format_for",
+    "label": "量化格式"
+  },
+  {
+    "source": "urpc_华为",
+    "target": "rdma",
+    "type": "uses",
+    "label": "传输层"
+  },
+  {
+    "source": "crossbar",
+    "target": "nvswitch",
+    "type": "used_in",
+    "label": "内部结构"
+  },
+  {
+    "source": "upi",
+    "target": "server",
+    "type": "connects_in",
+    "label": "多路互联"
+  },
+  {
+    "source": "infinity_fabric",
+    "target": "gpu",
+    "type": "connects",
+    "label": "AMD互联"
+  },
+  {
+    "source": "crc",
+    "target": "icrc",
+    "type": "basis_for",
+    "label": "基础"
+  },
+  {
+    "source": "ethernet",
+    "target": "crc",
+    "type": "uses",
+    "label": "帧校验"
+  },
+  {
+    "source": "crc",
+    "target": "ecc",
+    "type": "complements",
+    "label": "检错vs纠错"
+  },
+  {
+    "source": "权重",
+    "target": "tp",
+    "type": "partitioned_by",
+    "label": "切分对象"
+  },
+  {
+    "source": "激活",
+    "target": "sp",
+    "type": "optimized_by",
+    "label": "优化对象"
+  },
+  {
+    "source": "虚拟化",
+    "target": "server",
+    "type": "feature_of",
+    "label": "服务器特性"
+  },
+  {
+    "source": "go_back_n",
+    "target": "psn",
+    "type": "uses",
+    "label": "序列号重传"
+  },
+  {
+    "source": "异步访问",
+    "target": "rdma",
+    "type": "enabled_by",
+    "label": "异步通信"
+  },
+  {
+    "source": "通信原语",
+    "target": "gather",
+    "type": "includes",
+    "label": "包含"
+  },
+  {
+    "source": "通信原语",
+    "target": "scatter",
+    "type": "includes",
+    "label": "包含"
+  },
+  {
+    "source": "ring",
+    "target": "mesh",
+    "type": "simplifies_to",
+    "label": "简化形式"
+  },
+  {
+    "source": "tpu",
+    "target": "hbm",
+    "type": "uses",
+    "label": "高带宽内存"
+  },
+  {
+    "source": "spa",
+    "target": "cxl",
+    "type": "used_in",
+    "label": "内存扩展寻址"
+  }
+]

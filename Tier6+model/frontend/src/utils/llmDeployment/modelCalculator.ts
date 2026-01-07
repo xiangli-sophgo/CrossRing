@@ -90,17 +90,24 @@ export function calculateModelParams(model: LLMModelConfig): number {
     const numSharedExperts = model.moe_config.num_shared_experts ?? 0;
     const expertI = model.moe_config.expert_intermediate_size ?? I;
     const firstKDense = model.moe_config.first_k_dense_replace ?? 0;
-    
+    const moeLayerFreq = model.moe_config.moe_layer_freq ?? 1;
+
     // Dense 层 (前 firstKDense 层): 使用标准 FFN
     const numDenseLayers = Math.min(firstKDense, L);
     const denseFFNParams = 3 * H * I * numDenseLayers;
-    
-    // MoE 层 (后续层): 使用专家
-    const numMoELayers = L - numDenseLayers;
+
+    // MoE 层: 考虑 moe_layer_freq (1=每层MoE, 2=隔层MoE)
+    const remainingLayers = L - numDenseLayers;
+    const numMoELayers = Math.floor(remainingLayers / moeLayerFreq);
+    const numNonMoELayers = remainingLayers - numMoELayers;
+
+    // MoE 层参数
     const moeFFNParams = (3 * H * expertI * (numExperts + numSharedExperts) + H * numExperts) * numMoELayers;
-    
+    // 非 MoE 的剩余层使用标准 FFN
+    const nonMoeFFNParams = 3 * H * I * numNonMoELayers;
+
     // 覆盖 ffnParams（不再乘以 L，因为已经考虑了层数）
-    ffnParams = (denseFFNParams + moeFFNParams) / L;
+    ffnParams = (denseFFNParams + moeFFNParams + nonMoeFFNParams) / L;
   }
 
   // LayerNorm/RMSNorm: 每层 2 个 (attention前 + FFN前)
@@ -195,16 +202,22 @@ export function calculateParamsPerLayer(model: LLMModelConfig): {
     const numSharedExperts = model.moe_config.num_shared_experts ?? 0;
     const expertI = model.moe_config.expert_intermediate_size ?? I;
     const firstKDense = model.moe_config.first_k_dense_replace ?? 0;
+    const moeLayerFreq = model.moe_config.moe_layer_freq ?? 1;
     const numLayers = model.num_layers;
-    
+
     // 计算平均每层 FFN 参数（混合 Dense 和 MoE）
     const numDenseLayers = Math.min(firstKDense, numLayers);
-    const numMoELayers = numLayers - numDenseLayers;
+    const remainingLayers = numLayers - numDenseLayers;
+    const numMoELayers = Math.floor(remainingLayers / moeLayerFreq);
+    const numNonMoELayers = remainingLayers - numMoELayers;
+
     const denseFFN = 3 * H * I;
     const moeFFN = 3 * H * expertI * (numExperts + numSharedExperts) + H * numExperts;
-    
+
     // 加权平均
-    ffn = numLayers > 0 ? (denseFFN * numDenseLayers + moeFFN * numMoELayers) / numLayers : moeFFN;
+    ffn = numLayers > 0
+      ? (denseFFN * (numDenseLayers + numNonMoELayers) + moeFFN * numMoELayers) / numLayers
+      : moeFFN;
   }
 
   // LayerNorm/RMSNorm: 每层 2 个

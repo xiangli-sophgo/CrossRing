@@ -35,6 +35,9 @@ function generateCandidates(
   ppCandidates: number[];
   epCandidates: number[];
   spCandidates: number[];
+  moeTpCandidates: number[];
+  mlaTpCandidates: number[];
+  mlaDpCandidates: number[];
 } {
   const maxChips = constraints.max_chips ?? hardware.node.chips_per_node * hardware.cluster.num_nodes;
   const chipsPerNode = hardware.node.chips_per_node;
@@ -67,6 +70,15 @@ function generateCandidates(
     }
   }
 
+  // MoE TP 候选值 (仅 MoE，专家内张量并行度，通常 ≤ 8)
+  const moeTpCandidates: number[] = [1];
+  if (model.model_type === 'moe' && model.moe_config) {
+    // moe_tp 通常较小 (1, 2, 4, 8)，且 moe_tp * ep 需等于 tp * dp
+    for (let moeTp = 2; moeTp <= Math.min(8, chipsPerNode); moeTp *= 2) {
+      moeTpCandidates.push(moeTp);
+    }
+  }
+
   // SP 候选值 (通常与 TP 相同或为 1)
   const spCandidates: number[] = [1];
 
@@ -76,7 +88,25 @@ function generateCandidates(
     dpCandidates.push(dp);
   }
 
-  return { dpCandidates, tpCandidates, ppCandidates, epCandidates, spCandidates };
+  // MLA TP/DP 候选值 (仅 MLA 模型，如 DeepSeek V3/R1)
+  // 注意: mla_tp/mla_dp 放在 MLAConfig 中，默认使用全局 tp/dp
+  // 这里生成候选值供手动配置时参考，搜索时默认使用全局值
+  const mlaTpCandidates: number[] = [];
+  const mlaDpCandidates: number[] = [];
+  if (model.attention_type === 'mla' && model.mla_config) {
+    // mla_tp 必须能整除 attention_heads
+    for (let mlaTp = 1; mlaTp <= Math.min(16, chipsPerNode); mlaTp *= 2) {
+      if (model.num_attention_heads % mlaTp === 0) {
+        mlaTpCandidates.push(mlaTp);
+      }
+    }
+    // mla_dp 基于芯片数约束
+    for (let mlaDp = 1; mlaDp <= maxChips; mlaDp *= 2) {
+      mlaDpCandidates.push(mlaDp);
+    }
+  }
+
+  return { dpCandidates, tpCandidates, ppCandidates, epCandidates, spCandidates, moeTpCandidates, mlaTpCandidates, mlaDpCandidates };
 }
 
 /**
@@ -84,7 +114,8 @@ function generateCandidates(
  */
 function generateAllPlans(
   candidates: ReturnType<typeof generateCandidates>,
-  maxChips: number
+  maxChips: number,
+  isMoE: boolean = false
 ): ParallelismStrategy[] {
   const plans: ParallelismStrategy[] = [];
 
@@ -93,9 +124,24 @@ function generateAllPlans(
       for (const pp of candidates.ppCandidates) {
         for (const ep of candidates.epCandidates) {
           for (const sp of candidates.spCandidates) {
-            const totalChips = dp * tp * pp * ep;
-            if (totalChips <= maxChips && totalChips >= 1) {
-              plans.push({ dp, tp, pp, ep, sp });
+            // 对于 MoE 模型，需要遍历 moe_tp
+            const moeTpList = isMoE ? candidates.moeTpCandidates : [1];
+            for (const moe_tp of moeTpList) {
+              // Attention 部分芯片数: tp * dp
+              // MoE 部分芯片数: moe_tp * ep
+              // 两者需要一致才能正确部署
+              const attnChips = tp * dp;
+              const moeChips = moe_tp * ep;
+
+              // MoE 模型: 检查 Attention 和 MoE 芯片数一致性
+              if (isMoE && ep > 1 && attnChips !== moeChips) {
+                continue;
+              }
+
+              const effectiveChips = attnChips * pp;
+              if (effectiveChips <= maxChips && effectiveChips >= 1) {
+                plans.push({ dp, tp, pp, ep, sp, moe_tp: isMoE ? moe_tp : undefined });
+              }
             }
           }
         }
@@ -286,7 +332,8 @@ export function searchOptimalPlan(
 
   // 生成所有方案组合
   const maxChips = constraints.max_chips ?? hardware.node.chips_per_node * hardware.cluster.num_nodes;
-  const allPlans = generateAllPlans(candidates, maxChips);
+  const isMoE = model.model_type === 'moe';
+  const allPlans = generateAllPlans(candidates, maxChips, isMoE);
 
   let evaluatedCount = 0;
   let prunedCount = 0;

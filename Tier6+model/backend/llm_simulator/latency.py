@@ -23,7 +23,7 @@ from .types import (
 PCIE_PROTOCOL_OVERHEAD = 0.15  # 15% 协议开销
 
 # HBM 效率因子
-HBM_EFFICIENCY = 0.85  # 85% 效率
+HBM_EFFICIENCY = 0.85  # 默认 85% 效率 (如果配置中没有指定)
 
 # AllReduce 算法因子 (Ring AllReduce)
 ALLREDUCE_FACTOR = 2.0  # 2(n-1)/n ≈ 2
@@ -70,8 +70,37 @@ def calc_memory_bound_time_ms(data_gb: float, hardware: HardwareConfig) -> float
     """
     if data_gb <= 0:
         return 0.0
-    bandwidth_gbps = hardware.chip.memory_bandwidth_gbps * HBM_EFFICIENCY
+    # 使用配置中的带宽利用率，如果没有则使用默认值
+    utilization = getattr(hardware.chip, 'memory_bandwidth_utilization', HBM_EFFICIENCY)
+    bandwidth_gbps = hardware.chip.memory_bandwidth_gbps * utilization
     return (data_gb / bandwidth_gbps) * 1000
+
+
+def get_effective_mla_parallelism(
+    model: LLMModelConfig,
+    parallelism: ParallelismStrategy,
+) -> tuple[int, int]:
+    """
+    获取有效的 MLA 并行度
+
+    如果 MLAConfig 中指定了 mla_tp/mla_dp，使用它们
+    否则使用全局 tp/dp
+
+    Args:
+        model: 模型配置
+        parallelism: 并行策略
+
+    Returns:
+        (mla_tp, mla_dp): MLA 的张量并行度和数据并行度
+    """
+    if model.mla_config is None:
+        return parallelism.tp, parallelism.dp
+
+    # mla_tp/mla_dp = 0 表示使用全局值
+    mla_tp = model.mla_config.mla_tp if model.mla_config.mla_tp > 0 else parallelism.tp
+    mla_dp = model.mla_config.mla_dp if model.mla_config.mla_dp > 0 else parallelism.dp
+
+    return mla_tp, mla_dp
 
 
 def calc_roofline_latency(
@@ -159,7 +188,9 @@ def calc_hbm_read_latency(
     if data_gb <= 0:
         return 0.0
 
-    bandwidth_gbps = hardware.chip.memory_bandwidth_gbps * HBM_EFFICIENCY
+    # 使用配置中的带宽利用率，如果没有则使用默认值
+    utilization = getattr(hardware.chip, 'memory_bandwidth_utilization', HBM_EFFICIENCY)
+    bandwidth_gbps = hardware.chip.memory_bandwidth_gbps * utilization
     bandwidth_time_ms = (data_gb / bandwidth_gbps) * 1000
 
     if not is_sequential:
@@ -467,20 +498,22 @@ def calc_mla_q_projection_latency(
 
     mla = model.mla_config
     bytes_per_elem = get_bytes_per_element(model.dtype)
+    # 使用 MLA 独立并行度
+    mla_tp, _ = get_effective_mla_parallelism(model, parallelism)
 
     # Q 的总头维度 = nope + rope
     q_head_dim = mla.qk_nope_head_dim + mla.qk_rope_head_dim
-    q_total_dim = model.num_attention_heads * q_head_dim // parallelism.tp
+    q_total_dim = model.num_attention_heads * q_head_dim // mla_tp
 
     # FLOPS: down projection + up projection
     flops_down = 2 * inference.batch_size * num_tokens * model.hidden_size * mla.q_lora_rank
     flops_up = 2 * inference.batch_size * num_tokens * mla.q_lora_rank * q_total_dim
-    total_flops = (flops_down + flops_up) / parallelism.tp
+    total_flops = (flops_down + flops_up) / mla_tp
     tflops = total_flops / 1e12
     compute_time = tflops / hardware.chip.compute_tflops_fp16 * 1000
 
     # 内存访问: 权重 + IO
-    weight_down_bytes = model.hidden_size * mla.q_lora_rank * bytes_per_elem / parallelism.tp
+    weight_down_bytes = model.hidden_size * mla.q_lora_rank * bytes_per_elem / mla_tp
     weight_up_bytes = mla.q_lora_rank * q_total_dim * bytes_per_elem
     io_bytes = inference.batch_size * num_tokens * (model.hidden_size + q_total_dim) * bytes_per_elem
     data_gb = (weight_down_bytes + weight_up_bytes + io_bytes) / (1024 ** 3)
@@ -499,25 +532,33 @@ def calc_mla_kv_compression_latency(
     """
     计算 MLA KV 压缩投影延迟
 
-    DeepSeek V3 KV 压缩: hidden_size -> kv_lora_rank
-    这是 MLA 的关键优化，将 KV 压缩到低维空间
+    DeepSeek V3 KV 压缩: hidden_size -> (kv_lora_rank + qk_rope_head_dim)
+    包含两部分:
+    1. c_t^KV: 压缩 KV 潜在向量，维度 = kv_lora_rank
+    2. k_t^R: RoPE 解耦 key，维度 = qk_rope_head_dim
 
-    FLOPS = 2 * B * S * H * kv_lora_rank
+    根据 PDF 文档: W_kv_a 维度 = [H, d_kv] = [H, kv_lora_rank + qk_rope_head_dim]
+    FLOPS = 2 * B * S * H * (kv_lora_rank + qk_rope_head_dim)
     """
     if model.mla_config is None:
         return 0.0
 
     mla = model.mla_config
     bytes_per_elem = get_bytes_per_element(model.dtype)
+    # 使用 MLA 独立并行度
+    mla_tp, _ = get_effective_mla_parallelism(model, parallelism)
+
+    # KV 下投影输出维度 = kv_lora_rank + qk_rope_head_dim (如 512 + 64 = 576)
+    kv_compress_dim = mla.kv_lora_rank + mla.qk_rope_head_dim
 
     # 压缩投影
-    flops = 2 * inference.batch_size * num_tokens * model.hidden_size * mla.kv_lora_rank / parallelism.tp
+    flops = 2 * inference.batch_size * num_tokens * model.hidden_size * kv_compress_dim / mla_tp
     tflops = flops / 1e12
     compute_time = tflops / hardware.chip.compute_tflops_fp16 * 1000
 
     # 内存访问
-    weight_bytes = model.hidden_size * mla.kv_lora_rank * bytes_per_elem / parallelism.tp
-    io_bytes = inference.batch_size * num_tokens * (model.hidden_size + mla.kv_lora_rank) * bytes_per_elem
+    weight_bytes = model.hidden_size * kv_compress_dim * bytes_per_elem / mla_tp
+    io_bytes = inference.batch_size * num_tokens * (model.hidden_size + kv_compress_dim) * bytes_per_elem
     data_gb = (weight_bytes + io_bytes) / (1024 ** 3)
     memory_time = calc_hbm_read_latency(data_gb, hardware)
 
@@ -545,7 +586,9 @@ def calc_mla_attention_score_latency(
 
     mla = model.mla_config
     bytes_per_elem = get_bytes_per_element(model.dtype)
-    num_heads_per_tp = model.num_attention_heads // parallelism.tp
+    # 使用 MLA 独立并行度
+    mla_tp, _ = get_effective_mla_parallelism(model, parallelism)
+    num_heads_per_tp = model.num_attention_heads // mla_tp
 
     # MLA Score 计算: Q @ K^T，但 K 是压缩后的
     qk_dim = mla.qk_nope_head_dim + mla.qk_rope_head_dim
@@ -556,7 +599,7 @@ def calc_mla_attention_score_latency(
     # 内存访问: Q + 压缩的 K + Score
     q_bytes = inference.batch_size * num_heads_per_tp * num_tokens * qk_dim * bytes_per_elem
     # K 是从压缩的 kv_lora_rank 解压来的
-    k_bytes = inference.batch_size * context_length * mla.kv_lora_rank * bytes_per_elem / parallelism.tp
+    k_bytes = inference.batch_size * context_length * mla.kv_lora_rank * bytes_per_elem / mla_tp
     score_bytes = inference.batch_size * num_heads_per_tp * num_tokens * context_length * bytes_per_elem
     data_gb = (q_bytes + k_bytes + score_bytes) / (1024 ** 3)
     memory_time = calc_hbm_read_latency(data_gb, hardware)
@@ -587,13 +630,15 @@ def calc_mla_kv_cache_read_latency(
 
     mla = model.mla_config
     bytes_per_elem = get_bytes_per_element(model.dtype)
+    # 使用 MLA 独立并行度
+    mla_tp, _ = get_effective_mla_parallelism(model, parallelism)
 
     # MLA KV Cache 大小: c_t^KV + k_t^R
     kv_cache_dim = mla.kv_lora_rank + mla.qk_rope_head_dim
     kv_cache_bytes = (
         2 * inference.batch_size * context_length *
         kv_cache_dim * bytes_per_elem
-    ) / parallelism.tp
+    ) / mla_tp
 
     kv_cache_gb = kv_cache_bytes / (1024 ** 3)
     return calc_hbm_read_latency(kv_cache_gb, hardware, is_sequential=False)
@@ -617,13 +662,15 @@ def calc_mla_kv_cache_write_latency(
 
     mla = model.mla_config
     bytes_per_elem = get_bytes_per_element(model.dtype)
+    # 使用 MLA 独立并行度
+    mla_tp, _ = get_effective_mla_parallelism(model, parallelism)
 
     # MLA KV Cache 写入: c_t^KV + k_t^R
     kv_cache_dim = mla.kv_lora_rank + mla.qk_rope_head_dim
     kv_bytes = (
         2 * inference.batch_size * num_tokens *
         kv_cache_dim * bytes_per_elem
-    ) / parallelism.tp
+    ) / mla_tp
 
     kv_gb = kv_bytes / (1024 ** 3)
     return calc_hbm_write_latency(kv_gb, hardware)
@@ -650,17 +697,19 @@ def calc_mla_output_latency(
 
     mla = model.mla_config
     bytes_per_elem = get_bytes_per_element(model.dtype)
-    num_heads_per_tp = model.num_attention_heads // parallelism.tp
+    # 使用 MLA 独立并行度
+    mla_tp, _ = get_effective_mla_parallelism(model, parallelism)
+    num_heads_per_tp = model.num_attention_heads // mla_tp
 
     # V 解压: kv_lora_rank -> v_total_dim
-    v_total_dim = model.num_kv_heads * mla.v_head_dim // parallelism.tp
+    v_total_dim = model.num_kv_heads * mla.v_head_dim // mla_tp
     flops_v_up = 2 * inference.batch_size * context_length * mla.kv_lora_rank * v_total_dim
 
     # Softmax @ V
     flops_sv = 2 * inference.batch_size * num_heads_per_tp * num_tokens * context_length * mla.v_head_dim
 
     # Output projection
-    flops_out = 2 * inference.batch_size * num_tokens * model.num_attention_heads * mla.v_head_dim * model.hidden_size / parallelism.tp
+    flops_out = 2 * inference.batch_size * num_tokens * model.num_attention_heads * mla.v_head_dim * model.hidden_size / mla_tp
 
     total_flops = flops_v_up + flops_sv + flops_out
     tflops = total_flops / 1e12
@@ -669,7 +718,7 @@ def calc_mla_output_latency(
     # 内存访问
     v_up_weight_bytes = mla.kv_lora_rank * v_total_dim * bytes_per_elem
     score_bytes = inference.batch_size * num_heads_per_tp * num_tokens * context_length * bytes_per_elem
-    output_weight_bytes = model.num_attention_heads * mla.v_head_dim * model.hidden_size * bytes_per_elem / parallelism.tp
+    output_weight_bytes = model.num_attention_heads * mla.v_head_dim * model.hidden_size * bytes_per_elem / mla_tp
     output_bytes = inference.batch_size * num_tokens * model.hidden_size * bytes_per_elem
     data_gb = (v_up_weight_bytes + score_bytes + output_weight_bytes + output_bytes) / (1024 ** 3)
     memory_time = calc_hbm_read_latency(data_gb, hardware)
@@ -1030,16 +1079,19 @@ def calc_ep_dispatch_latency(
     计算 EP Dispatch (Token 分发) 延迟
 
     All2All 通信: 每个芯片将 token 发送到对应专家所在的芯片
-    数据量 = B * S * H * bytes * num_experts_per_tok
+    数据量 = B * S * H * FP8_bytes * num_experts_per_tok
+
+    根据 DeepSeek V3 论文，Dispatch 使用 FP8 精度传输
     """
     if model.moe_config is None or parallelism.ep <= 1:
         return 0.0
 
     moe = model.moe_config
-    bytes_per_elem = get_bytes_per_element(model.dtype)
+    # Dispatch 使用 FP8 精度 (1 byte)
+    dispatch_bytes_per_elem = 1
 
     # 每个 token 发送到 num_experts_per_tok 个专家
-    data_bytes = inference.batch_size * num_tokens * model.hidden_size * bytes_per_elem * moe.num_experts_per_tok
+    data_bytes = inference.batch_size * num_tokens * model.hidden_size * dispatch_bytes_per_elem * moe.num_experts_per_tok
     data_gb = data_bytes / (1024 ** 3)
 
     return calc_ep_alltoall_latency(data_gb, ep_bandwidth_gbps, ep_latency_us, parallelism.ep)
@@ -1058,12 +1110,22 @@ def calc_ep_combine_latency(
     计算 EP Combine (结果收集) 延迟
 
     All2All 通信: 每个芯片收集专家计算结果
-    数据量与 Dispatch 相同
+    数据量 = B * S * H * BF16_bytes * num_experts_per_tok
+
+    根据 DeepSeek V3 论文，Combine 使用 BF16 精度传输（比 Dispatch 精度高）
     """
-    return calc_ep_dispatch_latency(
-        model, inference, parallelism, hardware, num_tokens,
-        ep_bandwidth_gbps, ep_latency_us
-    )
+    if model.moe_config is None or parallelism.ep <= 1:
+        return 0.0
+
+    moe = model.moe_config
+    # Combine 使用 BF16 精度 (2 bytes)
+    combine_bytes_per_elem = 2
+
+    # 每个 token 从 num_experts_per_tok 个专家收集结果
+    data_bytes = inference.batch_size * num_tokens * model.hidden_size * combine_bytes_per_elem * moe.num_experts_per_tok
+    data_gb = data_bytes / (1024 ** 3)
+
+    return calc_ep_alltoall_latency(data_gb, ep_bandwidth_gbps, ep_latency_us, parallelism.ep)
 
 
 def is_moe_layer(layer_index: int, model: LLMModelConfig) -> bool:
@@ -1296,6 +1358,665 @@ def calc_ep_alltoall_latency(
     total_latency_ms = (n - 1) * latency_us / 1000
 
     return transfer_time_ms + total_latency_ms
+
+
+# ============================================
+# AllReduce 多算法实现
+# ============================================
+
+def calc_double_binary_tree_allreduce_latency(
+    data_gb: float,
+    bandwidth_gbps: float,
+    latency_us: float,
+    group_size: int,
+) -> float:
+    """
+    Double Binary Tree AllReduce 延迟
+
+    双二叉树算法，NCCL多机默认算法，适合N>32的场景
+    时间 = datasize / bandwidth + 2 * log2(n) * latency
+
+    Args:
+        data_gb: 数据量 (GB)
+        bandwidth_gbps: 链路带宽 (GB/s)
+        latency_us: 链路延迟 (us)
+        group_size: 组大小
+
+    Returns:
+        延迟 (ms)
+    """
+    if group_size <= 1 or data_gb <= 0:
+        return 0.0
+
+    # 双二叉树：传输量等于数据量（两棵树各传一半，但带宽利用率100%）
+    transfer_time_ms = (data_gb / bandwidth_gbps) * 1000
+
+    # 延迟 = 2 * log2(n) * 单跳延迟
+    log_n = math.ceil(math.log2(group_size))
+    total_latency_ms = 2 * log_n * latency_us / 1000
+
+    return transfer_time_ms + total_latency_ms
+
+
+def calc_halving_doubling_allreduce_latency(
+    data_gb: float,
+    bandwidth_gbps: float,
+    latency_us: float,
+    group_size: int,
+) -> float:
+    """
+    Halving-Doubling AllReduce 延迟
+
+    适合Fat-Tree拓扑，节点数需为2的幂次
+    时间 = 2 * (n-1)/n * datasize / bandwidth + 2 * log2(n) * latency
+
+    Args:
+        data_gb: 数据量 (GB)
+        bandwidth_gbps: 链路带宽 (GB/s)
+        latency_us: 链路延迟 (us)
+        group_size: 组大小
+
+    Returns:
+        延迟 (ms)
+    """
+    if group_size <= 1 or data_gb <= 0:
+        return 0.0
+
+    n = group_size
+    # 传输量与Ring相同
+    transfer_factor = 2 * (n - 1) / n
+    transfer_time_ms = (transfer_factor * data_gb / bandwidth_gbps) * 1000
+
+    # 延迟只有 log2(n) 轮
+    log_n = math.ceil(math.log2(n))
+    total_latency_ms = 2 * log_n * latency_us / 1000
+
+    return transfer_time_ms + total_latency_ms
+
+
+def calc_reduce_broadcast_allreduce_latency(
+    data_gb: float,
+    bandwidth_gbps: float,
+    latency_us: float,
+    group_size: int,
+) -> float:
+    """
+    Reduce + Broadcast AllReduce 延迟
+
+    适合Full-Mesh拓扑且N<8的小规模场景
+    时间 = 2 * (n-1) * datasize / bandwidth + latency
+
+    Args:
+        data_gb: 数据量 (GB)
+        bandwidth_gbps: 链路带宽 (GB/s)
+        latency_us: 链路延迟 (us)
+        group_size: 组大小
+
+    Returns:
+        延迟 (ms)
+    """
+    if group_size <= 1 or data_gb <= 0:
+        return 0.0
+
+    n = group_size
+    # 传输量更大，但延迟低
+    transfer_factor = 2 * (n - 1)
+    transfer_time_ms = (transfer_factor * data_gb / bandwidth_gbps) * 1000
+
+    # 只有一次启动延迟（所有通信可并行）
+    total_latency_ms = latency_us / 1000
+
+    return transfer_time_ms + total_latency_ms
+
+
+def select_allreduce_algorithm(
+    group_size: int,
+    data_gb: float,
+    topology_type: str = "ring",
+) -> str:
+    """
+    根据规模和拓扑自动选择最优AllReduce算法
+
+    选择策略:
+    - N<8 且 Full-Mesh: reduce_broadcast
+    - Fat-Tree拓扑: halving_doubling
+    - N>32: double_binary_tree
+    - 其他: ring
+
+    Args:
+        group_size: 组大小
+        data_gb: 数据量 (GB)
+        topology_type: 拓扑类型 ('ring', 'fat_tree', 'full_mesh')
+
+    Returns:
+        算法名称
+    """
+    if topology_type == "full_mesh" and group_size < 8:
+        return "reduce_broadcast"
+    elif topology_type == "fat_tree":
+        return "halving_doubling"
+    elif group_size > 32:
+        return "double_binary_tree"
+    else:
+        return "ring"
+
+
+def calc_allreduce_latency_auto(
+    data_gb: float,
+    bandwidth_gbps: float,
+    latency_us: float,
+    group_size: int,
+    algorithm: str | None = None,
+    topology_type: str = "ring",
+) -> float:
+    """
+    统一的AllReduce延迟计算接口，支持自动算法选择
+
+    Args:
+        data_gb: 数据量 (GB)
+        bandwidth_gbps: 链路带宽 (GB/s)
+        latency_us: 链路延迟 (us)
+        group_size: 组大小
+        algorithm: 算法类型 (可选，None则自动选择)
+        topology_type: 拓扑类型 ('ring', 'fat_tree', 'full_mesh')
+
+    Returns:
+        延迟 (ms)
+    """
+    if algorithm is None:
+        algorithm = select_allreduce_algorithm(group_size, data_gb, topology_type)
+
+    if algorithm == "ring":
+        return calc_tp_allreduce_latency(data_gb, bandwidth_gbps, latency_us, group_size)
+    elif algorithm == "double_binary_tree":
+        return calc_double_binary_tree_allreduce_latency(data_gb, bandwidth_gbps, latency_us, group_size)
+    elif algorithm == "halving_doubling":
+        return calc_halving_doubling_allreduce_latency(data_gb, bandwidth_gbps, latency_us, group_size)
+    elif algorithm == "reduce_broadcast":
+        return calc_reduce_broadcast_allreduce_latency(data_gb, bandwidth_gbps, latency_us, group_size)
+    else:
+        # 默认使用Ring
+        return calc_tp_allreduce_latency(data_gb, bandwidth_gbps, latency_us, group_size)
+
+
+# ============================================
+# All-to-All 多算法实现
+# ============================================
+
+def calc_pairwise_alltoall_latency(
+    data_gb: float,
+    bandwidth_gbps: float,
+    latency_us: float,
+    group_size: int,
+) -> float:
+    """
+    Pairwise All-to-All 延迟
+
+    两两交换算法，适合小规模(N<8)
+    时间 = (n-1) * (data/n) / bandwidth + (n-1) * latency
+
+    Args:
+        data_gb: 总数据量 (GB)
+        bandwidth_gbps: 链路带宽 (GB/s)
+        latency_us: 链路延迟 (us)
+        group_size: 组大小
+
+    Returns:
+        延迟 (ms)
+    """
+    if group_size <= 1 or data_gb <= 0:
+        return 0.0
+
+    n = group_size
+    # 每对节点交换 data/n 的数据
+    data_per_pair = data_gb / n
+    transfer_time_ms = (n - 1) * (data_per_pair / bandwidth_gbps) * 1000
+
+    # 延迟 = (n-1) * 单跳延迟
+    total_latency_ms = (n - 1) * latency_us / 1000
+
+    return transfer_time_ms + total_latency_ms
+
+
+def calc_ring_alltoall_latency(
+    data_gb: float,
+    bandwidth_gbps: float,
+    latency_us: float,
+    group_size: int,
+) -> float:
+    """
+    Ring-based All-to-All 延迟
+
+    环形算法，适合大规模，带宽利用率高
+    与Pairwise相同的复杂度，但更适合Ring拓扑
+    """
+    return calc_pairwise_alltoall_latency(data_gb, bandwidth_gbps, latency_us, group_size)
+
+
+def calc_bruck_alltoall_latency(
+    data_gb: float,
+    bandwidth_gbps: float,
+    latency_us: float,
+    group_size: int,
+) -> float:
+    """
+    Bruck All-to-All 延迟
+
+    Bruck算法，适合中规模(8<=N<=32)，低延迟
+    时间 = ceil(log2(n)) * data / bandwidth + ceil(log2(n)) * latency
+
+    Args:
+        data_gb: 总数据量 (GB)
+        bandwidth_gbps: 链路带宽 (GB/s)
+        latency_us: 链路延迟 (us)
+        group_size: 组大小
+
+    Returns:
+        延迟 (ms)
+    """
+    if group_size <= 1 or data_gb <= 0:
+        return 0.0
+
+    log_n = math.ceil(math.log2(group_size))
+    transfer_time_ms = log_n * (data_gb / bandwidth_gbps) * 1000
+    total_latency_ms = log_n * latency_us / 1000
+
+    return transfer_time_ms + total_latency_ms
+
+
+def select_alltoall_algorithm(group_size: int) -> str:
+    """
+    根据规模自动选择最优All-to-All算法
+
+    选择策略:
+    - N<8: pairwise
+    - 8<=N<=32: bruck
+    - N>32: ring
+
+    Args:
+        group_size: 组大小
+
+    Returns:
+        算法名称
+    """
+    if group_size < 8:
+        return "pairwise"
+    elif group_size <= 32:
+        return "bruck"
+    else:
+        return "ring"
+
+
+def calc_alltoall_latency_auto(
+    data_gb: float,
+    bandwidth_gbps: float,
+    latency_us: float,
+    group_size: int,
+    algorithm: str | None = None,
+) -> float:
+    """
+    统一的All-to-All延迟计算接口，支持自动算法选择
+
+    Args:
+        data_gb: 总数据量 (GB)
+        bandwidth_gbps: 链路带宽 (GB/s)
+        latency_us: 链路延迟 (us)
+        group_size: 组大小
+        algorithm: 算法类型 (可选，None则自动选择)
+
+    Returns:
+        延迟 (ms)
+    """
+    if algorithm is None:
+        algorithm = select_alltoall_algorithm(group_size)
+
+    if algorithm == "pairwise":
+        return calc_pairwise_alltoall_latency(data_gb, bandwidth_gbps, latency_us, group_size)
+    elif algorithm == "ring":
+        return calc_ring_alltoall_latency(data_gb, bandwidth_gbps, latency_us, group_size)
+    elif algorithm == "bruck":
+        return calc_bruck_alltoall_latency(data_gb, bandwidth_gbps, latency_us, group_size)
+    else:
+        # 默认使用基础实现
+        return calc_ep_alltoall_latency(data_gb, bandwidth_gbps, latency_us, group_size)
+
+
+# ============================================
+# SP (序列并行) 通信延迟
+# ============================================
+
+def calc_sp_allgather_latency(
+    data_gb: float,
+    bandwidth_gbps: float,
+    latency_us: float,
+    sp_size: int,
+) -> float:
+    """
+    计算 SP AllGather 延迟
+
+    AllGather: 将序列切分重新聚合为完整序列
+    通信量 = (n-1)/n * data_size
+    用于: TP层之前，序列切分 → 张量切分
+
+    Args:
+        data_gb: 数据量 (GB)
+        bandwidth_gbps: 链路带宽 (GB/s)
+        latency_us: 链路延迟 (us)
+        sp_size: SP 组大小
+
+    Returns:
+        延迟 (ms)
+    """
+    if sp_size <= 1 or data_gb <= 0:
+        return 0.0
+
+    n = sp_size
+    transfer_factor = (n - 1) / n
+    transfer_time_ms = (transfer_factor * data_gb / bandwidth_gbps) * 1000
+
+    # 延迟 = (n-1) * 单跳延迟
+    total_latency_ms = (n - 1) * latency_us / 1000
+
+    return transfer_time_ms + total_latency_ms
+
+
+def calc_sp_reduce_scatter_latency(
+    data_gb: float,
+    bandwidth_gbps: float,
+    latency_us: float,
+    sp_size: int,
+) -> float:
+    """
+    计算 SP ReduceScatter 延迟
+
+    ReduceScatter: 将张量切分结果分布到序列切分
+    通信量 = (n-1)/n * data_size
+    用于: TP层之后，张量切分 → 序列切分
+
+    Args:
+        data_gb: 数据量 (GB)
+        bandwidth_gbps: 链路带宽 (GB/s)
+        latency_us: 链路延迟 (us)
+        sp_size: SP 组大小
+
+    Returns:
+        延迟 (ms)
+    """
+    # ReduceScatter 与 AllGather 通信量相同
+    return calc_sp_allgather_latency(data_gb, bandwidth_gbps, latency_us, sp_size)
+
+
+def calc_sp_comm_volume_gb(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    num_tokens: int,
+) -> float:
+    """
+    计算 SP 单次通信数据量 (GB)
+
+    Args:
+        model: 模型配置
+        inference: 推理配置
+        parallelism: 并行策略
+        num_tokens: token数量
+
+    Returns:
+        数据量 (GB)
+    """
+    if parallelism.sp <= 1:
+        return 0.0
+
+    bytes_per_elem = get_bytes_per_element(model.dtype)
+    # 单次通信的数据量 = batch * seq * hidden * bytes
+    data_bytes = inference.batch_size * num_tokens * model.hidden_size * bytes_per_elem
+    return data_bytes / (1024 ** 3)
+
+
+# ============================================
+# EP+TP 组合通信延迟
+# ============================================
+
+def calc_ep_tp_scatter_gather_latency(
+    data_gb: float,
+    ep_bandwidth_gbps: float,
+    ep_latency_us: float,
+    ep_size: int,
+    moe_tp: int,
+    tp_bandwidth_gbps: float,
+    tp_latency_us: float,
+) -> float:
+    """
+    EP+TP Scatter/Gather 方案延迟
+
+    方案1: 简单但带宽利用率低
+    - Scatter: 将token分发到EP*moe_tp个目标
+    - Gather: 收集结果
+
+    Args:
+        data_gb: 数据量 (GB)
+        ep_bandwidth_gbps: EP组间带宽 (GB/s)
+        ep_latency_us: EP组间延迟 (us)
+        ep_size: EP组大小
+        moe_tp: MoE专家内TP切分度
+        tp_bandwidth_gbps: TP组内带宽 (GB/s)
+        tp_latency_us: TP组内延迟 (us)
+
+    Returns:
+        延迟 (ms)
+    """
+    if ep_size <= 1 or data_gb <= 0:
+        return 0.0
+
+    # EP All-to-All
+    ep_latency = calc_ep_alltoall_latency(data_gb, ep_bandwidth_gbps, ep_latency_us, ep_size)
+
+    # 如果moe_tp>1，每个专家内还需要TP AllReduce
+    if moe_tp > 1:
+        expert_output_gb = data_gb / ep_size
+        tp_latency = calc_tp_allreduce_latency(expert_output_gb, tp_bandwidth_gbps, tp_latency_us, moe_tp)
+        return ep_latency + tp_latency
+
+    return ep_latency
+
+
+def calc_ep_tp_group_alltoall_latency(
+    data_gb: float,
+    ep_bandwidth_gbps: float,
+    ep_latency_us: float,
+    ep_size: int,
+    moe_tp: int,
+    tp_bandwidth_gbps: float,
+    tp_latency_us: float,
+) -> float:
+    """
+    EP+TP Group-wise All2All + AllGather 方案延迟
+
+    方案2: 高效方案，moe_tp>2时推荐
+    - 阶段1: EP组内All2All (数据按moe_tp分组)
+    - 阶段2: TP组内AllGather
+
+    Args:
+        data_gb: 数据量 (GB)
+        ep_bandwidth_gbps: EP组间带宽 (GB/s)
+        ep_latency_us: EP组间延迟 (us)
+        ep_size: EP组大小
+        moe_tp: MoE专家内TP切分度
+        tp_bandwidth_gbps: TP组内带宽 (GB/s)
+        tp_latency_us: TP组内延迟 (us)
+
+    Returns:
+        延迟 (ms)
+    """
+    if ep_size <= 1 or data_gb <= 0:
+        return 0.0
+
+    # 阶段1: EP组内All2All (数据按moe_tp分组)
+    data_per_tp_group = data_gb / moe_tp if moe_tp > 1 else data_gb
+    ep_alltoall_latency = calc_ep_alltoall_latency(data_per_tp_group, ep_bandwidth_gbps, ep_latency_us, ep_size)
+
+    # 阶段2: TP组内AllGather
+    if moe_tp > 1:
+        expert_output_per_tp = data_gb / ep_size / moe_tp
+        tp_allgather_latency = calc_sp_allgather_latency(expert_output_per_tp, tp_bandwidth_gbps, tp_latency_us, moe_tp)
+    else:
+        tp_allgather_latency = 0.0
+
+    return ep_alltoall_latency + tp_allgather_latency
+
+
+def calc_ep_tp_combined_latency(
+    data_gb: float,
+    ep_bandwidth_gbps: float,
+    ep_latency_us: float,
+    ep_size: int,
+    moe_tp: int,
+    tp_bandwidth_gbps: float,
+    tp_latency_us: float,
+    strategy: str = "auto",
+) -> float:
+    """
+    自动选择EP+TP组合策略
+
+    Args:
+        data_gb: 数据量 (GB)
+        ep_bandwidth_gbps: EP组间带宽 (GB/s)
+        ep_latency_us: EP组间延迟 (us)
+        ep_size: EP组大小
+        moe_tp: MoE专家内TP切分度
+        tp_bandwidth_gbps: TP组内带宽 (GB/s)
+        tp_latency_us: TP组内延迟 (us)
+        strategy: 策略 ('scatter_gather', 'group_alltoall', 'auto')
+
+    Returns:
+        延迟 (ms)
+    """
+    if strategy == "auto":
+        # moe_tp <= 2 时使用 Scatter/Gather，否则使用 Group-wise All2All
+        strategy = "scatter_gather" if moe_tp <= 2 else "group_alltoall"
+
+    if strategy == "scatter_gather":
+        return calc_ep_tp_scatter_gather_latency(
+            data_gb, ep_bandwidth_gbps, ep_latency_us, ep_size,
+            moe_tp, tp_bandwidth_gbps, tp_latency_us
+        )
+    else:
+        return calc_ep_tp_group_alltoall_latency(
+            data_gb, ep_bandwidth_gbps, ep_latency_us, ep_size,
+            moe_tp, tp_bandwidth_gbps, tp_latency_us
+        )
+
+
+# ============================================
+# DP (数据并行) 梯度同步延迟
+# ============================================
+
+def calc_dp_gradient_sync_latency(
+    model: LLMModelConfig,
+    parallelism: ParallelismStrategy,
+    dp_bandwidth_gbps: float,
+    dp_latency_us: float,
+    algorithm: str | None = None,
+) -> float:
+    """
+    计算 DP 梯度同步延迟
+
+    通信量 = 模型参数量 * dtype_size
+
+    Args:
+        model: 模型配置
+        parallelism: 并行策略
+        dp_bandwidth_gbps: DP组间带宽 (GB/s)
+        dp_latency_us: DP组间延迟 (us)
+        algorithm: AllReduce算法 (可选)
+
+    Returns:
+        延迟 (ms)
+    """
+    if parallelism.dp <= 1:
+        return 0.0
+
+    bytes_per_elem = get_bytes_per_element(model.dtype)
+
+    # 计算模型参数量
+    H = model.hidden_size
+    L = model.num_layers
+    I = model.intermediate_size
+    V = model.vocab_size
+
+    # Attention: Q, K, V, O 投影
+    attn_params = 4 * H * H * L / parallelism.tp
+
+    # FFN 参数
+    if model.moe_config:
+        moe = model.moe_config
+        experts_per_ep = moe.num_experts / parallelism.ep
+        expert_ffn_params = 3 * H * moe.expert_intermediate_size * L * experts_per_ep / parallelism.tp
+        shared_expert_params = 3 * H * moe.expert_intermediate_size * moe.num_shared_experts * L / parallelism.tp
+        ffn_params = expert_ffn_params + shared_expert_params
+        # Gate网络
+        gate_params = H * moe.num_experts * L
+    else:
+        ffn_params = 3 * H * I * L / parallelism.tp
+        gate_params = 0
+
+    # Embedding
+    embed_params = V * H / parallelism.tp
+
+    # LayerNorm参数
+    layernorm_params = 2 * H * L * 2  # 每层2个LN，每个LN有gamma和beta
+
+    total_params = attn_params + ffn_params + gate_params + embed_params + layernorm_params
+    total_params_per_pp = total_params / parallelism.pp
+
+    # 梯度数据量 (GB)
+    gradient_gb = (total_params_per_pp * bytes_per_elem) / (1024 ** 3)
+
+    # 使用自动选择的AllReduce算法
+    return calc_allreduce_latency_auto(gradient_gb, dp_bandwidth_gbps, dp_latency_us, parallelism.dp, algorithm)
+
+
+def calc_dp_gradient_sync_with_overlap(
+    model: LLMModelConfig,
+    parallelism: ParallelismStrategy,
+    dp_bandwidth_gbps: float,
+    dp_latency_us: float,
+    backward_compute_latency_ms: float,
+    overlap_ratio: float = 0.6,
+) -> float:
+    """
+    计算考虑计算-通信重叠的 DP 梯度同步延迟
+
+    现代框架(如PyTorch DDP)会在反向传播过程中启动梯度同步，
+    部分通信可以与计算重叠
+
+    Args:
+        model: 模型配置
+        parallelism: 并行策略
+        dp_bandwidth_gbps: DP组间带宽 (GB/s)
+        dp_latency_us: DP组间延迟 (us)
+        backward_compute_latency_ms: 反向传播计算时间 (ms)
+        overlap_ratio: 可重叠比例 (默认0.6)
+
+    Returns:
+        非重叠延迟 (ms)
+    """
+    if parallelism.dp <= 1:
+        return 0.0
+
+    full_sync_latency = calc_dp_gradient_sync_latency(
+        model, parallelism, dp_bandwidth_gbps, dp_latency_us
+    )
+
+    # 可重叠部分
+    overlappable = full_sync_latency * overlap_ratio
+    # 实际可重叠量受限于计算时间
+    actual_overlap = min(overlappable, backward_compute_latency_ms)
+
+    # 非重叠延迟
+    exposed_latency = full_sync_latency - actual_overlap
+
+    return exposed_latency
 
 
 # ============================================

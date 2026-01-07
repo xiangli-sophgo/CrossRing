@@ -45,6 +45,12 @@ from .latency import (
     # Kernel Fusion
     calc_fused_layernorm_qkv_latency, calc_fused_ffn_gate_up_latency,
     calc_single_layer_latency_fused, OVERLAP_COEFFICIENTS,
+    # SP 通信
+    calc_sp_allgather_latency, calc_sp_reduce_scatter_latency, calc_sp_comm_volume_gb,
+    # EP+TP 组合通信
+    calc_ep_tp_combined_latency,
+    # DP 梯度同步
+    calc_dp_gradient_sync_latency,
 )
 from .gantt import GanttChartBuilder, convert_to_frontend_format
 
@@ -228,6 +234,10 @@ class SimulationConfig:
     # 新增: Kernel Fusion 和 MLA 优化
     enable_fusion: bool = True      # 启用 Kernel Fusion 优化
     enable_comm_overlap: bool = True  # 启用计算-通信重叠
+    # 训练模式配置
+    enable_training_mode: bool = False  # 启用训练模式（模拟DP梯度同步）
+    enable_dp_gradient_sync: bool = False  # 启用DP梯度同步模拟
+    gradient_accumulation_steps: int = 1  # 梯度累积步数
 
 
 @dataclass
@@ -591,6 +601,15 @@ class LLMInferenceSimulator:
             )
             current_time += ln1_latency
 
+            # SP AllGather (序列切分 → 张量切分)
+            if self.parallelism.sp > 1:
+                sp_allgather_latency = self._calc_sp_allgather_latency(num_tokens)
+                self.gantt_builder.add_comm_task(
+                    GanttTaskType.SP_ALLGATHER, current_time, sp_allgather_latency,
+                    phase, chip_id, pp_stage, layer_index, token_index
+                )
+                current_time += sp_allgather_latency
+
             # Attention QKV (MLA 使用专用计算)
             if use_mla:
                 # MLA: Q 投影 + KV 压缩
@@ -679,6 +698,15 @@ class LLMInferenceSimulator:
                 )
                 current_time += tp_comm_latency
 
+            # SP ReduceScatter (张量切分 → 序列切分)
+            if self.parallelism.sp > 1:
+                sp_reduce_scatter_latency = self._calc_sp_reduce_scatter_latency(num_tokens)
+                self.gantt_builder.add_comm_task(
+                    GanttTaskType.SP_REDUCE_SCATTER, current_time, sp_reduce_scatter_latency,
+                    phase, chip_id, pp_stage, layer_index, token_index
+                )
+                current_time += sp_reduce_scatter_latency
+
             # KV Cache 写入
             if self.config.enable_kv_cache:
                 if use_mla:
@@ -705,6 +733,15 @@ class LLMInferenceSimulator:
                 phase, chip_id, pp_stage, layer_index, token_index
             )
             current_time += ln2_latency
+
+            # SP AllGather (序列切分 → 张量切分) - 进入FFN TP层
+            if self.parallelism.sp > 1:
+                sp_allgather_latency = self._calc_sp_allgather_latency(num_tokens)
+                self.gantt_builder.add_comm_task(
+                    GanttTaskType.SP_ALLGATHER, current_time, sp_allgather_latency,
+                    phase, chip_id, pp_stage, layer_index, token_index
+                )
+                current_time += sp_allgather_latency
 
             # 判断是否为 MoE 层
             is_moe = is_moe_layer(layer_index, self.model)
@@ -811,6 +848,15 @@ class LLMInferenceSimulator:
                 )
                 current_time += tp_comm_latency
 
+            # SP ReduceScatter (张量切分 → 序列切分) - 离开FFN TP层
+            if self.parallelism.sp > 1:
+                sp_reduce_scatter_latency = self._calc_sp_reduce_scatter_latency(num_tokens)
+                self.gantt_builder.add_comm_task(
+                    GanttTaskType.SP_REDUCE_SCATTER, current_time, sp_reduce_scatter_latency,
+                    phase, chip_id, pp_stage, layer_index, token_index
+                )
+                current_time += sp_reduce_scatter_latency
+
         else:
             # 粗粒度模拟 - 整层计算
             layer_latency = self._calc_layer_latency_coarse(num_tokens, context_length)
@@ -850,6 +896,36 @@ class LLMInferenceSimulator:
         ) / (1024 ** 3)
 
         return calc_pp_p2p_latency(data_size_gb, self.pp_bandwidth, self.pp_latency)
+
+    def _calc_sp_allgather_latency(self, num_tokens: int) -> float:
+        """计算 SP AllGather 延迟"""
+        if self.parallelism.sp <= 1:
+            return 0.0
+
+        # 计算数据量
+        data_size_gb = calc_sp_comm_volume_gb(
+            self.model, self.inference, self.parallelism, num_tokens
+        )
+
+        # SP通信使用与TP相同的带宽和延迟（通常SP与TP绑定在同一组）
+        return calc_sp_allgather_latency(
+            data_size_gb, self.tp_bandwidth, self.tp_latency, self.parallelism.sp
+        )
+
+    def _calc_sp_reduce_scatter_latency(self, num_tokens: int) -> float:
+        """计算 SP ReduceScatter 延迟"""
+        if self.parallelism.sp <= 1:
+            return 0.0
+
+        # 计算数据量
+        data_size_gb = calc_sp_comm_volume_gb(
+            self.model, self.inference, self.parallelism, num_tokens
+        )
+
+        # SP通信使用与TP相同的带宽和延迟
+        return calc_sp_reduce_scatter_latency(
+            data_size_gb, self.tp_bandwidth, self.tp_latency, self.parallelism.sp
+        )
 
     def _calc_layer_latency_coarse(self, num_tokens: int, context_length: int) -> float:
         """粗粒度计算单层延迟"""
@@ -1164,24 +1240,33 @@ def run_simulation(
     node_hw = hardware_dict.get("node", {})
     cluster_hw = hardware_dict.get("cluster", {})
 
+    # 默认使用 SG2260E 芯片参数
     hardware = HardwareConfig(
         chip=ChipHardwareConfig(
-            chip_type=chip_hw.get("chip_type", "H100-SXM"),
-            compute_tflops_fp16=chip_hw.get("compute_tflops_fp16", 989),
-            memory_gb=chip_hw.get("memory_gb", 80),
-            memory_bandwidth_gbps=chip_hw.get("memory_bandwidth_gbps", 3350),
+            chip_type=chip_hw.get("chip_type", "SG2260E"),
+            compute_tflops_fp16=chip_hw.get("compute_tflops_fp16", 64),
+            memory_gb=chip_hw.get("memory_gb", 64),
+            memory_bandwidth_gbps=chip_hw.get("memory_bandwidth_gbps", 273),
+            compute_tops_int8=chip_hw.get("compute_tops_int8", 128),
+            num_cores=chip_hw.get("num_cores", 8),
+            memory_bandwidth_utilization=chip_hw.get("memory_bandwidth_utilization", 0.893),
+            l2_cache_mb=chip_hw.get("l2_cache_mb", 16),
+            l2_bandwidth_gbps=chip_hw.get("l2_bandwidth_gbps", 512),
             pcie_bandwidth_gbps=chip_hw.get("pcie_bandwidth_gbps", 64),
             pcie_latency_us=chip_hw.get("pcie_latency_us", 1),
             hbm_random_access_latency_ns=chip_hw.get("hbm_random_access_latency_ns", 100),
         ),
         node=NodeConfig(
             chips_per_node=node_hw.get("chips_per_node", 8),
-            intra_node_bandwidth_gbps=node_hw.get("intra_node_bandwidth_gbps", 900),
+            intra_node_bandwidth_gbps=node_hw.get("intra_node_bandwidth_gbps", 64),
             intra_node_latency_us=node_hw.get("intra_node_latency_us", 1),
+            bandwidth_utilization=node_hw.get("bandwidth_utilization", 0.9),
+            startup_latency_us=node_hw.get("startup_latency_us", 1),
+            sync_latency_us=node_hw.get("sync_latency_us", 1),
         ),
         cluster=ClusterConfig(
             num_nodes=cluster_hw.get("num_nodes", 1),
-            inter_node_bandwidth_gbps=cluster_hw.get("inter_node_bandwidth_gbps", 400),
+            inter_node_bandwidth_gbps=cluster_hw.get("inter_node_bandwidth_gbps", 16),
             inter_node_latency_us=cluster_hw.get("inter_node_latency_us", 2),
         ),
     )

@@ -170,6 +170,15 @@ export const ModelConfigSelector: React.FC<ModelConfigSelectorProps> = ({ value,
     }
   }
 
+  const updateMlaField = <K extends keyof NonNullable<LLMModelConfig['mla_config']>>(
+    field: K,
+    val: NonNullable<LLMModelConfig['mla_config']>[K]
+  ) => {
+    if (value.mla_config) {
+      onChange({ ...value, mla_config: { ...value.mla_config, [field]: val } })
+    }
+  }
+
   const paramRowStyle: React.CSSProperties = {
     display: 'flex',
     justifyContent: 'space-between',
@@ -333,6 +342,25 @@ export const ModelConfigSelector: React.FC<ModelConfigSelectorProps> = ({ value,
                 <InputNumber size="small" min={0} max={100} value={value.moe_config.first_k_dense_replace || 0}
                   onChange={(v) => updateMoeField('first_k_dense_replace', v || 0)} style={{ width: 80 }} />
               </div>
+            </div>
+          )}
+
+          {value.attention_type === 'mla' && value.mla_config && (
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #e8e8e8' }}>
+              <Tag color="cyan" style={{ marginBottom: 6 }}>MLA 并行度</Tag>
+              <div style={paramRowStyle}>
+                <Tooltip title="MLA TP: MLA (Attention) 部分的张量并行度，不设置则使用全局 TP"><Text style={{ fontSize: 11, cursor: 'help' }}>MLA TP</Text></Tooltip>
+                <InputNumber size="small" min={1} max={64} value={value.mla_config.mla_tp || undefined}
+                  onChange={(v) => updateMlaField('mla_tp', v || undefined)} style={{ width: 80 }}
+                  placeholder="同TP" />
+              </div>
+              <div style={paramRowStyle}>
+                <Tooltip title="MLA DP: MLA (Attention) 部分的数据并行度，不设置则使用全局 DP"><Text style={{ fontSize: 11, cursor: 'help' }}>MLA DP</Text></Tooltip>
+                <InputNumber size="small" min={1} max={64} value={value.mla_config.mla_dp || undefined}
+                  onChange={(v) => updateMlaField('mla_dp', v || undefined)} style={{ width: 80 }}
+                  placeholder="同DP" />
+              </div>
+              <Text type="secondary" style={{ fontSize: 10 }}>约束: MLA_TP × MLA_DP = TP × DP</Text>
             </div>
           )}
           <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #e8e8e8' }}>

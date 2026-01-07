@@ -78,8 +78,8 @@ export interface ManualConnection {
 
 // 层级默认连接参数
 export interface LevelConnectionDefaults {
-  bandwidth?: number;  // 默认带宽 (Gbps)
-  latency?: number;    // 默认延迟 (ns)
+  bandwidth?: number;  // 默认带宽 (GB/s)
+  latency?: number;    // 默认延迟 (us)
 }
 
 // 手动连接配置

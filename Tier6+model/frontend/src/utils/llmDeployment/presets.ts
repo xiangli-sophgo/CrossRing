@@ -51,6 +51,8 @@ export const DEEPSEEK_V3: LLMModelConfig = {
     num_shared_experts: 1,
     expert_intermediate_size: 2048,  // 每个专家的FFN维度
     first_k_dense_replace: 3,        // 前3层使用Dense FFN
+    moe_tp: 1,
+    ep_tp_strategy: 'scatter_gather',
   },
   mla_config: DEEPSEEK_V3_MLA,
 };
@@ -77,6 +79,8 @@ export const DEEPSEEK_R1: LLMModelConfig = {
     num_shared_experts: 1,
     expert_intermediate_size: 2048,  // 每个专家的FFN维度
     first_k_dense_replace: 3,        // 前3层使用Dense FFN
+    moe_tp: 1,
+    ep_tp_strategy: 'scatter_gather',
   },
   mla_config: DEEPSEEK_V3_MLA,  // 与 V3 相同的 MLA 配置
 };
@@ -225,22 +229,37 @@ function estimateModelParams(config: LLMModelConfig): string {
 // 预设硬件配置
 // ============================================
 
+/** 算能 SG2260E (默认芯片) */
+export const SG2260E: ChipHardwareConfig = {
+  chip_type: 'SG2260E',
+  compute_tflops_fp16: 64,     // FP16 算力
+  compute_tops_int8: 128,      // INT8 算力
+  num_cores: 8,                // 计算核心数
+  memory_gb: 64,               // DRAM 容量
+  memory_bandwidth_gbps: 273,  // DRAM 理论带宽
+  memory_bandwidth_utilization: 0.893,  // 带宽利用率
+  l2_cache_mb: 16,             // L2M 容量
+  l2_bandwidth_gbps: 512,      // L2M 单向带宽
+};
+
 /** NVIDIA H100 SXM */
 export const H100_SXM: ChipHardwareConfig = {
   chip_type: 'H100-SXM',
-  compute_tflops_fp16: 989,    // FP16 Tensor Core
-  compute_tops_int8: 1979,     // INT8 Tensor Core
+  compute_tflops_fp16: 1979,   // FP16 Tensor Core
+  compute_tops_int8: 3958,     // INT8 Tensor Core
   memory_gb: 80,
   memory_bandwidth_gbps: 3350,
+  memory_bandwidth_utilization: 0.9,
 };
 
 /** NVIDIA H100 PCIe */
 export const H100_PCIE: ChipHardwareConfig = {
   chip_type: 'H100-PCIe',
-  compute_tflops_fp16: 756,
-  compute_tops_int8: 1513,
+  compute_tflops_fp16: 1513,   // FP16 Tensor Core
+  compute_tops_int8: 3026,     // INT8 Tensor Core
   memory_gb: 80,
   memory_bandwidth_gbps: 2000,
+  memory_bandwidth_utilization: 0.9,
 };
 
 /** NVIDIA A100 SXM */
@@ -250,6 +269,7 @@ export const A100_SXM: ChipHardwareConfig = {
   compute_tops_int8: 624,
   memory_gb: 80,
   memory_bandwidth_gbps: 2039,
+  memory_bandwidth_utilization: 0.85,
 };
 
 /** NVIDIA A100 PCIe */
@@ -259,6 +279,7 @@ export const A100_PCIE: ChipHardwareConfig = {
   compute_tops_int8: 624,
   memory_gb: 80,
   memory_bandwidth_gbps: 1935,
+  memory_bandwidth_utilization: 0.85,
 };
 
 /** NVIDIA A800 (中国版) */
@@ -268,6 +289,7 @@ export const A800: ChipHardwareConfig = {
   compute_tops_int8: 624,
   memory_gb: 80,
   memory_bandwidth_gbps: 2039,
+  memory_bandwidth_utilization: 0.85,
 };
 
 /** NVIDIA L40S */
@@ -277,6 +299,7 @@ export const L40S: ChipHardwareConfig = {
   compute_tops_int8: 724,
   memory_gb: 48,
   memory_bandwidth_gbps: 864,
+  memory_bandwidth_utilization: 0.85,
 };
 
 /** NVIDIA RTX 4090 */
@@ -286,6 +309,7 @@ export const RTX_4090: ChipHardwareConfig = {
   compute_tops_int8: 330,
   memory_gb: 24,
   memory_bandwidth_gbps: 1008,
+  memory_bandwidth_utilization: 0.85,
 };
 
 /** AMD MI300X */
@@ -295,6 +319,7 @@ export const MI300X: ChipHardwareConfig = {
   compute_tops_int8: 2614,
   memory_gb: 192,
   memory_bandwidth_gbps: 5300,
+  memory_bandwidth_utilization: 0.85,
 };
 
 /** 华为昇腾910B */
@@ -304,10 +329,12 @@ export const ASCEND_910B: ChipHardwareConfig = {
   compute_tops_int8: 640,
   memory_gb: 64,
   memory_bandwidth_gbps: 1600,
+  memory_bandwidth_utilization: 0.85,
 };
 
 /** 所有预设芯片 */
 export const CHIP_PRESETS: Record<string, ChipHardwareConfig> = {
+  'sg2260e': SG2260E,        // 默认芯片
   'h100-sxm': H100_SXM,
   'h100-pcie': H100_PCIE,
   'a100-sxm': A100_SXM,
@@ -318,6 +345,9 @@ export const CHIP_PRESETS: Record<string, ChipHardwareConfig> = {
   'mi300x': MI300X,
   'ascend-910b': ASCEND_910B,
 };
+
+/** 默认芯片 ID */
+export const DEFAULT_CHIP_ID = 'sg2260e';
 
 /** 获取芯片列表 */
 export function getChipList(): Array<{ id: string; name: string; memory: string; compute: string; isCustom?: boolean }> {
@@ -393,6 +423,14 @@ export interface ChipInterconnectConfig {
   recommended_chips_per_node: number;
 }
 
+/** SG2260E 互联配置 */
+export const SG2260E_INTERCONNECT: ChipInterconnectConfig = {
+  interconnect_type: 'TP Group',
+  intra_node_bandwidth_gbps: 64,   // TP Group 内带宽
+  intra_node_latency_us: 1,
+  recommended_chips_per_node: 8,
+};
+
 /** H100 SXM 互联配置 - NVLink 4.0 */
 export const H100_SXM_INTERCONNECT: ChipInterconnectConfig = {
   interconnect_type: 'NVLink 4.0',
@@ -405,7 +443,7 @@ export const H100_SXM_INTERCONNECT: ChipInterconnectConfig = {
 export const H100_PCIE_INTERCONNECT: ChipInterconnectConfig = {
   interconnect_type: 'PCIe 5.0',
   intra_node_bandwidth_gbps: 128,
-  intra_node_latency_us: 3,
+  intra_node_latency_us: 15,  // PCIe实测 ~13-20us
   recommended_chips_per_node: 8,
 };
 
@@ -413,7 +451,7 @@ export const H100_PCIE_INTERCONNECT: ChipInterconnectConfig = {
 export const A100_SXM_INTERCONNECT: ChipInterconnectConfig = {
   interconnect_type: 'NVLink 3.0',
   intra_node_bandwidth_gbps: 600,
-  intra_node_latency_us: 1,
+  intra_node_latency_us: 2,  // 实测 ~2us
   recommended_chips_per_node: 8,
 };
 
@@ -421,7 +459,7 @@ export const A100_SXM_INTERCONNECT: ChipInterconnectConfig = {
 export const PCIE_4_INTERCONNECT: ChipInterconnectConfig = {
   interconnect_type: 'PCIe 4.0',
   intra_node_bandwidth_gbps: 64,
-  intra_node_latency_us: 5,
+  intra_node_latency_us: 15,  // PCIe实测 ~13-20us
   recommended_chips_per_node: 8,
 };
 
@@ -436,13 +474,14 @@ export const MI300X_INTERCONNECT: ChipInterconnectConfig = {
 /** Ascend 910B 互联配置 - HCCS */
 export const ASCEND_910B_INTERCONNECT: ChipInterconnectConfig = {
   interconnect_type: 'HCCS',
-  intra_node_bandwidth_gbps: 300,
+  intra_node_bandwidth_gbps: 392,  // 7链路 × 56 GB/s
   intra_node_latency_us: 2,
   recommended_chips_per_node: 8,
 };
 
 /** 芯片ID到互联配置的映射 */
 export const CHIP_INTERCONNECT_PRESETS: Record<string, ChipInterconnectConfig> = {
+  'sg2260e': SG2260E_INTERCONNECT,  // 默认芯片
   'h100-sxm': H100_SXM_INTERCONNECT,
   'h100-pcie': H100_PCIE_INTERCONNECT,
   'a100-sxm': A100_SXM_INTERCONNECT,

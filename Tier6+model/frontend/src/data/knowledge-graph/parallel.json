@@ -1,0 +1,65 @@
+[
+  {
+    "id": "scale_up",
+    "name": "Scale Up",
+    "definition": "Scale Up（垂直扩展）是通过向单个系统添加更多资源来提升性能的扩展方式。在AI领域，典型做法是在单台服务器内增加GPU数量（如从4卡升级到8卡），或升级到更高性能的GPU型号。Scale Up的优势在于通信延迟极低（通过NVLink等高速互联），编程模型简单，适合对延迟敏感的场景。但其上限受单节点物理容量限制，例如单台DGX最多8GPU、单插槽内存容量有限等。在大模型时代，Scale Up通常与Scale Out结合使用，形成层次化的集群架构。",
+    "category": "parallel",
+    "source": "Hill, M.D. (1990). What is Scalability? ACM SIGARCH Computer Architecture News",
+    "url": "https://dl.acm.org/doi/10.1145/121973.121975",
+    "notes": "又称垂直扩展(Vertical Scaling)，典型场景如NVLink多GPU互联"
+  },
+  {
+    "id": "scale_out",
+    "name": "Scale Out",
+    "definition": "Scale Out（水平扩展）是通过添加更多独立计算节点来提升系统整体容量的扩展方式。在AI训练中，这意味着将工作负载分布到多台服务器上，通过InfiniBand或高速以太网互联。Scale Out的核心优势是理论上可无限扩展，突破单机物理限制，是训练超大规模模型（如GPT-4、LLaMA-3）的必要条件。但其挑战在于：网络通信延迟和带宽成为瓶颈，需要精心设计的并行策略（如3D并行）来隐藏通信开销；分布式系统的复杂性增加，包括故障处理、负载均衡、一致性维护等。现代AI集群通常采用分层设计：节点内Scale Up（NVLink），节点间Scale Out（InfiniBand）。",
+    "category": "parallel",
+    "source": "Hill, M.D. (1990). What is Scalability? ACM SIGARCH Computer Architecture News",
+    "url": "https://dl.acm.org/doi/10.1145/121973.121975",
+    "notes": "又称水平扩展(Horizontal Scaling)，典型场景如跨服务器InfiniBand互联"
+  },
+  {
+    "id": "tp",
+    "name": "TP",
+    "definition": "Tensor Parallelism（张量并行，简称TP）是一种层内模型并行策略，核心思想是将单层的权重矩阵沿特定维度切分到多个GPU上并行计算。以Transformer的FFN层为例，可将第一个线性层按列切分、第二个按行切分，中间激活无需通信，仅在层边界进行AllReduce同步。TP的优势是能处理单层参数超过单卡显存的情况，且计算效率高（接近线性加速）。但其通信开销随切分数增加而增大，每次前向/反向都需要AllReduce，因此通常限制在8卡以内（一台机器内）通过NVLink高速互联。TP是Megatron-LM提出的关键技术，现已成为大模型训练的标准配置。",
+    "category": "parallel",
+    "source": "Shoeybi et al. (2019). Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism. arXiv:1909.08053",
+    "url": "https://arxiv.org/abs/1909.08053",
+    "notes": "每次前向/反向需要AllReduce同步，通信开销与序列长度×隐藏维度成正比"
+  },
+  {
+    "id": "sp",
+    "name": "SP",
+    "definition": "Sequence Parallelism（序列并行，简称SP）是一种针对激活内存的优化策略，与TP紧密配合使用。在TP中，Attention和FFN层的权重被切分并行计算，但LayerNorm、Dropout等操作仍需要完整的激活张量，这部分激活在每张GPU上都完整存储，造成冗余。SP的解决方案是：将这些操作的输入激活沿序列维度切分，每张GPU只存储和处理部分序列，通过在TP区域边界插入AllGather（收集完整激活）和ReduceScatter（分散激活）操作来衔接。SP可将激活内存减少到原来的1/TP_size，对于长序列训练尤其重要，是Megatron-LM的重要优化。",
+    "category": "parallel",
+    "source": "Korthikanti et al. (2023). Reducing Activation Recomputation in Large Transformer Models. MLSys 2023",
+    "url": "https://arxiv.org/abs/2205.05198",
+    "notes": "SP是TP的补充，主要优化TP无法切分的算子的激活内存"
+  },
+  {
+    "id": "ep",
+    "name": "EP",
+    "definition": "Expert Parallelism（专家并行，简称EP）是专为Mixture-of-Experts（MoE）模型设计的并行策略。在MoE架构中，FFN层被替换为多个并行的专家子网络，每个token由门控网络（Router）动态选择激活哪些专家。EP将不同的专家分布到不同GPU上，每张GPU负责一部分专家的计算。由于每个token可能被路由到任意专家，EP需要AllToAll通信进行全局token重分布：先将token发送到对应专家所在的GPU计算，再将结果返回。这种通信模式与TP的AllReduce不同，对网络拓扑有特殊要求（Fat-Tree比Torus更适合）。EP是DeepSeek-V2、Mixtral等MoE大模型的核心并行技术。",
+    "category": "parallel",
+    "source": "Fedus et al. (2022). Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity. JMLR",
+    "url": "https://arxiv.org/abs/2101.03961",
+    "notes": "EP的通信模式为AllToAll，与TP的AllReduce不同，对网络拓扑要求不同"
+  },
+  {
+    "id": "dp",
+    "name": "DP",
+    "definition": "Data Parallelism（数据并行，简称DP）是最基础也最常用的分布式训练策略。其核心思想是在每个GPU上复制完整的模型副本，将训练数据batch均匀切分给各GPU独立进行前向和反向计算，最后通过AllReduce操作同步梯度，确保所有GPU上的模型参数保持一致。DP的优势在于概念简单、实现成熟、扩展性好（通信量与GPU数量无关）。但其局限是每张GPU必须能容纳完整模型，对于超大模型（如70B+）单卡显存不足时无法使用。实践中DP常与TP/PP组合形成3D并行：TP处理单层过大问题，PP处理层数过多问题，DP扩展训练规模。ZeRO系列优化可显著减少DP的内存冗余。",
+    "category": "parallel",
+    "source": "Dean et al. (2012). Large Scale Distributed Deep Networks. NIPS 2012",
+    "url": "https://papers.nips.cc/paper/2012/hash/6aca97005c68f1206823815f66102863-Abstract.html",
+    "notes": "最简单的并行方式，但每个GPU需存储完整模型，内存效率低"
+  },
+  {
+    "id": "pp",
+    "name": "PP",
+    "definition": "Pipeline Parallelism（流水线并行，简称PP）是将神经网络按层切分为多个Stage，每个Stage分配到不同GPU上串行执行的并行策略。朴素实现会导致严重的气泡（bubble）问题：当某个Stage在计算时其他Stage空闲。为此提出了多种调度策略：GPipe将batch拆分为多个micro-batch流水执行；PipeDream采用1F1B（一次前向一次反向交替）调度进一步减少bubble；Interleaved调度将多个Stage分配给同一GPU交错执行。PP的通信发生在Stage边界，传输激活和梯度，通信量较小但对延迟敏感。PP适合处理层数多、单卡无法容纳所有层的场景，通常跨节点部署（利用高延迟容忍特性）。",
+    "category": "parallel",
+    "source": "Huang et al. (2019). GPipe: Efficient Training of Giant Neural Networks using Pipeline Parallelism. NeurIPS 2019",
+    "url": "https://arxiv.org/abs/1811.06965",
+    "notes": "Interleaved 1F1B调度可将bubble率降至O(1/m)，m为micro-batch数"
+  }
+]

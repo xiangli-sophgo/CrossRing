@@ -9,7 +9,7 @@
 // ============================================
 
 /** 数据精度类型 */
-export type DataType = 'fp32' | 'fp16' | 'bf16' | 'int8' | 'int4';
+export type DataType = 'fp32' | 'fp16' | 'bf16' | 'fp8' | 'int8' | 'int4';
 
 /** 模型类型 */
 export type ModelType = 'dense' | 'moe';
@@ -25,6 +25,12 @@ export type InferencePhase = 'prefill' | 'decode';
 
 /** 瓶颈类型 */
 export type BottleneckType = 'compute' | 'memory' | 'communication' | 'pipeline_bubble' | 'balanced';
+
+/** AllReduce算法类型 */
+export type AllReduceAlgorithm = 'ring' | 'double_binary_tree' | 'halving_doubling' | 'reduce_broadcast';
+
+/** All-to-All算法类型 */
+export type AllToAllAlgorithm = 'pairwise' | 'ring' | 'bruck';
 
 /** 单阶段瓶颈分析 */
 export interface PhaseBottleneckAnalysis {
@@ -98,6 +104,12 @@ export interface MoEConfig {
   expert_intermediate_size?: number;
   /** 前K层使用Dense FFN（DeepSeek V3 = 3，即layer 0-2是Dense，layer 3+是MoE） */
   first_k_dense_replace?: number;
+  /** MoE层出现频率 (1=每层都是MoE, 2=隔层MoE)，默认为1 */
+  moe_layer_freq?: number;
+  /** MoE专家内的TP切分度 */
+  moe_tp?: number;
+  /** EP+TP策略: 'scatter_gather' 或 'group_alltoall' */
+  ep_tp_strategy?: 'scatter_gather' | 'group_alltoall';
 }
 
 /** MLA (Multi-head Latent Attention) 配置 - DeepSeek V3/R1 专用 */
@@ -112,6 +124,10 @@ export interface MLAConfig {
   qk_rope_head_dim: number;
   /** V 的头维度 */
   v_head_dim: number;
+  /** MLA 张量并行度 (可选，默认使用全局 tp) */
+  mla_tp?: number;
+  /** MLA 数据并行度 (可选，默认使用全局 dp) */
+  mla_dp?: number;
 }
 
 /** LLM 模型配置 */
@@ -180,10 +196,18 @@ export interface ChipHardwareConfig {
   compute_tflops_fp16: number;
   /** INT8 算力 (TOPs) */
   compute_tops_int8?: number;
+  /** 计算核心数 */
+  num_cores?: number;
   /** 显存容量 (GB) */
   memory_gb: number;
-  /** 显存带宽 (GB/s) */
+  /** 显存带宽 (GB/s) - 理论带宽 */
   memory_bandwidth_gbps: number;
+  /** 显存带宽利用率 (0-1)，默认 0.9 */
+  memory_bandwidth_utilization?: number;
+  /** L2 缓存容量 (MB) */
+  l2_cache_mb?: number;
+  /** L2 缓存带宽 (GB/s) */
+  l2_bandwidth_gbps?: number;
   /** 成本 ($/hour) - 云服务商按需实例价格 */
   cost_per_hour?: number;
 }
@@ -196,6 +220,12 @@ export interface NodeConfig {
   intra_node_bandwidth_gbps: number;
   /** 节点内互联延迟 (us) */
   intra_node_latency_us: number;
+  /** 带宽利用率 (0-1)，默认 0.9 */
+  bandwidth_utilization?: number;
+  /** 通信启动延迟 (us)，默认 1 */
+  startup_latency_us?: number;
+  /** 同步延迟 (us)，默认 1 */
+  sync_latency_us?: number;
 }
 
 /** 集群配置 */
@@ -226,7 +256,7 @@ export interface HardwareConfig {
 export interface ParallelismStrategy {
   /** 数据并行度 */
   dp: number;
-  /** 张量并行度 */
+  /** 张量并行度 (Attention部分) */
   tp: number;
   /** 流水线并行度 */
   pp: number;
@@ -234,6 +264,8 @@ export interface ParallelismStrategy {
   ep: number;
   /** 序列并行度 */
   sp: number;
+  /** MoE专家内张量并行度 (可选，默认=1，仅MoE模型使用) */
+  moe_tp?: number;
 }
 
 /** 部署方案 */
@@ -454,6 +486,19 @@ export const DEFAULT_SCORE_WEIGHTS: ScoreWeights = {
   balance: 0.15,
 };
 
+/** TPS per chip 优化权重 (文档推荐: max TPS per chip) */
+export const TPS_OPTIMIZED_WEIGHTS: ScoreWeights = {
+  latency: 0.1,       // 仅作为约束，不主导评分
+  throughput: 0.7,    // TPS per chip 主导
+  efficiency: 0.15,   // 资源利用率
+  balance: 0.05,      // 负载均衡
+};
+
+/** Batch Size 候选值 (包含非 2 幂次值) */
+export const BATCH_SIZE_OPTIONS: number[] = [
+  1, 2, 4, 8, 10, 12, 16, 32, 64, 128, 256, 512, 1024, 1280,
+];
+
 /** 搜索约束 */
 export interface SearchConstraints {
   /** 最大芯片数 */
@@ -577,6 +622,7 @@ export const BYTES_PER = {
   fp32: 4,
   fp16: 2,
   bf16: 2,
+  fp8: 1,
   int8: 1,
   int4: 0.5,
 } as const;

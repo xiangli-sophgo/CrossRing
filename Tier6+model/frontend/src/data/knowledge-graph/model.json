@@ -1,0 +1,128 @@
+[
+  {
+    "id": "token",
+    "name": "Token",
+    "definition": "Token是大语言模型处理文本的最小离散单位，由分词器（Tokenizer）将原始文本切分得到。不同于传统NLP按单词分词，现代LLM普遍使用子词分词算法（如BPE、WordPiece、SentencePiece），将文本切分为介于字符和单词之间的片段，既能覆盖所有可能的输入又能保持合理的词表大小。典型词表大小为32K-128K个token。Token的统计特性：英文中1个token约等于0.75个单词或4个字符；中文中1个token约等于1-2个汉字。Token是计费和性能的基本单位：API按token数计费，模型上下文长度以token计量（如4K、32K、128K）。Token还决定了位置编码和注意力计算的范围。理解token对于控制成本、估算延迟和设计prompt都至关重要。",
+    "category": "model",
+    "source": "Sennrich et al. (2016). Neural Machine Translation of Rare Words with Subword Units. ACL",
+    "url": "https://arxiv.org/abs/1508.07909",
+    "notes": "GPT系列使用BPE分词，1 token约等于0.75个英文单词"
+  },
+  {
+    "id": "注意力机制",
+    "name": "注意力机制",
+    "definition": "Attention Mechanism（注意力机制）是一种让模型动态关注输入序列不同部分的技术，通过计算Query与Key的相似度来加权Value。是Transformer架构的核心组件。",
+    "category": "model",
+    "source": "Vaswani et al. (2017). Attention Is All You Need. NeurIPS 2017",
+    "url": "https://arxiv.org/abs/1706.03762",
+    "notes": "自注意力复杂度O(n²)，n为序列长度"
+  },
+  {
+    "id": "权重",
+    "name": "权重",
+    "definition": "Weight（权重）是神经网络中神经元连接的可学习参数，反映输入对输出的影响强度。LLM的权重主要分布在Attention和FFN层，存储和传输权重是主要的内存开销。",
+    "category": "model",
+    "source": "Goodfellow et al. (2016). Deep Learning. MIT Press",
+    "url": "https://www.deeplearningbook.org/",
+    "notes": "70B模型FP16权重约140GB，是TP/PP切分的主要对象"
+  },
+  {
+    "id": "激活",
+    "name": "激活",
+    "definition": "Activation（激活）是神经网络前向传播过程中各层的中间输出值。LLM推理中，激活内存随batch size和序列长度增长，是SP优化的主要目标。",
+    "category": "model",
+    "source": "Goodfellow et al. (2016). Deep Learning. MIT Press",
+    "url": "https://www.deeplearningbook.org/",
+    "notes": "训练时需保存激活用于反向传播，推理时可流式释放"
+  },
+  {
+    "id": "transformer",
+    "name": "Transformer",
+    "definition": "Transformer是2017年Google提出的革命性神经网络架构，完全基于注意力机制建模序列依赖关系，摒弃了此前主流的RNN/LSTM结构。原始架构包含编码器（Encoder）和解码器（Decoder）两部分，每部分由多个相同的层堆叠而成。每层包含多头自注意力（MHA）和前馈网络（FFN）两个子模块，配合残差连接和层归一化。Transformer的核心优势是：1）自注意力可并行计算所有位置的依赖，训练速度大幅提升；2）能有效捕获长距离依赖；3）架构统一，易于扩展。现代LLM主要使用仅解码器（Decoder-only）变体，如GPT系列、LLaMA、Qwen等，通过因果注意力掩码实现自回归生成。",
+    "category": "model",
+    "source": "Vaswani et al. (2017). Attention Is All You Need. NeurIPS",
+    "url": "https://arxiv.org/abs/1706.03762",
+    "notes": "GPT系列使用仅解码器架构，BERT使用仅编码器架构"
+  },
+  {
+    "id": "attention",
+    "name": "Attention",
+    "definition": "Attention（注意力机制）是Transformer的核心计算单元，通过计算Query与Key的相似度来动态加权Value，实现序列元素间的信息交互。具体计算为：Attention(Q,K,V) = softmax(QK^T/sqrt(d_k))V。其中Q（查询）、K（键）、V（值）分别由输入经不同线性变换得到，d_k是Key的维度用于缩放。注意力权重矩阵反映了每个位置应该关注哪些其他位置。计算复杂度为O(n²d)，n为序列长度，d为维度，这是长序列处理的主要瓶颈。自注意力（Self-Attention）中Q、K、V来自同一序列；交叉注意力中Q来自一个序列，K、V来自另一序列。注意力机制使模型能并行处理任意距离的依赖关系，是Transformer超越RNN的关键创新。",
+    "category": "model",
+    "source": "Vaswani et al. (2017). Attention Is All You Need. NeurIPS",
+    "url": "https://arxiv.org/abs/1706.03762",
+    "notes": "Scaled Dot-Product Attention: softmax(QK^T/√d_k)V"
+  },
+  {
+    "id": "mha",
+    "name": "MHA",
+    "definition": "MHA（Multi-Head Attention，多头注意力）将注意力计算分成h个并行的头，每个头独立学习不同的注意力模式。具体实现：输入X首先通过h组不同的W_Q、W_K、W_V线性变换分别得到h组Q、K、V；每组独立计算注意力；最后将h个头的输出拼接并通过W_O投影得到最终结果。多头的好处是：1）让模型同时关注不同位置的不同表示子空间；2）不同头可以捕获不同类型的依赖（如局部语法、长程语义）；3）增加模型容量而计算量与单头相当。典型配置如GPT-3：h=96头，d_model=12288，d_head=128。MHA的主要参数包括Q/K/V投影矩阵（3×d_model²）和输出投影矩阵（d_model²），是Transformer参数量的主要来源之一。",
+    "category": "model",
+    "source": "Vaswani et al. (2017). Attention Is All You Need. NeurIPS",
+    "url": "https://arxiv.org/abs/1706.03762",
+    "notes": "典型配置：h=32头，d_head=128，总维度4096"
+  },
+  {
+    "id": "mqa",
+    "name": "MQA",
+    "definition": "MQA（Multi-Query Attention，多查询注意力）是MHA的内存优化变体，由Google在2019年提出。核心改变是：保留多个Query头，但所有Query头共享同一组Key和Value。这使得KV Cache大小从h×d_head降低到d_head（h为头数），减少了1/h。对于典型的32头模型，KV Cache可减少到原来的1/32。MQA对推理极其友好：不仅节省显存，还减少了内存带宽需求（每步decode需要读取的KV Cache更少）。代价是可能损失一些模型质量，因为不同Query头被强制使用相同的K/V表示。实践中MQA的质量损失是可接受的，PaLM、Falcon等模型采用了MQA。MQA是在模型架构层面解决KV Cache瓶颈的开创性工作，启发了后续的GQA和MLA。",
+    "category": "model",
+    "source": "Shazeer (2019). Fast Transformer Decoding: One Write-Head is All You Need. arXiv:1911.02150",
+    "url": "https://arxiv.org/abs/1911.02150",
+    "notes": "MQA的KV Cache仅为MHA的1/h（h为头数）"
+  },
+  {
+    "id": "gqa",
+    "name": "GQA",
+    "definition": "GQA（Grouped Query Attention，分组查询注意力）是MHA和MQA之间的折中方案，由Google在2023年提出。GQA将h个Query头分成g组，每组内的Query头共享同一组Key和Value。g=h时退化为MHA，g=1时退化为MQA。这提供了连续的精度-效率权衡空间。例如LLaMA-2 70B使用8组GQA（32个Query头分成8组），KV Cache减少到MHA的1/4（而非MQA的1/32），在显著节省内存的同时保持了接近MHA的模型质量。GQA的另一个优势是可以通过上采样将MHA预训练的检查点转换为GQA：先复制K/V头再继续训练，无需从头训练。实验表明GQA在长序列推理中质量损失极小，已成为现代开源大模型（LLaMA-2/3、Qwen-2、Mistral等）的标准配置。",
+    "category": "model",
+    "source": "Ainslie et al. (2023). GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints. EMNLP",
+    "url": "https://arxiv.org/abs/2305.13245",
+    "notes": "LLaMA-2 70B使用8组GQA，32个Query头共享8组KV"
+  },
+  {
+    "id": "mla",
+    "name": "MLA",
+    "definition": "MLA（Multi-head Latent Attention，多头潜在注意力）是DeepSeek-V2提出的创新注意力机制，通过低秩压缩大幅减少KV Cache。MLA的核心思想是：不直接缓存K和V，而是缓存它们的低秩压缩表示（潜在向量）。具体地，将K和V通过低秩矩阵压缩到远小于原始维度的潜在空间，推理时从潜在向量恢复K和V进行注意力计算。由于潜在维度远小于原始KV维度，缓存大小可减少90%以上。MLA还引入了解耦的RoPE位置编码，将位置信息与内容信息分离处理。DeepSeek-V2使用MLA实现了超低的推理成本：236B参数的MoE模型，KV Cache仅相当于7B级别模型。MLA代表了KV Cache优化的新方向，通过训练时学习更高效的KV表示，而非简单共享（如MQA/GQA）。",
+    "category": "model",
+    "source": "DeepSeek-AI (2024). DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model",
+    "url": "https://arxiv.org/abs/2405.04434",
+    "notes": "MLA的KV Cache比MHA减少90%以上"
+  },
+  {
+    "id": "moe",
+    "name": "MoE",
+    "definition": "MoE（Mixture of Experts，混合专家模型）是一种稀疏激活的神经网络架构，通过门控机制（Router）动态选择部分专家子网络来处理每个输入。在Transformer中，MoE通常替换FFN层：将一个大FFN拆分为多个小专家FFN，每个token只激活其中一部分（如Top-2）。这样模型参数量可以很大（提供更强的表示能力），但计算量保持可控（仅激活部分专家）。例如Mixtral 8x7B有8个专家共47B参数，但每次推理只激活2个专家，计算量约等于14B密集模型。MoE的挑战包括：负载均衡（防止所有token路由到少数专家）、通信开销（EP需要AllToAll）、显存占用（所有专家都要加载）。DeepSeek-V2、GPT-4等顶级模型据信都采用MoE架构。",
+    "category": "model",
+    "source": "Shazeer et al. (2017). Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer. ICLR",
+    "url": "https://arxiv.org/abs/1701.06538",
+    "notes": "Mixtral使用8个专家每次激活2个，DeepSeek-V2使用160个专家每次激活6个"
+  },
+  {
+    "id": "ffn",
+    "name": "FFN",
+    "definition": "FFN（Feed-Forward Network，前馈网络）是Transformer每层中Attention之后的两层全连接网络，对每个位置独立进行非线性变换，为模型提供逐位置的特征转换能力。标准FFN结构为：FFN(x) = W_2 · activation(W_1 · x + b_1) + b_2，其中隐藏维度通常是模型维度的4倍（如d_model=4096时d_ff=16384）。激活函数从原始的ReLU演进到GELU、SiLU/Swish，现代模型如LLaMA使用SwiGLU变体（引入门控机制）。FFN占据Transformer参数的约2/3：W_1维度d_model×d_ff，W_2维度d_ff×d_model。在MoE模型中，FFN被替换为多个专家FFN，通过路由机制稀疏激活。FFN被认为是模型存储知识的主要位置，其参数编码了训练语料中的事实性知识。",
+    "category": "model",
+    "source": "Vaswani et al. (2017). Attention Is All You Need. NeurIPS",
+    "url": "https://arxiv.org/abs/1706.03762",
+    "notes": "FFN(x) = max(0, xW₁+b₁)W₂+b₂ 或使用GELU/SwiGLU激活"
+  },
+  {
+    "id": "kv_cache",
+    "name": "KV Cache",
+    "definition": "KV Cache是LLM推理中的核心优化技术，用于缓存自注意力计算中已处理token的Key和Value向量。在自回归生成中，每生成一个新token都需要与所有历史token计算注意力。如果不缓存，每步都要重新计算所有历史token的K和V，计算量随序列增长呈O(n²)增长。通过KV Cache，历史token的K/V只需计算一次后存储，新token只需计算自己的K/V并与缓存拼接。这将计算复杂度从O(n²)降到O(n)。但KV Cache带来了显著的内存开销：对于LLaMA-70B，单条8K序列的KV Cache约需2.5GB。这使得内存管理（如PagedAttention）和KV压缩（如MQA/GQA/MLA）成为推理优化的重点。",
+    "category": "model",
+    "source": "Pope et al. (2023). Efficiently Scaling Transformer Inference. MLSys",
+    "url": "https://arxiv.org/abs/2211.05102",
+    "notes": "KV Cache大小 = 2 × 层数 × 头数 × 序列长度 × 头维度 × 精度字节"
+  },
+  {
+    "id": "rope",
+    "name": "RoPE",
+    "definition": "RoPE（Rotary Position Embedding）是通过旋转矩阵将位置信息编码到Query和Key向量的技术。支持长度外推，是LLaMA等模型的标准位置编码。",
+    "category": "model",
+    "source": "Su et al. (2021). RoFormer: Enhanced Transformer with Rotary Position Embedding. arXiv:2104.09864",
+    "url": "https://arxiv.org/abs/2104.09864",
+    "notes": "RoPE的相对位置信息通过Q和K的旋转角度差体现"
+  }
+]

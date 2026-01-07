@@ -45,7 +45,7 @@ function buildGraphFromTopology(topology: HierarchicalTopology): Graph {
     }
 
     const bandwidth = conn.bandwidth ?? 100; // 默认100 Gbps
-    const latency = conn.latency ?? 100; // 默认100 ns
+    const latency = conn.latency ?? 1; // 默认1 us
 
     edges.get(conn.source)!.set(conn.target, { bandwidth, latency });
     edges.get(conn.target)!.set(conn.source, { bandwidth, latency });

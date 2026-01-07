@@ -1,0 +1,101 @@
+[
+  {
+    "id": "tps",
+    "name": "TPS",
+    "definition": "TPS（Tokens Per Second，每秒生成token数）是衡量LLM推理性能的核心指标，分为两种：1）Prefill TPS：处理输入prompt的速度，计算密集型，主要受GPU算力限制；2）Decode TPS：生成输出token的速度，内存带宽密集型，主要受HBM带宽限制。用户体验主要由Decode TPS决定。以H100（3TB/s HBM带宽）推理LLaMA-70B（140GB FP16权重）为例：每生成一个token需读取全部权重，理论上限约21 token/s（单用户）。提高TPS的方法包括：增大batch size（均摊权重读取）、量化（减少数据量）、Tensor Parallelism（叠加带宽）、Speculative Decoding（一次验证多token）。MLPerf Inference使用TPS作为LLM推理的标准性能指标。实际系统还需权衡TPS与延迟（TTFT/TPOT）的关系。",
+    "category": "inference",
+    "source": "MLPerf Inference Benchmark; LLM Inference Performance Metrics",
+    "url": "https://mlcommons.org/benchmarks/inference/",
+    "notes": "LLM推理TPS受限于HBM带宽和GPU算力"
+  },
+  {
+    "id": "fp4_int8",
+    "name": "FP4/INT8",
+    "definition": "FP4是4位浮点格式（如E2M1），INT8是8位整数格式（-128到127）。两者均用于神经网络量化，以较小精度损失换取内存和计算效率提升。",
+    "category": "inference",
+    "source": "NVIDIA Transformer Engine; Dettmers et al. (2022). LLM.int8(): 8-bit Matrix Multiplication. NeurIPS",
+    "url": "https://arxiv.org/abs/2208.07339",
+    "notes": "H100支持FP8/INT8张量核，NVIDIA Blackwell支持FP4"
+  },
+  {
+    "id": "prefill",
+    "name": "Prefill",
+    "definition": "Prefill是LLM推理的第一阶段，对用户输入的完整prompt进行一次性前向计算。在这个阶段，模型并行处理所有输入token，计算它们的注意力并生成KV Cache。Prefill的特点是：1）计算密集型（Compute-bound），因为要处理大量token的矩阵乘法；2）可高度并行化，所有prompt token同时计算；3）延迟与prompt长度成正比（O(n²)计算量）。对于长prompt（如RAG场景），Prefill可能占据推理时间的大部分。Prefill的优化策略包括：使用更大batch size提高GPU利用率、Chunked Prefill将长prompt分块处理、Splitwise将Prefill与Decode分离到不同GPU。Prefill完成后输出第一个生成token，进入Decode阶段。",
+    "category": "inference",
+    "source": "Pope et al. (2023). Efficiently Scaling Transformer Inference. MLSys",
+    "url": "https://arxiv.org/abs/2211.05102",
+    "notes": "Prefill阶段计算量为O(n²d)，n为prompt长度，d为隐藏维度"
+  },
+  {
+    "id": "decode",
+    "name": "Decode",
+    "definition": "Decode是LLM推理的第二阶段，基于Prefill构建的KV Cache逐个token自回归生成输出。每生成一个token需要：1）读取该token的embedding；2）读取全部模型权重进行前向计算；3）读取所有历史token的KV Cache计算注意力；4）将新token的KV追加到Cache。Decode的特点是严重的内存带宽瓶颈（Memory-bound）：每个token只做很少的计算，但要读取GB级的权重和KV Cache，算术强度极低。因此Decode的TPS主要受限于HBM带宽而非算力。优化策略包括：Continuous Batching提高batch size（均摊权重读取开销）、量化减少数据量、Speculative Decoding一次验证多token、MQA/GQA/MLA减少KV Cache。",
+    "category": "inference",
+    "source": "Pope et al. (2023). Efficiently Scaling Transformer Inference. MLSys",
+    "url": "https://arxiv.org/abs/2211.05102",
+    "notes": "Decode阶段是典型的memory-bound场景，TPS受限于HBM带宽"
+  },
+  {
+    "id": "flash_attention",
+    "name": "FlashAttention",
+    "definition": "FlashAttention是Stanford大学Tri Dao等人提出的IO感知注意力计算算法，通过精妙的分块（tiling）策略大幅减少对HBM的访问次数。传统注意力实现需要将完整的N×N注意力矩阵写入HBM再读回，而FlashAttention在SRAM（片上高速缓存）中分块计算，仅在最终输出时写HBM。这将内存复杂度从O(N²)降至O(N)，同时因为减少了内存访问，计算速度也大幅提升（2-4倍）。FlashAttention是精确计算，没有近似误差，可直接替换标准注意力。FlashAttention-2进一步优化了并行化策略，达到理论峰值性能的50-73%。FlashAttention-3支持FP8和异步计算。现已成为主流LLM训练和推理框架的标配。",
+    "category": "inference",
+    "source": "Dao et al. (2022). FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness. NeurIPS",
+    "url": "https://arxiv.org/abs/2205.14135",
+    "notes": "FlashAttention-2进一步优化，达到理论峰值性能的50-73%"
+  },
+  {
+    "id": "paged_attention",
+    "name": "PagedAttention",
+    "definition": "PagedAttention是vLLM提出的KV Cache管理技术，将KV Cache分成固定大小的页，实现动态分配和跨请求共享。解决内存碎片问题，提高吞吐量。",
+    "category": "inference",
+    "source": "Kwon et al. (2023). Efficient Memory Management for Large Language Model Serving with PagedAttention. SOSP",
+    "url": "https://arxiv.org/abs/2309.06180",
+    "notes": "PagedAttention使KV Cache利用率从20-40%提升至近100%"
+  },
+  {
+    "id": "speculative_decoding",
+    "name": "Speculative Decoding",
+    "definition": "Speculative Decoding（推测解码）用小模型快速生成多个候选token，再由大模型并行验证。通过一次前向验证多个token，加速自回归生成。",
+    "category": "inference",
+    "source": "Leviathan et al. (2023). Fast Inference from Transformers via Speculative Decoding. ICML",
+    "url": "https://arxiv.org/abs/2211.17192",
+    "notes": "加速比取决于小模型与大模型的token接受率"
+  },
+  {
+    "id": "continuous_batching",
+    "name": "Continuous Batching",
+    "definition": "Continuous Batching（连续批处理）是动态调整推理批次的技术，已完成的请求立即退出，新请求随时加入。最大化GPU利用率，提高服务吞吐量。",
+    "category": "inference",
+    "source": "Yu et al. (2022). Orca: A Distributed Serving System for Transformer-Based Generative Models. OSDI",
+    "url": "https://www.usenix.org/conference/osdi22/presentation/yu",
+    "notes": "也称Iteration-level Batching或In-flight Batching"
+  },
+  {
+    "id": "quantization",
+    "name": "Quantization",
+    "definition": "Quantization（量化）将模型权重和激活从高精度（FP32/FP16）转为低精度（INT8/INT4/FP8），减少内存占用和计算量，可能轻微损失精度。",
+    "category": "inference",
+    "source": "Dettmers et al. (2022). LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale. NeurIPS",
+    "url": "https://arxiv.org/abs/2208.07339",
+    "notes": "PTQ(训练后量化)简单但精度损失大，QAT(量化感知训练)效果更好"
+  },
+  {
+    "id": "gradient_checkpointing",
+    "name": "Gradient Checkpointing",
+    "definition": "Gradient Checkpointing（梯度检查点）只保存部分层的激活值，反向传播时重新计算未保存的激活。用内存换计算，使有限GPU内存可训练更大模型。",
+    "category": "inference",
+    "source": "Chen et al. (2016). Training Deep Nets with Sublinear Memory Cost. arXiv:1604.06174",
+    "url": "https://arxiv.org/abs/1604.06174",
+    "notes": "激活内存从O(n)降至O(√n)，计算量增加约33%"
+  },
+  {
+    "id": "zero",
+    "name": "ZeRO",
+    "definition": "ZeRO（Zero Redundancy Optimizer）是DeepSpeed提出的优化器状态分片技术，将优化器状态、梯度和参数分片到多个GPU，消除数据并行中的冗余存储。",
+    "category": "inference",
+    "source": "Rajbhandari et al. (2020). ZeRO: Memory Optimizations Toward Training Trillion Parameter Models. SC",
+    "url": "https://arxiv.org/abs/1910.02054",
+    "notes": "ZeRO-1/2/3分别分片优化器状态/梯度/参数"
+  }
+]

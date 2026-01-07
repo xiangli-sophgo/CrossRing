@@ -1,0 +1,137 @@
+[
+  {
+    "id": "torus",
+    "name": "Torus",
+    "definition": "Torus（环面）是将节点排列成多维网格并在每个维度首尾相连的网络拓扑。相比Mesh减少了直径和平均跳数，是超级计算机的常用互联拓扑。",
+    "category": "interconnect",
+    "source": "Dally & Towles (2004). Principles and Practices of Interconnection Networks. Morgan Kaufmann",
+    "url": "https://en.wikipedia.org/wiki/Torus_interconnect",
+    "notes": "IBM Blue Gene使用3D Torus，Fugaku使用6D Torus"
+  },
+  {
+    "id": "fat_tree",
+    "name": "Fat-Tree",
+    "definition": "Fat-Tree（胖树）是一种多层交换机构成的网络拓扑，核心特点是无阻塞（non-blocking）：任意两个端点间可同时以全带宽通信而不相互干扰。其设计原则是越靠近根节点，链路越胖（带宽越大），上层聚合带宽等于下层总带宽。典型的三层Fat-Tree由边缘层（ToR交换机连接服务器）、汇聚层和核心层构成，形成层次化的全带宽互联。Fat-Tree是现代数据中心网络的主流架构，因为它提供良好的双分带宽，适合AllToAll等多对多通信模式，这对Expert Parallelism至关重要。相比Torus/Dragonfly等HPC常用拓扑，Fat-Tree路由简单、故障恢复快，但成本较高（交换机数量大）。NVIDIA的InfiniBand集群和云厂商的AI网络普遍采用Fat-Tree或其变体（如Clos网络、Leaf-Spine架构）。",
+    "category": "interconnect",
+    "source": "Leiserson (1985). Fat-Trees: Universal Networks for Hardware-Efficient Supercomputing. IEEE TC",
+    "url": "https://en.wikipedia.org/wiki/Fat_tree",
+    "notes": "Clos网络是Fat-Tree的一般化形式"
+  },
+  {
+    "id": "dragonfly",
+    "name": "Dragonfly",
+    "definition": "Dragonfly（蜻蜓）是一种高效的层次化网络拓扑，将节点分组，组内全连接，组间通过全局链路稀疏连接。直径低、成本效益高，用于大规模HPC系统。",
+    "category": "interconnect",
+    "source": "Kim et al. (2008). Technology-Driven, Highly-Scalable Dragonfly Topology. ISCA",
+    "url": "https://ieeexplore.ieee.org/document/4556717",
+    "notes": "Cray Slingshot使用Dragonfly+变体拓扑"
+  },
+  {
+    "id": "mesh",
+    "name": "Mesh",
+    "definition": "Mesh（网格）是节点排列成规则多维网格、每个节点与相邻节点直接连接的拓扑。结构规则、布线简单，是片上网络（NoC）最常用的拓扑。",
+    "category": "interconnect",
+    "source": "Dally & Towles (2004). Principles and Practices of Interconnection Networks. Morgan Kaufmann",
+    "url": "https://en.wikipedia.org/wiki/Mesh_networking",
+    "notes": "2D Mesh直径为2(√N-1)，N为节点数"
+  },
+  {
+    "id": "ring",
+    "name": "Ring",
+    "definition": "Ring（环形）是所有节点连成闭环的拓扑，数据沿环单向或双向传输。结构最简单但延迟随节点数线性增长，适用于小规模或特定通信模式。",
+    "category": "interconnect",
+    "source": "Dally & Towles (2004). Principles and Practices of Interconnection Networks. Morgan Kaufmann",
+    "url": "https://en.wikipedia.org/wiki/Ring_network",
+    "notes": "Ring AllReduce是经典的带宽最优集合通信算法"
+  },
+  {
+    "id": "crossbar",
+    "name": "Crossbar",
+    "definition": "Crossbar（交叉开关）是任意输入端口可同时连接到任意输出端口的全连接交换结构。无阻塞但成本为O(N²)，适用于小规模高性能场景。",
+    "category": "interconnect",
+    "source": "Dally & Towles (2004). Principles and Practices of Interconnection Networks. Morgan Kaufmann",
+    "url": "https://en.wikipedia.org/wiki/Crossbar_switch",
+    "notes": "NVSwitch内部使用Crossbar实现GPU全连接"
+  },
+  {
+    "id": "nvlink",
+    "name": "NVLink",
+    "definition": "NVLink是NVIDIA专为GPU间高速互联开发的专有技术，提供远超PCIe的带宽和更低的延迟。NVLink 4.0（H100）单链路双向带宽100GB/s，H100配备18条NVLink，总带宽达900GB/s，是PCIe 5.0 x16（128GB/s）的7倍。NVLink支持GPU间直接内存访问（GPUDirect P2P），无需经过CPU内存中转。在多GPU服务器中，NVLink通过NVSwitch交换芯片实现GPU全连接拓扑，8张H100 GPU两两之间都有900GB/s的直连带宽。这种高带宽、低延迟的互联是Tensor Parallelism高效实现的基础，使得8卡TP能达到接近线性的加速比。NVLink是NVIDIA AI基础设施的核心竞争优势之一。",
+    "category": "interconnect",
+    "source": "NVIDIA NVLink and NVSwitch Technology Overview",
+    "url": "https://www.nvidia.com/en-us/data-center/nvlink/",
+    "notes": "H100配备18条NVLink 4.0，总带宽900GB/s双向"
+  },
+  {
+    "id": "nvswitch",
+    "name": "NVSwitch",
+    "definition": "NVSwitch是NVIDIA开发的专用交换芯片，用于在多GPU系统中实现NVLink的全连接互联。没有NVSwitch时，GPU间的NVLink连接是点对点的，8卡全连接需要每卡7条链路共28对连接；有了NVSwitch，所有GPU连接到交换芯片，任意两卡间通过NVSwitch一跳互通。第三代NVSwitch（用于DGX H100）有64个NVLink 4.0端口，总交换带宽达13.6TB/s，内部采用Crossbar无阻塞架构。DGX H100使用4个NVSwitch芯片，每个GPU连接到所有4个NVSwitch，实现8卡全连接，任意两GPU间都有900GB/s带宽。NVSwitch还支持跨节点互联：第四代NVSwitch配合NVLink Switch可将256个GPU连成单一计算域（GB200 NVL72）。NVSwitch是实现高效Tensor Parallelism的关键基础设施。",
+    "category": "interconnect",
+    "source": "NVIDIA NVSwitch Architecture Whitepaper",
+    "url": "https://www.nvidia.com/en-us/data-center/nvlink/",
+    "notes": "DGX H100使用4个NVSwitch实现8-GPU全连接"
+  },
+  {
+    "id": "infinity_fabric",
+    "name": "Infinity Fabric",
+    "definition": "Infinity Fabric是AMD开发的可扩展片上/片间互联架构，连接CPU核心、GPU CU和I/O设备。支持缓存一致性，是AMD芯粒(Chiplet)架构的基础。",
+    "category": "interconnect",
+    "source": "AMD Infinity Architecture Technical Overview",
+    "url": "https://www.amd.com/en/technologies/infinity-architecture",
+    "notes": "Infinity Fabric 3.0支持CXL协议"
+  },
+  {
+    "id": "upi",
+    "name": "UPI",
+    "definition": "UPI（Ultra Path Interconnect）是Intel开发的CPU间互联技术，取代QPI。用于多路服务器中CPU之间的高速通信和缓存一致性维护。",
+    "category": "interconnect",
+    "source": "Intel Xeon Scalable Processor Architecture",
+    "url": "https://en.wikipedia.org/wiki/Intel_Ultra_Path_Interconnect",
+    "notes": "第四代UPI速率16GT/s，支持最多8路互联"
+  },
+  {
+    "id": "cxl",
+    "name": "CXL",
+    "definition": "CXL（Compute Express Link）是基于PCIe物理层的开放互联标准，专为解决CPU与加速器、内存设备间的高效通信而设计。CXL定义了三种协议：CXL.io（兼容PCIe的I/O协议）、CXL.cache（设备缓存CPU内存）、CXL.mem（CPU访问设备内存），可组合使用。CXL的核心价值是提供低延迟的缓存一致性访问，设备内存可作为CPU地址空间的一部分直接访问，无需显式数据拷贝。CXL 2.0引入交换和多设备支持；CXL 3.0支持内存池化（多主机共享内存池）和fabric扩展。CXL对AI的意义：可实现大容量内存扩展（突破单机DDR容量限制）、CPU-GPU间低延迟数据共享、异构计算内存统一管理。Intel、AMD、ARM均已支持CXL，被认为是下一代数据中心互联的重要标准。",
+    "category": "interconnect",
+    "source": "CXL Consortium. Compute Express Link Specification",
+    "url": "https://www.computeexpresslink.org/",
+    "notes": "CXL 3.0支持内存池化和多级交换"
+  },
+  {
+    "id": "pcie",
+    "name": "PCIe",
+    "definition": "PCIe（Peripheral Component Interconnect Express）是高速串行扩展总线标准，用于连接CPU与GPU、NVMe、网卡等外设。PCIe 5.0单通道速率32GT/s。",
+    "category": "interconnect",
+    "source": "PCI-SIG. PCI Express Base Specification",
+    "url": "https://pcisig.com/",
+    "notes": "x16 PCIe 5.0双向带宽128GB/s，是GPU与CPU的主要连接方式"
+  },
+  {
+    "id": "infiniband",
+    "name": "InfiniBand",
+    "definition": "InfiniBand是专为高性能计算和数据中心设计的高速网络技术，由IBTA（InfiniBand Trade Association）标准化。InfiniBand的核心优势包括：1）原生RDMA支持，绕过操作系统内核，端到端延迟低至1-2微秒；2）高带宽，NDR速率单端口400Gb/s（双向），XDR将达800Gb/s；3）无损网络设计，基于信用流控保证不丢包；4）硬件卸载，网卡直接处理传输协议。InfiniBand是AI超级计算集群的首选网络：NVIDIA DGX SuperPOD使用InfiniBand互联，Meta的AI Research SuperCluster配备16000张A100通过InfiniBand连接。InfiniBand的缺点是成本高、生态封闭（主要由NVIDIA Mellanox垄断）。",
+    "category": "interconnect",
+    "source": "InfiniBand Trade Association. InfiniBand Architecture Specification",
+    "url": "https://www.infinibandta.org/",
+    "notes": "InfiniBand原生支持RDMA，无需额外协议栈"
+  },
+  {
+    "id": "roce",
+    "name": "RoCE",
+    "definition": "RoCE（RDMA over Converged Ethernet）是在标准以太网上实现RDMA功能的技术，由IBTA（InfiniBand贸易协会）标准化。RoCE有两个版本：RoCEv1工作在L2层，不能跨子网路由；RoCEv2封装在UDP/IP之上，可在L3网络中路由，是目前主流。RoCE的优势是复用现有以太网基础设施，部署成本低于InfiniBand；缺点是以太网原生是有损的，需要配合PFC（逐跳流控）防止丢包，ECN（拥塞通知）和DCQCN（拥塞控制算法）处理拥塞。RoCE的典型延迟约3-5微秒（比InfiniBand略高），带宽与底层以太网相同（100/200/400Gbps）。RoCE在云计算和企业数据中心应用广泛，AWS、Azure的高性能网络都基于RoCE。对于AI训练，InfiniBand仍是首选，但RoCE正在追赶。",
+    "category": "interconnect",
+    "source": "InfiniBand Trade Association. RoCE Specification",
+    "url": "https://en.wikipedia.org/wiki/RDMA_over_Converged_Ethernet",
+    "notes": "RoCEv2可利用现有以太网基础设施，部署成本低于InfiniBand"
+  },
+  {
+    "id": "ethernet",
+    "name": "Ethernet",
+    "definition": "Ethernet（以太网）是最广泛使用的局域网技术，遵循IEEE 802.3标准。数据中心常用100/200/400/800GbE，是通用网络连接的基础。",
+    "category": "interconnect",
+    "source": "IEEE 802.3 Ethernet Standard",
+    "url": "https://en.wikipedia.org/wiki/Ethernet",
+    "notes": "以太网通过PFC/ECN实现无损特性后可支持RDMA(RoCE)"
+  }
+]

@@ -117,12 +117,15 @@ const HistoryList: React.FC<HistoryListProps> = ({
       ),
     },
     {
-      title: 'TPS',
-      dataIndex: 'throughput',
-      key: 'throughput',
+      title: 'TPS/Chip',
+      key: 'tps_chip',
       width: 120,
       align: 'center' as const,
-      render: (v: number) => <span style={{ fontSize: 14 }}>{v.toFixed(0)} tok/s</span>,
+      render: (_: unknown, record: AnalysisHistoryItem) => {
+        // TPS/Chip = Total TPS / chips
+        const tpsPerChip = record.chips > 0 ? record.throughput / record.chips : 0
+        return <span style={{ fontSize: 14 }}>{tpsPerChip.toFixed(0)} tok/s</span>
+      },
     },
     {
       title: 'FTL',
@@ -424,6 +427,44 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
             <span style={{ marginLeft: 16, color: '#bbb' }}>点击策略卡片查看详情</span>
           </div>
 
+          {/* 硬件拓扑配置 */}
+          {_hardware && (
+            <div style={{
+              marginBottom: 12,
+              padding: '10px 12px',
+              background: '#f8f9fa',
+              borderRadius: 8,
+              border: '1px solid #e8e8e8',
+            }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 12 }}>
+                {/* Chip配置 */}
+                <div>
+                  <span style={{ color: '#999' }}>Chip: </span>
+                  <b style={{ color: colors.text }}>{_hardware.chip.chip_type}</b>
+                  <span style={{ color: '#bbb', marginLeft: 4 }}>
+                    ({_hardware.chip.compute_tflops_fp16} TFLOPs, {_hardware.chip.memory_gb}GB, {_hardware.chip.memory_bandwidth_gbps} GB/s)
+                  </span>
+                </div>
+                {/* Board配置 */}
+                <div>
+                  <span style={{ color: '#999' }}>Board: </span>
+                  <b style={{ color: colors.text }}>{_hardware.node.chips_per_node} Chips/Board</b>
+                  <span style={{ color: '#bbb', marginLeft: 4 }}>
+                    (NVLink {_hardware.node.intra_node_bandwidth_gbps} GB/s)
+                  </span>
+                </div>
+                {/* 总Board数：根据总芯片数和每Board芯片数计算 */}
+                <div>
+                  <span style={{ color: '#999' }}>总计: </span>
+                  <b style={{ color: colors.text }}>{Math.ceil(plan.total_chips / _hardware.node.chips_per_node)} Boards</b>
+                  <span style={{ color: '#bbb', marginLeft: 4 }}>
+                    (Board间 {_hardware.cluster.inter_node_bandwidth_gbps} GB/s)
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Benchmark 标识 (可点击展开) */}
           {inference && model && (
             <div style={{ marginBottom: 0 }}>
@@ -577,6 +618,15 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
         {/* 吞吐与效率 */}
         <Text style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', marginBottom: 8 }}>吞吐与效率</Text>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 8 }}>
+          <Tooltip title="Total TPS = TPS_chip × NumChips，集群总吞吐">
+            <div style={{ ...metricCardStyle(selectedMetric === 'throughput'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'throughput' ? null : 'throughput')}>
+              <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'throughput' ? colors.primary : '#d9d9d9' }} />
+              <Text style={{ fontSize: 13, color: colors.textSecondary }}>Total TPS</Text>
+              <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
+                {throughput.tokens_per_second.toFixed(0)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>tok/s</span>
+              </div>
+            </div>
+          </Tooltip>
           <Tooltip title="TPS per Batch = 1000 / TPOT(ms)，用户体验指标，SLO约束 ≥10">
             <div style={{ ...metricCardStyle(selectedMetric === 'tps_batch'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'tps_batch' ? null : 'tps_batch')}>
               <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'tps_batch' ? colors.primary : '#d9d9d9' }} />
@@ -592,15 +642,6 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
               <Text style={{ fontSize: 13, color: colors.textSecondary }}>TPS/Chip</Text>
               <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
                 {throughput.tps_per_chip.toFixed(0)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>tok/s</span>
-              </div>
-            </div>
-          </Tooltip>
-          <Tooltip title="Total TPS = TPS_chip × NumChips，集群总吞吐">
-            <div style={{ ...metricCardStyle(selectedMetric === 'throughput'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'throughput' ? null : 'throughput')}>
-              <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'throughput' ? colors.primary : '#d9d9d9' }} />
-              <Text style={{ fontSize: 13, color: colors.textSecondary }}>总吞吐</Text>
-              <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
-                {throughput.tokens_per_second.toFixed(0)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>tok/s</span>
               </div>
             </div>
           </Tooltip>

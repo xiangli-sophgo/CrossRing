@@ -262,21 +262,21 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
       return (
         <div style={detailWrapperStyle}>
           <div style={{ fontSize: 18, fontWeight: 600, color: '#52c41a', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>Throughput (吞吐量)</span>
-            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>系统处理能力 · 经济性核心指标</span>
+            <span>Total TPS</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>集群总吞吐 · 系统整体处理能力</span>
           </div>
           <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
-              每秒生成的Token数量，衡量系统处理能力的核心指标。吞吐量越高，
-              单位时间能服务的请求越多，成本效益越好。是容量规划和成本计算的基础。
+              集群每秒生成的Token总数，衡量系统整体处理能力。
+              Total TPS = TPS per Chip × 芯片数。是容量规划和成本计算的基础。
             </div>
           </div>
 
           <FormulaCard
             title="核心公式"
-            tex={String.raw`\text{Throughput} = \frac{\text{Batch} \times N_{\text{output}}}{T_{\text{e2e}}}`}
-            description="吞吐量 = 批次大小 × 输出token数 / 端到端延迟"
+            tex={String.raw`\text{Total TPS} = \text{TPS}_{\text{chip}} \times N_{\text{chips}}`}
+            description="集群总吞吐 = 单芯片吞吐 × 芯片数"
             result={throughput.tokens_per_second.toFixed(0)}
             unit="tok/s"
             resultColor="#52c41a"
@@ -286,39 +286,24 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             title="参数说明"
             variables={[
               {
-                symbol: '\\text{Batch}',
+                symbol: '\\text{TPS}_{\\text{chip}}',
+                name: '单芯片吞吐',
+                description: '每芯片每秒生成的token数，$= B \\times \\text{TPS}_{\\text{batch}}$',
+              },
+              {
+                symbol: 'N_{\\text{chips}}',
+                name: '芯片数',
+                description: '$= \\text{DP} \\times \\text{TP} \\times \\text{PP} \\times \\text{EP}$',
+              },
+              {
+                symbol: '\\text{TPS}_{\\text{batch}}',
+                name: '单Batch吞吐',
+                description: '$= 1000 / \\text{TPOT}(ms)$，用户体验指标',
+              },
+              {
+                symbol: 'B',
                 name: '批次大小',
                 description: '同时处理的请求数量',
-              },
-              {
-                symbol: 'N_{\\text{output}}',
-                name: '输出Token数',
-                description: '每个请求生成的token数量',
-              },
-              {
-                symbol: 'T_{\\text{e2e}}',
-                name: '端到端延迟',
-                description: 'TTFT + TPOT × 输出长度',
-              },
-              {
-                symbol: '\\text{TTFT}',
-                name: '首Token延迟',
-                description: 'Prefill阶段延迟',
-              },
-              {
-                symbol: '\\text{TPOT}',
-                name: '每Token延迟',
-                description: 'Decode阶段单token延迟',
-              },
-              {
-                symbol: '\\text{Peak FLOPs}',
-                name: '峰值算力',
-                description: '硬件理论峰值计算能力',
-              },
-              {
-                symbol: '\\text{FLOPs/Token}',
-                name: '每Token计算量',
-                description: '$\\approx 2 \\times$ 模型参数量',
               },
             ]}
           />
@@ -327,19 +312,188 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             title="计算分解"
             steps={[
               {
-                label: '端到端延迟',
-                formula: 'T_{\\text{e2e}} = \\text{TTFT} + \\text{TPOT} \\times N_{\\text{output}}',
-                value: latency.end_to_end_latency_ms.toFixed(1),
+                label: 'TPS_{\\text{batch}}',
+                formula: '\\text{TPS}_{\\text{batch}} = \\frac{1000}{\\text{TPOT}(ms)}',
+                value: throughput.tps_per_batch.toFixed(1),
+                unit: 'tok/s',
+              },
+              {
+                label: 'TPS_{\\text{chip}}',
+                formula: '\\text{TPS}_{\\text{chip}} = B \\times \\text{TPS}_{\\text{batch}}',
+                value: throughput.tps_per_chip.toFixed(0),
+                unit: 'tok/s',
+              },
+              {
+                label: 'N_{\\text{chips}}',
+                formula: 'N_{\\text{chips}} = \\text{DP} \\times \\text{TP} \\times \\text{PP} \\times \\text{EP}',
+                value: plan.total_chips.toString(),
+                unit: 'chips',
+              },
+            ]}
+          />
+        </div>
+      )
+
+    case 'tps_batch':
+      return (
+        <div style={detailWrapperStyle}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>TPS per Batch</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>用户体验指标 · SLO约束 ≥10</span>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <div style={sectionTitleStyle}>指标定义</div>
+            <div style={descStyle}>
+              单Batch每秒生成的Token数，是用户体验的核心指标。
+              TPS per Batch = 1 / DecodeTime(s)。SLO要求 ≥10，即 DecodeTime ≤ 100ms。
+            </div>
+          </div>
+
+          <FormulaCard
+            title="核心公式"
+            tex={String.raw`\text{TPS}_{\text{batch}} = \frac{1000}{\text{TPOT}(ms)} = \frac{1}{\text{DecodeTime}(s)}`}
+            description="单Batch吞吐 = 1000 / 单Token延迟(ms)"
+            result={throughput.tps_per_batch.toFixed(1)}
+            unit="tok/s"
+            resultColor={throughput.tps_per_batch >= 10 ? '#52c41a' : '#f5222d'}
+          />
+
+          <VariableList
+            title="参数说明"
+            variables={[
+              {
+                symbol: '\\text{TPOT}',
+                name: '单Token延迟',
+                description: 'Time Per Output Token，Decode阶段每token生成时间',
+              },
+              {
+                symbol: '\\text{DecodeTime}',
+                name: 'Decode时间',
+                description: '与TPOT相同，单位为秒',
+              },
+              {
+                symbol: '\\text{SLO}',
+                name: '服务质量约束',
+                description: 'TPS per Batch ≥ 10，保证用户体验',
+              },
+            ]}
+          />
+
+          <CalculationSteps
+            title="计算分解"
+            steps={[
+              {
+                label: '\\text{TPOT}',
+                formula: '\\text{TPOT} = \\max(T_{\\text{comp}}, T_{\\text{mem}}) + T_{\\text{comm}}',
+                value: latency.decode_per_token_latency_ms.toFixed(2),
                 unit: 'ms',
               },
               {
-                label: '理论峰值吞吐',
-                formula: '\\text{Max} = \\frac{\\text{Peak FLOPs}}{\\text{FLOPs/Token}}',
-                value: throughput.theoretical_max_throughput.toFixed(0),
+                label: '\\text{TPS}_{\\text{batch}}',
+                formula: '\\text{TPS}_{\\text{batch}} = \\frac{1000}{\\text{TPOT}}',
+                value: throughput.tps_per_batch.toFixed(1),
                 unit: 'tok/s',
               },
             ]}
           />
+
+          <div style={{
+            marginTop: 16,
+            padding: '10px 14px',
+            background: throughput.tps_per_batch >= 10 ? '#f6ffed' : '#fff2f0',
+            borderRadius: 8,
+            fontSize: 13,
+            color: throughput.tps_per_batch >= 10 ? '#52c41a' : '#f5222d',
+            textAlign: 'center',
+            border: `1px solid ${throughput.tps_per_batch >= 10 ? '#b7eb8f' : '#ffa39e'}`,
+          }}>
+            {throughput.tps_per_batch >= 10 ? '✓ 满足SLO约束' : '⚠ 不满足SLO约束'} ·
+            TPS/Batch = <strong>{throughput.tps_per_batch.toFixed(1)}</strong> tok/s ·
+            要求 ≥ 10 tok/s
+          </div>
+        </div>
+      )
+
+    case 'tps_chip':
+      return (
+        <div style={detailWrapperStyle}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#fa8c16', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>TPS per Chip</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>成本效益指标 · 优化目标</span>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <div style={sectionTitleStyle}>指标定义</div>
+            <div style={descStyle}>
+              单芯片每秒生成的Token数，是成本效益的核心指标，也是优化的主要目标。
+              TPS per Chip = Batch × TPS per Batch。在满足SLO的前提下，最大化此指标。
+            </div>
+          </div>
+
+          <FormulaCard
+            title="核心公式"
+            tex={String.raw`\text{TPS}_{\text{chip}} = B \times \text{TPS}_{\text{batch}} = \frac{B}{\text{DecodeTime}(s)}`}
+            description="单芯片吞吐 = 批次大小 × 单Batch吞吐"
+            result={throughput.tps_per_chip.toFixed(0)}
+            unit="tok/s"
+            resultColor="#fa8c16"
+          />
+
+          <VariableList
+            title="参数说明"
+            variables={[
+              {
+                symbol: 'B',
+                name: '批次大小',
+                description: '同时处理的请求数量，增大B可提高TPS per Chip',
+              },
+              {
+                symbol: '\\text{TPS}_{\\text{batch}}',
+                name: '单Batch吞吐',
+                description: '$= 1000 / \\text{TPOT}(ms)$，受SLO约束',
+              },
+              {
+                symbol: '\\text{DecodeTime}',
+                name: 'Decode时间',
+                description: '单token生成时间，与TPOT相同',
+              },
+            ]}
+          />
+
+          <CalculationSteps
+            title="计算分解"
+            steps={[
+              {
+                label: 'B',
+                formula: '\\text{Batch Size} = \\frac{\\text{TPS}_{\\text{chip}}}{\\text{TPS}_{\\text{batch}}}',
+                value: Math.round(throughput.tps_per_chip / throughput.tps_per_batch).toString(),
+                unit: '',
+              },
+              {
+                label: '\\text{TPS}_{\\text{batch}}',
+                formula: '\\frac{1000}{\\text{TPOT}(ms)}',
+                value: throughput.tps_per_batch.toFixed(1),
+                unit: 'tok/s',
+              },
+              {
+                label: '\\text{TPS}_{\\text{chip}}',
+                formula: 'B \\times \\text{TPS}_{\\text{batch}}',
+                value: throughput.tps_per_chip.toFixed(0),
+                unit: 'tok/s',
+              },
+            ]}
+          />
+
+          <div style={{
+            marginTop: 16,
+            padding: '10px 14px',
+            background: '#fff7e6',
+            borderRadius: 8,
+            fontSize: 12,
+            color: '#ad6800',
+            textAlign: 'center',
+          }}>
+            💡 优化目标: 在满足 TPS/Batch ≥ 10 的前提下，最大化 TPS/Chip
+          </div>
         </div>
       )
 
@@ -507,24 +661,31 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
     case 'cost':
       const costData = result.cost
       if (!costData) return null
+      // 计算每小时处理的token数
+      const tokensPerHour = throughput.tokens_per_second * 3600
+      // 计算输出/输入成本比
+      const outputInputRatio = costData.input_cost_per_million_tokens > 0
+        ? (costData.output_cost_per_million_tokens / costData.input_cost_per_million_tokens).toFixed(1)
+        : '-'
       return (
         <div style={detailWrapperStyle}>
           <div style={{ fontSize: 18, fontWeight: 600, color: '#fa8c16', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
             <span>Cost Analysis (成本分析)</span>
-            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>经济性指标 · 每百万Token成本</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>经济性指标 · $/M tokens</span>
           </div>
           <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
               每百万Token的推理成本，是衡量部署经济性的核心指标。
-              成本按Prefill/Decode时间比例分配到输入/输出Token，输出通常比输入贵3-5倍。
+              成本 = 硬件租用成本 / 吞吐量。输出成本通常是输入成本的3-5倍，
+              因为Decode阶段每token需要完整的前向传播，而Prefill可以批量处理。
             </div>
           </div>
 
           <FormulaCard
             title="核心公式"
-            tex={String.raw`\text{Cost} = \frac{\text{Hardware Cost/h} \times 10^6}{\text{Tokens/hour}}`}
-            description="每小时硬件成本 × 100万 / 每小时处理的Token数"
+            tex={String.raw`\text{Cost}_{\text{/M}} = \frac{\text{Price}_{\text{chip}} \times N_{\text{chips}} \times 10^6}{\text{TPS}_{\text{total}} \times 3600}`}
+            description="(单芯片价格 × 芯片数 × 100万) / (总TPS × 3600)"
             result={`$${costData.cost_per_million_tokens.toFixed(4)}`}
             unit="/M tokens"
             resultColor="#fa541c"
@@ -534,29 +695,29 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             title="参数说明"
             variables={[
               {
-                symbol: '\\text{Hardware Cost}',
-                name: '硬件成本',
-                description: '云服务商每小时租用价格',
-              },
-              {
-                symbol: '\\text{Tokens/hour}',
-                name: '每小时Token数',
-                description: 'Throughput × 3600',
+                symbol: '\\text{Price}_{\\text{chip}}',
+                name: '单芯片租用价格',
+                description: `云服务商每小时租用价格，当前 $${costData.hardware_cost_per_hour.toFixed(2)}/h`,
               },
               {
                 symbol: 'N_{\\text{chips}}',
                 name: '芯片数量',
-                description: '部署使用的芯片总数',
+                description: `$= \\text{DP} \\times \\text{TP} \\times \\text{PP} \\times \\text{EP} = ${plan.total_chips}$`,
               },
               {
-                symbol: '\\text{Throughput}',
-                name: '吞吐量',
-                description: '每秒生成的token数',
+                symbol: '\\text{TPS}_{\\text{total}}',
+                name: '集群总吞吐',
+                description: `$= \\text{TPS}_{\\text{chip}} \\times N_{\\text{chips}} = ${throughput.tokens_per_second.toFixed(0)}$ tok/s`,
               },
               {
-                symbol: '\\text{Price/chip}',
-                name: '单芯片价格',
-                description: '每芯片每小时租用成本',
+                symbol: '\\text{Cost}_{\\text{input}}',
+                name: '输入成本',
+                description: 'Prefill阶段成本，批量处理效率高',
+              },
+              {
+                symbol: '\\text{Cost}_{\\text{output}}',
+                name: '输出成本',
+                description: 'Decode阶段成本，逐token生成，通常是输入的3-5倍',
               },
             ]}
           />
@@ -565,15 +726,22 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             title="计算分解"
             steps={[
               {
-                label: '硬件成本',
-                formula: '\\text{Cost/h} = \\text{Price/chip} \\times N_{\\text{chips}}',
+                label: '总硬件成本',
+                formula: '\\text{Cost}_{\\text{hw}} = \\text{Price}_{\\text{chip}} \\times N_{\\text{chips}}',
                 value: `$${costData.hardware_cost_per_hour.toFixed(2)} × ${plan.total_chips}`,
                 unit: `= $${costData.total_hardware_cost_per_hour.toFixed(2)}/h`,
               },
               {
-                label: 'Tokens/hour',
-                formula: '\\text{Throughput} \\times 3600',
-                value: (throughput.tokens_per_second * 3600).toExponential(2),
+                label: '每小时Token数',
+                formula: '\\text{Tokens/h} = \\text{TPS}_{\\text{total}} \\times 3600',
+                value: tokensPerHour.toExponential(2),
+                unit: 'tokens',
+              },
+              {
+                label: '每Token成本',
+                formula: '\\text{Cost}_{\\text{/tok}} = \\frac{\\text{Cost}_{\\text{hw}}}{\\text{Tokens/h}}',
+                value: (costData.total_hardware_cost_per_hour / tokensPerHour * 1e6).toFixed(4),
+                unit: '$/M tok',
               },
             ]}
           />
@@ -617,17 +785,40 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             </div>
           </div>
 
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
             <div style={{
-              marginTop: 12,
               padding: '10px 14px',
               background: '#f5f5f5',
               borderRadius: 8,
-              fontSize: 13,
+              fontSize: 12,
               color: '#1f2937',
               textAlign: 'center',
             }}>
               效率: <strong style={{ color: '#fa541c' }}>{costData.tokens_per_dollar.toExponential(2)}</strong> tokens/$
             </div>
+            <div style={{
+              padding: '10px 14px',
+              background: '#f0f5ff',
+              borderRadius: 8,
+              fontSize: 12,
+              color: '#2f54eb',
+              textAlign: 'center',
+            }}>
+              输出/输入比: <strong>{outputInputRatio}×</strong>
+            </div>
+          </div>
+
+          <div style={{
+            marginTop: 12,
+            padding: '10px 14px',
+            background: '#fffbe6',
+            borderRadius: 8,
+            fontSize: 12,
+            color: '#ad6800',
+          }}>
+            💡 <strong>优化建议</strong>：在满足SLO（TPS/Batch ≥ 10）的前提下，
+            增大Batch Size可提高TPS/Chip，从而降低单位成本。
+          </div>
         </div>
       )
 

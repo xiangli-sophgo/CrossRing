@@ -1,0 +1,128 @@
+[
+  {
+    "id": "ecc",
+    "name": "ECC",
+    "definition": "ECC（Error-Correcting Code）是一类用于检测和纠正数据错误的编码技术。ECC内存通过额外的校验位实现单比特纠错、双比特检错（SECDED），是服务器内存的标准配置。",
+    "category": "protocol",
+    "source": "Hamming, R.W. (1950). Error Detecting and Error Correcting Codes. Bell System Technical Journal",
+    "url": "https://en.wikipedia.org/wiki/Error_correction_code",
+    "notes": "HBM3使用on-die ECC，GPU内存也支持ECC模式"
+  },
+  {
+    "id": "crc",
+    "name": "CRC",
+    "definition": "CRC（Cyclic Redundancy Check）是一种基于多项式除法的差错检测码，通过对数据计算固定长度的校验值来检测传输或存储中的错误。广泛用于网络协议和存储系统。",
+    "category": "protocol",
+    "source": "Peterson & Brown (1961). Cyclic Codes for Error Detection. Proceedings of the IRE",
+    "url": "https://en.wikipedia.org/wiki/Cyclic_redundancy_check",
+    "notes": "CRC-32用于以太网帧校验，CRC只能检错不能纠错"
+  },
+  {
+    "id": "汉明码",
+    "name": "汉明码",
+    "definition": "Hamming Code（汉明码）是一种线性纠错码，通过在数据位之间插入校验位来实现单比特纠错。是ECC内存和通信系统中最基础的纠错编码方案。",
+    "category": "protocol",
+    "source": "Hamming, R.W. (1950). Error Detecting and Error Correcting Codes. Bell System Technical Journal",
+    "url": "https://en.wikipedia.org/wiki/Hamming_code",
+    "notes": "汉明距离为3的码可纠正1位错误，检测2位错误"
+  },
+  {
+    "id": "cbfc",
+    "name": "CBFC",
+    "definition": "CBFC（Credit-Based Flow Control）是一种链路层流量控制机制，接收方预先通告可用缓冲区信用，发送方消耗信用后才能发送数据。确保数据不会因接收方缓冲区溢出而丢失。",
+    "category": "protocol",
+    "source": "InfiniBand Architecture Specification; PCIe Base Specification",
+    "url": "https://en.wikipedia.org/wiki/Flow_control_(data)#Credit-based_flow_control",
+    "notes": "InfiniBand和PCIe均使用信用流控，是无损网络的基础"
+  },
+  {
+    "id": "pcs",
+    "name": "PCS",
+    "definition": "PCS（Physical Coding Sublayer）是以太网物理层的子层，负责数据编码/解码、加扰、块对齐等功能。是连接MAC层和物理介质的关键接口层。",
+    "category": "protocol",
+    "source": "IEEE 802.3 Ethernet Standard",
+    "url": "https://en.wikipedia.org/wiki/Physical_coding_sublayer",
+    "notes": "PCS实现64B/66B编码（10GbE+）或PAM4调制（100GbE+）"
+  },
+  {
+    "id": "pfc",
+    "name": "PFC",
+    "definition": "PFC（Priority-based Flow Control）是IEEE 802.1Qbb定义的优先级流控机制，可对以太网的8个优先级队列独立发送PAUSE帧。是RoCE实现无损以太网的关键技术。",
+    "category": "protocol",
+    "source": "IEEE 802.1Qbb Priority-based Flow Control",
+    "url": "https://en.wikipedia.org/wiki/IEEE_802.1Qbb",
+    "notes": "PFC可能导致队头阻塞(HoL blocking)和死锁问题"
+  },
+  {
+    "id": "fec",
+    "name": "FEC",
+    "definition": "FEC（Forward Error Correction）是在发送端添加冗余编码，使接收端能检测并纠正传输错误的技术。高速链路（如100GbE+）必须使用FEC来满足误码率要求。",
+    "category": "protocol",
+    "source": "IEEE 802.3 Clause 91 (RS-FEC); IEEE 802.3bs",
+    "url": "https://en.wikipedia.org/wiki/Forward_error_correction",
+    "notes": "RS(544,514) FEC用于100/200/400GbE，增加约2.6%开销"
+  },
+  {
+    "id": "pam4",
+    "name": "PAM4",
+    "definition": "PAM4（4-Level Pulse Amplitude Modulation）是使用4个电平表示2比特的调制技术。相比NRZ在相同波特率下数据速率翻倍，是100GbE+链路的主流调制方式。",
+    "category": "protocol",
+    "source": "IEEE 802.3bs; OIF CEI-56G-PAM4",
+    "url": "https://en.wikipedia.org/wiki/PAM-4",
+    "notes": "PAM4信噪比要求比NRZ高约9.5dB，更易受干扰"
+  },
+  {
+    "id": "nrz",
+    "name": "NRZ",
+    "definition": "NRZ（Non-Return-to-Zero）是使用两个电平分别表示0和1的基带编码方式。每个比特周期信号电平保持恒定，是最基础的串行编码方式。",
+    "category": "protocol",
+    "source": "IEEE 802.3 Ethernet Standard",
+    "url": "https://en.wikipedia.org/wiki/Non-return-to-zero",
+    "notes": "NRZ在56Gbps以上速率难以满足误码率要求，逐渐被PAM4取代"
+  },
+  {
+    "id": "icrc",
+    "name": "ICRC",
+    "definition": "ICRC（Invariant CRC）是InfiniBand/RoCE协议中的端到端数据完整性校验字段，计算范围不包括会被网络设备修改的字段。确保数据在跨多跳传输后完整性。",
+    "category": "protocol",
+    "source": "InfiniBand Architecture Specification Volume 1",
+    "url": "https://www.infinibandta.org/ibta-specification/",
+    "notes": "ICRC补充VCRC（链路级CRC），提供端到端保护"
+  },
+  {
+    "id": "fecn",
+    "name": "FECN",
+    "definition": "FECN（Forward Explicit Congestion Notification）是网络设备在数据包中标记拥塞的机制，通知接收方其路径上发生了拥塞。与ECN/BECN配合实现端到端拥塞控制。",
+    "category": "protocol",
+    "source": "InfiniBand Architecture Specification; RFC 3168 (ECN)",
+    "url": "https://en.wikipedia.org/wiki/Explicit_Congestion_Notification",
+    "notes": "InfiniBand使用FECN/BECN，以太网使用ECN"
+  },
+  {
+    "id": "go_back_n",
+    "name": "Go-Back-N",
+    "definition": "Go-Back-N是一种滑动窗口ARQ协议，发送方可连续发送最多N个未确认帧。若发现错误，接收方丢弃后续所有帧，发送方需重传出错帧及其后所有帧。",
+    "category": "protocol",
+    "source": "Tanenbaum & Wetherall (2011). Computer Networks. Pearson",
+    "url": "https://en.wikipedia.org/wiki/Go-Back-N_ARQ",
+    "notes": "实现简单但带宽利用率低于选择性重传"
+  },
+  {
+    "id": "go_back_0",
+    "name": "Go-Back-0 (Stop-and-Wait)",
+    "definition": "Go-Back-0（即Stop-and-Wait）是最简单的ARQ协议，发送方每发送一帧必须等待确认才能发送下一帧。窗口大小为1，简单可靠但链路利用率低。",
+    "category": "protocol",
+    "source": "Tanenbaum & Wetherall (2011). Computer Networks. Pearson",
+    "url": "https://en.wikipedia.org/wiki/Stop-and-wait_ARQ",
+    "notes": "高延迟链路上效率极低，主要用于教学演示"
+  },
+  {
+    "id": "psn",
+    "name": "PSN",
+    "definition": "PSN（Packet Sequence Number）是InfiniBand/RoCE中用于保证数据包顺序和检测丢包的序列号字段。接收方通过PSN检测乱序和丢失，触发重传。",
+    "category": "protocol",
+    "source": "InfiniBand Architecture Specification Volume 1",
+    "url": "https://www.infinibandta.org/ibta-specification/",
+    "notes": "PSN为24位，配合MSN确保可靠传输"
+  }
+]

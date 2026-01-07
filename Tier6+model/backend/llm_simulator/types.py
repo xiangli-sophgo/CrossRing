@@ -47,6 +47,13 @@ class GanttTaskType(str, Enum):
     PP_COMM = "pp_comm"
     EP_COMM = "ep_comm"
 
+    # SP 通信 (序列并行)
+    SP_ALLGATHER = "sp_allgather"
+    SP_REDUCE_SCATTER = "sp_reduce_scatter"
+
+    # DP 通信 (数据并行梯度同步)
+    DP_GRADIENT_SYNC = "dp_gradient_sync"
+
     # MLA细粒度 (DeepSeek特有)
     RMSNORM_Q_LORA = "rmsnorm_q_lora"
     RMSNORM_KV_LORA = "rmsnorm_kv_lora"
@@ -81,6 +88,32 @@ class BottleneckType(str, Enum):
     MEMORY = "memory"
     COMMUNICATION = "communication"
     PIPELINE_BUBBLE = "pipeline_bubble"
+
+
+class AllReduceAlgorithm(str, Enum):
+    """AllReduce算法类型
+
+    - RING: Ring AllReduce, 适合N<=32的场景
+    - DOUBLE_BINARY_TREE: 双二叉树, NCCL多机默认, 适合N>32
+    - HALVING_DOUBLING: Halving-Doubling, 适合Fat-Tree拓扑
+    - REDUCE_BROADCAST: Reduce+Broadcast, 适合N<8且Full-Mesh拓扑
+    """
+    RING = "ring"
+    DOUBLE_BINARY_TREE = "double_binary_tree"
+    HALVING_DOUBLING = "halving_doubling"
+    REDUCE_BROADCAST = "reduce_broadcast"
+
+
+class AllToAllAlgorithm(str, Enum):
+    """All-to-All算法类型
+
+    - PAIRWISE: 两两交换, 适合小规模(N<8)
+    - RING: Ring-based, 适合大规模, 低带宽要求
+    - BRUCK: Bruck算法, 适合中规模(8<=N<=32), 低延迟
+    """
+    PAIRWISE = "pairwise"
+    RING = "ring"
+    BRUCK = "bruck"
 
 
 # ============================================
@@ -155,6 +188,11 @@ class ChipHardwareConfig:
     memory_bandwidth_gbps: float
     compute_tops_int8: float = 0.0
     cost_per_hour: float = 0.0
+    # 新增参数
+    num_cores: int = 8  # 计算核心数
+    memory_bandwidth_utilization: float = 0.9  # 显存带宽利用率
+    l2_cache_mb: float = 16.0  # L2 缓存容量 (MB)
+    l2_bandwidth_gbps: float = 512.0  # L2 缓存带宽 (GB/s)
     # 扩展配置
     pcie_bandwidth_gbps: float = 64.0  # PCIe Gen5 x16 默认
     pcie_latency_us: float = 1.0
@@ -167,6 +205,10 @@ class NodeConfig:
     chips_per_node: int
     intra_node_bandwidth_gbps: float
     intra_node_latency_us: float
+    # 新增参数
+    bandwidth_utilization: float = 0.9  # 带宽利用率
+    startup_latency_us: float = 1.0  # 通信启动延迟
+    sync_latency_us: float = 1.0  # 同步延迟
 
 
 @dataclass
@@ -198,6 +240,9 @@ class MoEConfig:
     num_shared_experts: int = 0
     expert_intermediate_size: int = 0
     first_k_dense_replace: int = 0  # 前K层使用Dense FFN（DeepSeek V3 = 3）
+    # EP+TP组合配置
+    moe_tp: int = 1  # MoE专家内的TP切分度
+    ep_tp_strategy: str = "scatter_gather"  # 'scatter_gather' 或 'group_alltoall'
 
 
 @dataclass
@@ -208,6 +253,8 @@ class MLAConfig:
     qk_nope_head_dim: int    # 非 RoPE 头维度
     qk_rope_head_dim: int    # RoPE 头维度
     v_head_dim: int          # V 的头维度
+    mla_tp: int = 0          # MLA 张量并行度 (0 表示使用全局 tp)
+    mla_dp: int = 0          # MLA 数据并行度 (0 表示使用全局 dp)
 
 
 @dataclass

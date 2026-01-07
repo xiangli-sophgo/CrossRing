@@ -121,8 +121,8 @@ export const SingleLevelView: React.FC<SingleLevelViewProps> = ({
       const edgeId = `${edge.source}-${edge.target}`
       const isLinkSelected = selectedLinkId === edgeId || selectedLinkId === `${edge.target}-${edge.source}`
 
-      const bandwidthStr = edge.bandwidth ? `${edge.bandwidth}Gbps` : ''
-      const latencyStr = edge.latency ? `${edge.latency}ns` : ''
+      const bandwidthStr = edge.bandwidth ? `${edge.bandwidth} GB/s` : ''
+      const latencyStr = edge.latency ? `${edge.latency} us` : ''
       const trafficStyle = getTrafficHeatmapStyle(edge.source, edge.target)
       const trafficStr = trafficStyle ? `流量: ${trafficStyle.trafficMb.toFixed(1)}MB, 利用率: ${(trafficStyle.utilization * 100).toFixed(0)}%` : ''
       const propsStr = [bandwidthStr, latencyStr, trafficStr].filter(Boolean).join(', ')

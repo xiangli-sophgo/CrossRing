@@ -116,9 +116,18 @@ interface AnalysisState {
   setDeploymentAnalysisData: (data: DeploymentAnalysisData | null) => void
   setAnalysisViewMode: (mode: AnalysisViewMode) => void
   setTrafficResult: (result: TopologyTrafficResult | null) => void
+  handleAddToHistory: (item: Omit<AnalysisHistoryItem, 'id' | 'timestamp'>) => void
   handleLoadFromHistory: (item: AnalysisHistoryItem) => void
   handleDeleteHistory: (id: string) => void
   handleClearHistory: () => void
+}
+
+// 知识图谱视口类型
+interface KnowledgeViewBox {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 // UI 状态
@@ -132,6 +141,7 @@ interface UIState {
   knowledgeVisibleCategories: Set<KnowledgeCategory>
   knowledgeNodes: ForceKnowledgeNode[]
   knowledgeInitialized: boolean
+  knowledgeViewBox: KnowledgeViewBox | null
   setViewMode: (mode: '3d' | 'topology' | 'analysis' | 'knowledge') => void
   setSelectedNode: (node: NodeDetail | null) => void
   setSelectedLink: (link: LinkDetail | null) => void
@@ -140,6 +150,7 @@ interface UIState {
   setKnowledgeVisibleCategories: (categories: Set<KnowledgeCategory>) => void
   setKnowledgeNodes: (nodes: ForceKnowledgeNode[]) => void
   setKnowledgeInitialized: (initialized: boolean) => void
+  setKnowledgeViewBox: (viewBox: KnowledgeViewBox) => void
   resetKnowledgeCategories: () => void
 }
 
@@ -236,6 +247,7 @@ export const WorkbenchProvider: React.FC<WorkbenchProviderProps> = ({ children }
   )
   const [knowledgeNodes, setKnowledgeNodes] = useState<ForceKnowledgeNode[]>([])
   const [knowledgeInitialized, setKnowledgeInitialized] = useState(false)
+  const [knowledgeViewBox, setKnowledgeViewBox] = useState<KnowledgeViewBox | null>(null)
   const resetKnowledgeCategories = useCallback(() => {
     setKnowledgeVisibleCategories(new Set(['hardware', 'interconnect', 'parallel', 'communication', 'model', 'inference', 'protocol', 'system']))
   }, [])
@@ -497,6 +509,7 @@ export const WorkbenchProvider: React.FC<WorkbenchProviderProps> = ({ children }
       canMapToTopology: false,
       viewMode: 'detail' as const,
       onViewModeChange: prev?.onViewModeChange || (() => {}),
+      // 历史由 WorkbenchContext 统一管理，这里保持兼容
       history: prev?.history || [],
       onLoadFromHistory: prev?.onLoadFromHistory || (() => {}),
       onDeleteHistory: prev?.onDeleteHistory || (() => {}),
@@ -516,6 +529,20 @@ export const WorkbenchProvider: React.FC<WorkbenchProviderProps> = ({ children }
   const handleClearHistory = useCallback(() => {
     localStorage.setItem(ANALYSIS_HISTORY_KEY, '[]')
     setAnalysisHistory([])
+  }, [])
+
+  const MAX_HISTORY_ITEMS = 20
+  const handleAddToHistory = useCallback((item: Omit<AnalysisHistoryItem, 'id' | 'timestamp'>) => {
+    setAnalysisHistory(prev => {
+      const newItem: AnalysisHistoryItem = {
+        ...item,
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        timestamp: Date.now(),
+      }
+      const updated = [newItem, ...prev].slice(0, MAX_HISTORY_ITEMS)
+      localStorage.setItem(ANALYSIS_HISTORY_KEY, JSON.stringify(updated))
+      return updated
+    })
   }, [])
 
   // ==================== 计算属性 ====================
@@ -614,6 +641,7 @@ export const WorkbenchProvider: React.FC<WorkbenchProviderProps> = ({ children }
       handleLoadFromHistory,
       handleDeleteHistory,
       handleClearHistory,
+      handleAddToHistory,
     },
     ui: {
       viewMode,
@@ -624,6 +652,7 @@ export const WorkbenchProvider: React.FC<WorkbenchProviderProps> = ({ children }
       knowledgeVisibleCategories,
       knowledgeNodes,
       knowledgeInitialized,
+      knowledgeViewBox,
       setViewMode,
       setSelectedNode,
       setSelectedLink,
@@ -632,6 +661,7 @@ export const WorkbenchProvider: React.FC<WorkbenchProviderProps> = ({ children }
       setKnowledgeVisibleCategories,
       setKnowledgeNodes,
       setKnowledgeInitialized,
+      setKnowledgeViewBox,
       resetKnowledgeCategories,
     },
     navigation,
