@@ -2,7 +2,7 @@
  * 实验列表页
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Card,
@@ -102,14 +102,12 @@ export default function ExperimentList() {
   const [editingField, setEditingField] = useState<'name' | 'description' | null>(null);
   const [editingValue, setEditingValue] = useState<string>('');
 
-  // 加载实验列表
+  // 加载实验列表（获取全部，本地过滤）
   const loadExperiments = async () => {
     setLoading(true);
     try {
-      const data = await getExperiments(
-        undefined,
-        typeFilter === 'all' ? undefined : typeFilter
-      );
+      // 获取全部实验，不在后端过滤
+      const data = await getExperiments();
       setExperiments(data);
     } catch (error) {
       message.error('加载实验列表失败');
@@ -118,9 +116,21 @@ export default function ExperimentList() {
     }
   };
 
+  // 首次加载（只在组件挂载时执行一次）
   useEffect(() => {
-    loadExperiments();
-  }, [typeFilter]);
+    // 只有当 store 中没有数据时才加载
+    if (experiments.length === 0) {
+      loadExperiments();
+    }
+  }, []);
+
+  // 本地过滤实验列表
+  const filteredExperiments = useMemo(() => {
+    if (typeFilter === 'all') {
+      return experiments;
+    }
+    return experiments.filter(e => e.experiment_type === typeFilter);
+  }, [experiments, typeFilter]);
 
   // 处理删除
   const handleDelete = async (id: number) => {
@@ -469,7 +479,7 @@ export default function ExperimentList() {
 
         <Table
           columns={columns}
-          dataSource={experiments}
+          dataSource={filteredExperiments}
           rowKey="id"
           loading={loading}
           rowSelection={{

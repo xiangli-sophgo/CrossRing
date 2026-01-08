@@ -97,5 +97,118 @@
     "source": "Rajbhandari et al. (2020). ZeRO: Memory Optimizations Toward Training Trillion Parameter Models. SC",
     "url": "https://arxiv.org/abs/1910.02054",
     "notes": "ZeRO-1/2/3分别分片优化器状态/梯度/参数"
+  },
+  {
+    "id": "slo",
+    "name": "SLO",
+    "fullName": "Service Level Objective",
+    "definition": "SLO（Service Level Objective，服务水平目标）是定义服务性能承诺的量化指标，在LLM推理服务中尤为关键。典型的LLM SLO包括：1）延迟SLO：如P99 TTFT < 500ms、P99 TPOT < 50ms；2）吞吐量SLO：如每秒处理请求数 > 100 QPS；3）可用性SLO：如99.9%的请求成功完成。SLO与SLA（Service Level Agreement）紧密相关，SLA是与客户的合同承诺，SLO是内部技术目标。在LLM服务中，满足SLO需要精细的资源调度：请求排队策略、批处理大小调整、负载均衡、超时控制等。违反SLO会导致用户体验下降，常见策略包括请求优先级分级、资源预留、弹性扩缩容。监控指标通常包括TTFT、TPOT、TPS的P50/P90/P99分位数。",
+    "category": "inference",
+    "source": "Google SRE Book; LLM Serving Best Practices",
+    "url": "https://sre.google/sre-book/service-level-objectives/",
+    "notes": "SLO是SLA的技术实现目标，需要持续监控和优化"
+  },
+  {
+    "id": "ttft",
+    "name": "TTFT",
+    "fullName": "Time to First Token",
+    "definition": "TTFT（Time to First Token，首token延迟）是衡量LLM推理响应速度的核心指标，指从用户发送请求到收到第一个生成token的时间。TTFT主要由以下部分组成：1）网络延迟：请求传输时间；2）排队延迟：等待GPU资源；3）Prefill延迟：处理完整prompt的计算时间。TTFT直接影响用户感知的响应速度，是交互式应用的关键SLO指标。影响TTFT的因素包括：prompt长度（O(n²)计算复杂度）、GPU算力、batch size、系统负载。优化策略包括：Chunked Prefill分块处理、Splitwise将Prefill分离到专用GPU、请求优先级调度、预计算常用prompt。典型要求：在线服务TTFT < 1秒，实时对话 < 500ms。也称为FTL（First Token Latency）。",
+    "category": "inference",
+    "source": "LLM Inference Performance Metrics; vLLM Documentation",
+    "url": "https://docs.vllm.ai/en/latest/",
+    "notes": "TTFT主要受Prefill计算影响，与prompt长度正相关",
+    "aliases": ["FTL", "First Token Latency", "首token延迟"]
+  },
+  {
+    "id": "tpot",
+    "name": "TPOT",
+    "fullName": "Time Per Output Token",
+    "definition": "TPOT（Time Per Output Token，每token生成时间）是衡量LLM推理Decode阶段性能的指标，表示生成每个输出token所需的平均时间。TPOT与TPS互为倒数关系：TPOT = 1/TPS。TPOT受以下因素影响：1）HBM带宽：每token需读取全部权重和KV Cache；2）Batch size：多请求共享权重读取开销；3）KV Cache大小：随序列长度增长；4）量化精度：低精度减少数据传输量。典型值：单用户H100推理70B模型约50ms/token（20 TPS）；高并发场景可能增至100-200ms/token。TPOT直接决定用户感知的生成速度，流式输出时用户阅读速度约200-300词/分钟（约3-5 token/秒），TPOT < 200ms通常可接受。也称为ITL（Inter-Token Latency）。",
+    "category": "inference",
+    "source": "LLM Inference Performance Metrics; Anyscale Blog",
+    "url": "https://www.anyscale.com/blog/continuous-batching-llm-inference",
+    "notes": "TPOT是Decode阶段的核心指标，受HBM带宽限制",
+    "aliases": ["ITL", "Inter-Token Latency", "每token延迟"]
+  },
+  {
+    "id": "latency",
+    "name": "Latency",
+    "fullName": "End-to-End Latency",
+    "definition": "Latency（延迟）在LLM推理中指从请求发送到完整响应接收的总时间，也称端到端延迟（E2E Latency）。总延迟 = TTFT + TPOT × 输出token数。延迟分解：1）网络延迟：客户端-服务器往返时间；2）排队延迟：等待GPU资源；3）Prefill延迟：处理输入prompt；4）Decode延迟：逐token生成输出。延迟指标通常用百分位数表示：P50（中位数）、P90、P99、P999，其中P99是SLO常用指标。影响延迟的关键因素：输入/输出长度、模型大小、GPU算力/带宽、系统负载、batch策略。优化延迟需要权衡吞吐量：小batch低延迟但浪费算力，大batch高吞吐但增加延迟。在线服务通常设置延迟上限，超时请求返回部分结果或错误。",
+    "category": "inference",
+    "source": "Systems Performance Engineering; LLM Serving Optimization",
+    "url": "https://arxiv.org/abs/2309.06180",
+    "notes": "总延迟 = TTFT + TPOT × 输出长度"
+  },
+  {
+    "id": "throughput",
+    "name": "Throughput",
+    "fullName": "System Throughput",
+    "definition": "Throughput（吞吐量）是衡量LLM推理系统处理能力的指标，通常用每秒生成的token总数或每秒完成的请求数表示。吞吐量指标：1）Token Throughput：所有用户每秒生成的token总数（系统TPS）；2）Request Throughput：每秒完成的请求数（QPS）；3）用户吞吐量：单用户的TPS。提高吞吐量的核心策略是增大batch size：多请求共享权重读取开销，将memory-bound转为compute-bound。Continuous Batching动态调整batch，最大化GPU利用率。吞吐量与延迟存在权衡：大batch提高吞吐但增加排队延迟。系统设计需要根据SLO在吞吐量和延迟间找平衡点。典型H100系统推理70B模型：单用户20 TPS，batch=32时系统可达400+ TPS。",
+    "category": "inference",
+    "source": "Pope et al. (2023). Efficiently Scaling Transformer Inference; vLLM Paper",
+    "url": "https://arxiv.org/abs/2309.06180",
+    "notes": "吞吐量与延迟需权衡，Continuous Batching是关键优化"
+  },
+  {
+    "id": "qps",
+    "name": "QPS",
+    "fullName": "Queries Per Second",
+    "definition": "QPS（Queries Per Second，每秒查询数）是衡量LLM推理服务处理能力的请求级指标。与TPS（token级）不同，QPS关注完整请求的处理速度。QPS = 并发请求数 / 平均请求延迟。影响QPS的因素：1）平均输入/输出长度：长序列降低QPS；2）GPU资源：更多GPU提高并发能力；3）Batch策略：Continuous Batching提高QPS；4）模型大小：小模型QPS更高。QPS常用于容量规划：估算支持N个并发用户需要多少GPU。实际系统中，QPS受SLO约束：在满足延迟要求的前提下最大化QPS。负载测试通常逐步增加QPS直到延迟超过SLO阈值，确定系统容量上限。与Web服务不同，LLM的QPS通常较低（几十到几百），但每个请求消耗大量计算资源。",
+    "category": "inference",
+    "source": "LLM Serving Best Practices; Load Testing Methodology",
+    "url": "https://www.anyscale.com/blog/continuous-batching-llm-inference",
+    "notes": "QPS是请求级指标，与token级TPS互补"
+  },
+  {
+    "id": "p99_latency",
+    "name": "P99 Latency",
+    "fullName": "99th Percentile Latency",
+    "definition": "P99 Latency（99分位延迟）是指99%的请求延迟低于此值的阈值，是LLM服务SLO的核心指标。相比平均延迟，P99更能反映用户体验的一致性，避免被少数极快请求拉低均值。百分位延迟体系：P50（中位数，50%请求）、P90（90%请求）、P95、P99、P999（99.9%请求）。P99与P50的差距反映系统稳定性：差距大说明延迟波动剧烈。影响P99的因素：1）长尾请求：超长prompt或输出；2）资源竞争：GPU内存/带宽争用；3）GC暂停：Python/CUDA内存管理；4）排队延迟：高负载时的等待。优化P99需要：设置请求超时、限制最大序列长度、资源隔离、预热模型避免冷启动。典型SLO：P99 TTFT < 1s，P99 TPOT < 100ms。",
+    "category": "inference",
+    "source": "SRE Best Practices; Latency Percentile Analysis",
+    "url": "https://sre.google/sre-book/monitoring-distributed-systems/",
+    "notes": "P99是SLO核心指标，反映最差1%用户的体验",
+    "aliases": ["P99", "99分位延迟", "尾延迟"]
+  },
+  {
+    "id": "goodput",
+    "name": "Goodput",
+    "fullName": "Effective Throughput",
+    "definition": "Goodput（有效吞吐量）是指在满足SLO约束条件下的实际有效输出量，区别于不考虑质量的原始吞吐量。Goodput = 满足SLO的请求数 × 平均输出长度 / 时间。Goodput的意义：1）排除超时、失败、被丢弃的请求；2）只计算对用户有价值的输出；3）反映系统的真实服务能力。Goodput与Throughput的差异在高负载时尤为明显：系统过载时Throughput可能很高但大量请求超时，Goodput反而下降。优化Goodput需要：合理的准入控制（拒绝超出容量的请求）、负载均衡、弹性扩缩容、请求优先级。Goodput是评估LLM服务系统ROI的关键指标：相同GPU资源下，Goodput越高越经济。Sarathi-Serve等系统以最大化Goodput为优化目标。",
+    "category": "inference",
+    "source": "Agrawal et al. (2024). Sarathi-Serve: Optimizing LLM Inference",
+    "url": "https://arxiv.org/abs/2403.02310",
+    "notes": "Goodput反映满足SLO的有效产出，是ROI关键指标"
+  },
+  {
+    "id": "normalized_latency",
+    "name": "Normalized Latency",
+    "fullName": "Normalized Latency per Token",
+    "definition": "Normalized Latency（归一化延迟）是将总延迟除以输出token数得到的标准化指标，用于公平比较不同长度请求的处理效率。Normalized Latency = 总延迟 / 输出token数。意义：1）消除输出长度差异的影响；2）反映系统的单位处理效率；3）便于跨请求、跨系统比较。与TPOT的区别：TPOT仅考虑Decode阶段，Normalized Latency包含完整的端到端时间（含TTFT、排队等）。使用场景：1）评估不同batch策略的效率；2）比较不同模型的推理性能；3）容量规划中估算GPU需求。局限性：对于极短输出请求，TTFT占比过大会使Normalized Latency偏高；需结合TTFT和TPOT分析。",
+    "category": "inference",
+    "source": "LLM Inference Benchmarking Methodology",
+    "url": "https://github.com/vllm-project/vllm",
+    "notes": "归一化延迟便于公平比较不同长度请求的效率"
+  },
+  {
+    "id": "batch_size",
+    "name": "Batch Size",
+    "fullName": "Inference Batch Size",
+    "definition": "Batch Size（批处理大小）是指同时处理的请求数量，是LLM推理性能优化的核心参数。Batch的作用：1）均摊权重读取开销：多请求共享一次权重读取；2）提高GPU利用率：将memory-bound转为compute-bound；3）提升系统吞吐量：batch加倍，吞吐量接近翻倍。Batch的权衡：1）延迟增加：排队等待凑batch；2）KV Cache占用：N个请求需要N倍缓存；3）内存限制：batch过大超出GPU内存。动态batch策略：Continuous Batching动态增减batch中的请求，最大化利用率。静态batch适用于离线批处理，动态batch适用于在线服务。最优batch size取决于：模型大小、GPU内存、延迟SLO、请求到达率。典型值：在线服务batch=8-64，离线处理batch=64-256。",
+    "category": "inference",
+    "source": "Pope et al. (2023). Efficiently Scaling Transformer Inference",
+    "url": "https://arxiv.org/abs/2211.05102",
+    "notes": "batch size是吞吐量与延迟权衡的关键参数"
+  },
+  {
+    "id": "time_to_last_token",
+    "name": "TTLT",
+    "fullName": "Time to Last Token",
+    "definition": "TTLT（Time to Last Token，末token延迟）是从请求发送到收到最后一个生成token的时间，即完整的端到端延迟。TTLT = TTFT + TPOT × (输出token数 - 1)。TTLT的意义：1）反映用户获得完整响应的等待时间；2）是SLO设置的重要参考；3）用于评估非流式输出场景的性能。TTLT与用户体验：流式输出时用户可边看边等，TTLT重要性降低；非流式输出（如API调用）时TTLT决定等待时间。TTLT的优化：1）减少TTFT：优化Prefill阶段；2）减少TPOT：提高Decode速度；3）减少输出长度：合理的max_tokens限制。对于长输出任务（如代码生成、长文摘要），TTLT可能达到数十秒，需要合理设置超时。",
+    "category": "inference",
+    "source": "LLM Inference Latency Analysis",
+    "url": "https://www.anyscale.com/blog/llm-inference-explained",
+    "notes": "TTLT = TTFT + TPOT × (输出长度-1)"
   }
 ]

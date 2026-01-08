@@ -730,5 +730,203 @@
     "target": "cxl",
     "type": "used_in",
     "label": "内存扩展寻址"
+  },
+  {
+    "source": "slo",
+    "target": "ttft",
+    "type": "constrains",
+    "label": "延迟约束"
+  },
+  {
+    "source": "slo",
+    "target": "tpot",
+    "type": "constrains",
+    "label": "延迟约束"
+  },
+  {
+    "source": "slo",
+    "target": "p99_latency",
+    "type": "measures_with",
+    "label": "衡量指标"
+  },
+  {
+    "source": "slo",
+    "target": "qps",
+    "type": "constrains",
+    "label": "吞吐约束"
+  },
+  {
+    "source": "slo",
+    "target": "throughput",
+    "type": "constrains",
+    "label": "吞吐约束"
+  },
+  {
+    "source": "goodput",
+    "target": "slo",
+    "type": "constrained_by",
+    "label": "受SLO约束"
+  },
+  {
+    "source": "latency",
+    "target": "ttft",
+    "type": "includes",
+    "label": "包含首token延迟"
+  },
+  {
+    "source": "latency",
+    "target": "tpot",
+    "type": "includes",
+    "label": "包含每token延迟"
+  },
+  {
+    "source": "ttft",
+    "target": "prefill",
+    "type": "determined_by",
+    "label": "由Prefill决定"
+  },
+  {
+    "source": "tpot",
+    "target": "decode",
+    "type": "determined_by",
+    "label": "由Decode决定"
+  },
+  {
+    "source": "tpot",
+    "target": "tps",
+    "type": "inverse_of",
+    "label": "互为倒数"
+  },
+  {
+    "source": "time_to_last_token",
+    "target": "ttft",
+    "type": "starts_with",
+    "label": "起始于"
+  },
+  {
+    "source": "time_to_last_token",
+    "target": "tpot",
+    "type": "composed_of",
+    "label": "累加组成"
+  },
+  {
+    "source": "time_to_last_token",
+    "target": "latency",
+    "type": "equals",
+    "label": "等于端到端延迟"
+  },
+  {
+    "source": "p99_latency",
+    "target": "latency",
+    "type": "percentile_of",
+    "label": "百分位数"
+  },
+  {
+    "source": "normalized_latency",
+    "target": "latency",
+    "type": "normalizes",
+    "label": "归一化"
+  },
+  {
+    "source": "normalized_latency",
+    "target": "tpot",
+    "type": "similar_to",
+    "label": "类似但含TTFT"
+  },
+  {
+    "source": "throughput",
+    "target": "tps",
+    "type": "measured_by",
+    "label": "Token吞吐"
+  },
+  {
+    "source": "throughput",
+    "target": "qps",
+    "type": "measured_by",
+    "label": "请求吞吐"
+  },
+  {
+    "source": "throughput",
+    "target": "batch_size",
+    "type": "scales_with",
+    "label": "随batch扩展"
+  },
+  {
+    "source": "goodput",
+    "target": "throughput",
+    "type": "refines",
+    "label": "有效吞吐"
+  },
+  {
+    "source": "qps",
+    "target": "latency",
+    "type": "trades_off",
+    "label": "与延迟权衡"
+  },
+  {
+    "source": "batch_size",
+    "target": "continuous_batching",
+    "type": "optimized_by",
+    "label": "动态优化"
+  },
+  {
+    "source": "batch_size",
+    "target": "kv_cache",
+    "type": "trades_off",
+    "label": "内存权衡"
+  },
+  {
+    "source": "batch_size",
+    "target": "latency",
+    "type": "trades_off",
+    "label": "延迟权衡"
+  },
+  {
+    "source": "ttft",
+    "target": "flash_attention",
+    "type": "optimized_by",
+    "label": "优化Prefill"
+  },
+  {
+    "source": "tpot",
+    "target": "quantization",
+    "type": "optimized_by",
+    "label": "减少数据量"
+  },
+  {
+    "source": "tpot",
+    "target": "hbm",
+    "type": "limited_by",
+    "label": "受带宽限制"
+  },
+  {
+    "source": "tpot",
+    "target": "speculative_decoding",
+    "type": "optimized_by",
+    "label": "推测解码加速"
+  },
+  {
+    "source": "throughput",
+    "target": "continuous_batching",
+    "type": "optimized_by",
+    "label": "动态批处理"
+  },
+  {
+    "source": "qps",
+    "target": "continuous_batching",
+    "type": "optimized_by",
+    "label": "提高请求处理"
+  },
+  {
+    "source": "ttft",
+    "target": "batch_size",
+    "type": "affected_by",
+    "label": "排队影响"
+  },
+  {
+    "source": "p99_latency",
+    "target": "slo",
+    "type": "used_in",
+    "label": "SLO核心指标"
   }
 ]

@@ -20,7 +20,7 @@ import {
 } from 'antd';
 import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useExperimentStore } from '../../stores/experimentStore';
-import { getExperiment, getStatistics, getResults, getParamKeys, getTrafficStats, type TrafficStat } from './api';
+import { getExperiment, getResults, getParamKeys, getTrafficStats, type TrafficStat } from './api';
 import ResultTable from './components/ResultTable';
 import ParameterAnalysisView from './components/ParameterAnalysisView';
 import type { ResultsPageResponse, ExperimentType } from './types';
@@ -51,7 +51,6 @@ export default function ExperimentDetail() {
   const {
     currentExperiment,
     setCurrentExperiment,
-    setCurrentStatistics,
     filters,
   } = useExperimentStore();
 
@@ -63,30 +62,21 @@ export default function ExperimentDetail() {
   const [sortBy, setSortBy] = useState('id');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [paramKeys, setParamKeys] = useState<string[]>([]);
+  const [paramKeysLoaded, setParamKeysLoaded] = useState(false);
   const [trafficStats, setTrafficStats] = useState<TrafficStat[]>([]);
+  const [trafficStatsLoaded, setTrafficStatsLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState('results');
   const [resultsLoaded, setResultsLoaded] = useState(false);
 
   const experimentId = parseInt(id || '0', 10);
 
-  // 加载实验详情（轻量级：只加载基本信息和参数键）
+  // 只加载实验基本信息
   const loadExperiment = async () => {
     if (!experimentId) return;
     setLoading(true);
     try {
-      // 先加载基本信息，尽快显示页面
       const exp = await getExperiment(experimentId);
       setCurrentExperiment(exp);
-
-      // 并行加载其他信息
-      const [stats, keysData, trafficData] = await Promise.all([
-        getStatistics(experimentId),
-        getParamKeys(experimentId),
-        getTrafficStats(experimentId),
-      ]);
-      setCurrentStatistics(stats);
-      setParamKeys(keysData.param_keys);
-      setTrafficStats(trafficData.traffic_stats);
     } catch (error) {
       message.error('加载实验详情失败');
     } finally {
@@ -94,9 +84,41 @@ export default function ExperimentDetail() {
     }
   };
 
-  // 刷新所有数据（实验详情 + 结果数据）
+  // 加载参数键（延迟到"结果数据"标签）
+  const loadParamKeys = async () => {
+    if (!experimentId || paramKeysLoaded) return;
+    try {
+      const keysData = await getParamKeys(experimentId);
+      setParamKeys(keysData.param_keys);
+      setParamKeysLoaded(true);
+    } catch (error) {
+      console.error('加载参数键失败:', error);
+    }
+  };
+
+  // 加载流量统计（延迟到"概览"标签）
+  const loadTrafficStats = async () => {
+    if (!experimentId || trafficStatsLoaded) return;
+    try {
+      const trafficData = await getTrafficStats(experimentId);
+      setTrafficStats(trafficData.traffic_stats);
+      setTrafficStatsLoaded(true);
+    } catch (error) {
+      console.error('加载流量统计失败:', error);
+    }
+  };
+
+  // 刷新所有数据
   const refreshAll = async () => {
-    await Promise.all([loadExperiment(), loadResults()]);
+    setParamKeysLoaded(false);
+    setTrafficStatsLoaded(false);
+    setResultsLoaded(false);
+    await loadExperiment();
+    if (activeTab === 'results') {
+      await Promise.all([loadParamKeys(), loadResults()]);
+    } else if (activeTab === 'overview') {
+      await loadTrafficStats();
+    }
     message.success('刷新成功');
   };
 
@@ -122,19 +144,37 @@ export default function ExperimentDetail() {
     }
   };
 
+  // 加载实验基本信息
   useEffect(() => {
-    loadExperiment();
-    // 重置结果加载状态
+    // 如果 store 中已有当前实验的数据，不重新加载基本信息
+    if (currentExperiment && currentExperiment.id === experimentId) {
+      setLoading(false);
+    } else {
+      loadExperiment();
+    }
+    // 切换实验时重置所有加载状态
+    setParamKeysLoaded(false);
+    setTrafficStatsLoaded(false);
     setResultsLoaded(false);
     setResultsData(null);
   }, [experimentId]);
 
-  // 延迟加载结果数据：只在切换到results tab时或参数变化时加载
+  // 延迟加载：根据当前标签页加载对应数据
   useEffect(() => {
     if (activeTab === 'results') {
+      loadParamKeys();
+      loadResults();
+    } else if (activeTab === 'overview') {
+      loadTrafficStats();
+    }
+  }, [experimentId, activeTab]);
+
+  // 结果数据参数变化时重新加载
+  useEffect(() => {
+    if (activeTab === 'results' && paramKeysLoaded) {
       loadResults();
     }
-  }, [experimentId, page, pageSize, sortBy, sortOrder, filters, activeTab]);
+  }, [page, pageSize, sortBy, sortOrder, filters]);
 
   if (loading) {
     return (

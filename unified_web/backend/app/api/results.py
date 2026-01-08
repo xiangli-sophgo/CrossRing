@@ -225,45 +225,9 @@ async def get_traffic_stats(experiment_id: int):
     if not experiment:
         raise HTTPException(status_code=404, detail="实验不存在")
 
-    # 获取所有结果
-    results, total = db_manager.db.get_results(experiment_id, page=1, page_size=100000)
-
-    # 按数据流名称分组统计
-    traffic_groups = {}
-    for result in results:
-        config_params = result.get("config_params", {})
-        # 尝试获取数据流名称字段
-        traffic_name = config_params.get("数据流名称") or config_params.get("file_name") or "未知"
-
-        if traffic_name not in traffic_groups:
-            traffic_groups[traffic_name] = {
-                "count": 0,
-                "performances": [],
-            }
-
-        traffic_groups[traffic_name]["count"] += 1
-        performance = result.get("performance", 0)
-        if performance is not None:
-            traffic_groups[traffic_name]["performances"].append(performance)
-
-    # 计算统计值
-    stats = []
-    for traffic_name, group in traffic_groups.items():
-        performances = group["performances"]
-        avg_performance = sum(performances) / len(performances) if performances else 0
-        max_performance = max(performances) if performances else 0
-        min_performance = min(performances) if performances else 0
-
-        stats.append({
-            "traffic_name": traffic_name,
-            "count": group["count"],
-            "avg_performance": avg_performance,
-            "max_performance": max_performance,
-            "min_performance": min_performance,
-        })
-
-    # 按结果数量降序排序
-    stats.sort(key=lambda x: x["count"], reverse=True)
+    # 使用优化后的聚合查询，只查询必要字段
+    stats = db_manager.db.get_traffic_stats_aggregated(experiment_id)
+    total = sum(s["count"] for s in stats)
 
     return {
         "experiment_id": experiment_id,
@@ -284,21 +248,8 @@ async def get_result_html(result_id: int, experiment_id: int):
     if not experiment:
         raise HTTPException(status_code=404, detail="实验不存在")
 
-    # 获取结果（需要完整数据，包括 result_html）
-    results_data = db_manager.get_results(
-        experiment_id=experiment_id,
-        page=1,
-        page_size=100000,
-        lightweight=False,
-    )
-
-    # 查找指定result_id的结果
-    target_result = None
-    for result in results_data["results"]:
-        if result["id"] == result_id:
-            target_result = result
-            break
-
+    # 直接按ID查询单个结果，避免加载全部结果
+    target_result = db_manager.db.get_result_by_id(result_id, experiment_id)
     if not target_result:
         raise HTTPException(status_code=404, detail="结果不存在")
 

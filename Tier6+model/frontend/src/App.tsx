@@ -19,6 +19,132 @@ const DEFAULT_SIDER_WIDTH = 520
 const MIN_SIDER_WIDTH = 380
 const MAX_SIDER_WIDTH = 900
 
+// 卡片估计高度
+const CARD_ESTIMATED_HEIGHT = 280
+
+/**
+ * 知识节点详情卡片组件 - 支持多卡片堆叠
+ */
+interface KnowledgeNodeCardsProps {
+  nodes: ForceKnowledgeNode[]
+  onClose: (nodeId: string) => void
+  onNodeClick: (node: { id: string; category: string }) => void
+}
+
+const KnowledgeNodeCards: React.FC<KnowledgeNodeCardsProps> = ({ nodes, onClose, onNodeClick }) => {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [maxCards, setMaxCards] = useState(3)
+
+  // 动态计算可显示的最大卡片数
+  useEffect(() => {
+    const updateMaxCards = () => {
+      if (containerRef.current) {
+        const containerHeight = containerRef.current.parentElement?.clientHeight || 600
+        // 预留一些空间给其他UI元素
+        const availableHeight = containerHeight - 100
+        const calculatedMax = Math.max(1, Math.floor(availableHeight / CARD_ESTIMATED_HEIGHT))
+        setMaxCards(calculatedMax)
+      }
+    }
+    updateMaxCards()
+    window.addEventListener('resize', updateMaxCards)
+    return () => window.removeEventListener('resize', updateMaxCards)
+  }, [])
+
+  // 只显示前maxCards个节点
+  const visibleNodes = nodes.slice(0, maxCards)
+
+  // 渲染来源链接
+  const renderSource = (source: string, url?: string) => {
+    const linkStyle: React.CSSProperties = { color: '#1677ff', cursor: 'pointer', textDecoration: 'underline' }
+    if (url) {
+      return <a href={url} target="_blank" rel="noopener noreferrer" style={linkStyle}>{source}</a>
+    }
+    return source
+  }
+
+  return (
+    <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
+      {visibleNodes.map((node, index) => {
+        // 计算相关节点
+        const relatedNodeIds = new Set<string>()
+        knowledgeData.relations.forEach(r => {
+          if (r.source === node.id) relatedNodeIds.add(r.target)
+          if (r.target === node.id) relatedNodeIds.add(r.source)
+        })
+        const relatedNodes = knowledgeData.nodes.filter(n => relatedNodeIds.has(n.id))
+
+        return (
+          <Card
+            key={node.id}
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  width: 10, height: 10, borderRadius: '50%',
+                  background: CATEGORY_COLORS[node.category],
+                  flexShrink: 0,
+                }} />
+                <span style={{ fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {node.fullName || node.name}
+                </span>
+                {index === 0 && nodes.length > 1 && (
+                  <Tag color="blue" style={{ marginLeft: 'auto', fontSize: 10 }}>最新</Tag>
+                )}
+              </div>
+            }
+            size="small"
+            style={{
+              opacity: index === 0 ? 1 : 0.9,
+              transition: 'all 0.3s ease',
+            }}
+            extra={<a onClick={() => onClose(node.id)}>关闭</a>}
+          >
+            <Tag color={CATEGORY_COLORS[node.category]} style={{ marginBottom: 8 }}>
+              {CATEGORY_NAMES[node.category]}
+            </Tag>
+            <div style={{
+              fontSize: 13,
+              lineHeight: 1.6,
+              marginBottom: 8,
+              maxHeight: index === 0 ? 'none' : 60,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}>
+              {node.definition}
+            </div>
+            {node.source && (
+              <div style={{ marginBottom: 6 }}>
+                <div style={{ fontWeight: 500, marginBottom: 2, fontSize: 12 }}>来源</div>
+                <div style={{ fontSize: 11, color: '#666' }}>{renderSource(node.source, (node as any).url)}</div>
+              </div>
+            )}
+            {relatedNodes.length > 0 && (
+              <div>
+                <div style={{ fontWeight: 500, marginBottom: 4, fontSize: 12 }}>相关概念 ({relatedNodes.length})</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: index === 0 ? 'none' : 32, overflow: 'hidden' }}>
+                  {relatedNodes.slice(0, index === 0 ? undefined : 6).map(n => (
+                    <Tag
+                      key={n.id}
+                      color={CATEGORY_COLORS[n.category as keyof typeof CATEGORY_COLORS]}
+                      style={{ cursor: 'pointer', margin: 0, fontSize: 11 }}
+                      onClick={() => onNodeClick(n)}
+                    >
+                      {n.name}
+                    </Tag>
+                  ))}
+                  {index !== 0 && relatedNodes.length > 6 && (
+                    <Tag style={{ margin: 0, fontSize: 11 }}>+{relatedNodes.length - 6}</Tag>
+                  )}
+                </div>
+              </div>
+            )}
+          </Card>
+        )
+      })}
+    </div>
+  )
+}
+
 /**
  * 主工作台内容组件（使用 Context）
  */
@@ -234,7 +360,7 @@ const WorkbenchContent: React.FC = () => {
         >
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
             {/* 知识网络模式且选中节点时，隐藏配置面板 */}
-            {ui.viewMode === 'knowledge' && ui.knowledgeSelectedNode ? null : ui.viewMode === 'knowledge' ? (
+            {ui.viewMode === 'knowledge' && ui.knowledgeSelectedNodes.length > 0 ? null : ui.viewMode === 'knowledge' ? (
               <Collapse
                 defaultActiveKey={['config']}
                 size="small"
@@ -307,71 +433,14 @@ const WorkbenchContent: React.FC = () => {
             )}
           </div>
 
-          {/* 知识图谱节点详情 */}
-          {ui.viewMode === 'knowledge' && ui.knowledgeSelectedNode && (() => {
-            const node = ui.knowledgeSelectedNode
-            // 计算相关节点
-            const relatedNodeIds = new Set<string>()
-            knowledgeData.relations.forEach(r => {
-              if (r.source === node.id) relatedNodeIds.add(r.target)
-              if (r.target === node.id) relatedNodeIds.add(r.source)
-            })
-            const relatedNodes = knowledgeData.nodes.filter(n => relatedNodeIds.has(n.id))
-            // 渲染来源链接（使用节点的url字段）
-            const renderSource = (source: string, url?: string) => {
-              const linkStyle: React.CSSProperties = { color: '#1677ff', cursor: 'pointer', textDecoration: 'underline' }
-              if (url) {
-                return <a href={url} target="_blank" rel="noopener noreferrer" style={linkStyle}>{source}</a>
-              }
-              return source
-            }
-            return (
-              <Card
-                title={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{
-                      width: 10, height: 10, borderRadius: '50%',
-                      background: CATEGORY_COLORS[node.category],
-                    }} />
-                    <span style={{ fontSize: 14 }}>{node.fullName || node.name}</span>
-                  </div>
-                }
-                size="small"
-                style={{ marginTop: 16 }}
-                extra={<a onClick={() => ui.setKnowledgeSelectedNode(null)}>关闭</a>}
-              >
-                <Tag color={CATEGORY_COLORS[node.category]} style={{ marginBottom: 12 }}>
-                  {CATEGORY_NAMES[node.category]}
-                </Tag>
-                <div style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>
-                  {node.definition}
-                </div>
-                {node.source && (
-                  <div style={{ marginBottom: 8 }}>
-                    <div style={{ fontWeight: 500, marginBottom: 4 }}>来源</div>
-                    <div style={{ fontSize: 12, color: '#666' }}>{renderSource(node.source, (node as any).url)}</div>
-                  </div>
-                )}
-                {relatedNodes.length > 0 && (
-                  <div>
-                    <div style={{ fontWeight: 500, marginBottom: 6 }}>相关概念 ({relatedNodes.length})</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                      {relatedNodes.map(n => (
-                        <Tag
-                          key={n.id}
-                          color={CATEGORY_COLORS[n.category as keyof typeof CATEGORY_COLORS]}
-                          style={{ cursor: 'pointer', margin: 0 }}
-                          onClick={() => ui.setKnowledgeSelectedNode(n as ForceKnowledgeNode)}
-                        >
-                          {n.name}
-                        </Tag>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </Card>
-            )
-          })()}
+          {/* 知识图谱节点详情 - 支持多卡片堆叠 */}
+          {ui.viewMode === 'knowledge' && ui.knowledgeSelectedNodes.length > 0 && (
+            <KnowledgeNodeCards
+              nodes={ui.knowledgeSelectedNodes}
+              onClose={(nodeId) => ui.removeKnowledgeSelectedNode(nodeId)}
+              onNodeClick={(node) => ui.addKnowledgeSelectedNode(node as ForceKnowledgeNode)}
+            />
+          )}
 
           {/* 节点详情卡片 */}
           {ui.viewMode !== 'knowledge' && ui.selectedNode && (

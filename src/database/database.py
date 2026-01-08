@@ -801,6 +801,87 @@ class DatabaseManager:
                 for r in results
             ]
 
+    def get_result_by_id(self, result_id: int, experiment_id: int) -> Optional[dict]:
+        """
+        直接按ID获取单个结果（包含完整数据）
+
+        Args:
+            result_id: 结果ID
+            experiment_id: 实验ID
+
+        Returns:
+            结果字典，不存在返回None
+        """
+        experiment_type = self._get_experiment_type(experiment_id)
+        ResultModel = self._get_result_model(experiment_type)
+
+        with self.get_session() as session:
+            result = session.query(ResultModel).filter(
+                ResultModel.id == result_id,
+                ResultModel.experiment_id == experiment_id
+            ).first()
+            if result:
+                return self._result_to_dict(result, lightweight=False)
+            return None
+
+    def get_traffic_stats_aggregated(self, experiment_id: int) -> list:
+        """
+        使用SQL聚合直接统计流量文件性能，避免加载全部数据到内存
+
+        Args:
+            experiment_id: 实验ID
+
+        Returns:
+            流量统计列表
+        """
+        experiment_type = self._get_experiment_type(experiment_id)
+        ResultModel = self._get_result_model(experiment_type)
+
+        with self.get_session() as session:
+            # 只查询 config_params 和 performance
+            results = session.query(
+                ResultModel.config_params,
+                ResultModel.performance
+            ).filter(
+                ResultModel.experiment_id == experiment_id
+            ).all()
+
+            # 按数据流名称分组统计
+            traffic_groups = {}
+            for config_params, performance in results:
+                if not config_params:
+                    continue
+                traffic_name = config_params.get("数据流名称") or config_params.get("file_name") or "未知"
+
+                if traffic_name not in traffic_groups:
+                    traffic_groups[traffic_name] = []
+                if performance is not None:
+                    traffic_groups[traffic_name].append(performance)
+
+            # 计算统计值
+            stats = []
+            for traffic_name, performances in traffic_groups.items():
+                if performances:
+                    stats.append({
+                        "traffic_name": traffic_name,
+                        "count": len(performances),
+                        "avg_performance": sum(performances) / len(performances),
+                        "max_performance": max(performances),
+                        "min_performance": min(performances),
+                    })
+                else:
+                    stats.append({
+                        "traffic_name": traffic_name,
+                        "count": 0,
+                        "avg_performance": 0,
+                        "max_performance": 0,
+                        "min_performance": 0,
+                    })
+
+            # 按结果数量降序排序
+            stats.sort(key=lambda x: x["count"], reverse=True)
+            return stats
+
     @classmethod
     def reset_instance(cls):
         """重置单例实例（用于测试）"""

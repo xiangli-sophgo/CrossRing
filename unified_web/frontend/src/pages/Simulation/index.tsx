@@ -139,9 +139,7 @@ const Simulation: React.FC = () => {
   const [sweepConfigName, setSweepConfigName] = useState('')
 
   const pollIntervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
-  const wsConnectionsRef = useRef<Map<string, WebSocket>>(new Map())
   const runningTasksRef = useRef<Map<string, { task: TaskStatus; startTime: number }>>(new Map())
-  const loadHistoryDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 同步表单值到 store
   const syncFormToStore = useCallback(() => {
@@ -179,7 +177,6 @@ const Simulation: React.FC = () => {
             ? new Date(taskItem.started_at).getTime()
             : new Date(taskItem.created_at).getTime()
           newRunningTasks.set(taskItem.task_id, { task: fullStatus, startTime })
-          connectTaskWebSocket(taskItem.task_id)
         }
       }
       setRunningTasks(newRunningTasks)
@@ -220,14 +217,37 @@ const Simulation: React.FC = () => {
       })
     }
 
-    // 刷新历史列表：任务状态变化时都刷新（包括进度更新）
-    // 使用防抖避免过于频繁的刷新（500ms 内只刷新一次）
-    if (loadHistoryDebounceRef.current) {
-      clearTimeout(loadHistoryDebounceRef.current)
-    }
-    loadHistoryDebounceRef.current = setTimeout(() => {
+    // 任务完成时的处理
+    if (['completed', 'failed', 'cancelled'].includes(update.status)) {
+      // 停止该任务的轮询（避免重复通知）
+      const interval = pollIntervalsRef.current.get(update.task_id)
+      if (interval) {
+        clearInterval(interval)
+        pollIntervalsRef.current.delete(update.task_id)
+      }
+
+      // 刷新历史列表
       loadHistory()
-    }, 500)
+
+      // 显示完成消息
+      const expName = update.experiment_name || update.task_id.slice(0, 8)
+      if (update.status === 'completed') {
+        message.success(`任务完成: ${expName}`)
+      } else if (update.status === 'failed') {
+        message.error(`任务失败: ${expName}`)
+      }
+
+      // 延迟移除任务卡片（失败任务需手动关闭）
+      if (update.status !== 'failed') {
+        setTimeout(() => {
+          setRunningTasks(prev => {
+            const newMap = new Map(prev)
+            newMap.delete(update.task_id)
+            return newMap
+          })
+        }, 3000)
+      }
+    }
   }, [])
 
   // 使用全局 WebSocket 订阅
@@ -280,9 +300,6 @@ const Simulation: React.FC = () => {
       // 清除所有任务轮询
       pollIntervalsRef.current.forEach(interval => clearInterval(interval))
       pollIntervalsRef.current.clear()
-      // 关闭所有 WebSocket 连接
-      wsConnectionsRef.current.forEach(ws => ws.close())
-      wsConnectionsRef.current.clear()
     }
   }, [])
 
@@ -460,109 +477,11 @@ const Simulation: React.FC = () => {
         newMap.set(response.task_id, { task: initialStatus, startTime: Date.now() })
         return newMap
       })
-      connectTaskWebSocket(response.task_id)
     } catch (error: any) {
       message.error(error.response?.data?.detail || '启动仿真失败')
     } finally {
       setLoading(false)
     }
-  }
-
-  // WebSocket 连接管理
-  const connectTaskWebSocket = (taskId: string) => {
-    // 如果已经有连接，不重复创建
-    if (wsConnectionsRef.current.has(taskId)) return
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    // 使用当前host，让Vite代理转发到后端
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/simulation/ws/${taskId}`)
-    let messageShown = false
-
-    ws.onopen = () => {
-      console.log(`WebSocket connected for task ${taskId}`)
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-
-        // 忽略心跳消息
-        if (data.type === 'heartbeat') return
-
-        // 更新任务状态
-        setRunningTasks(prev => {
-          const newMap = new Map(prev)
-          const existing = newMap.get(taskId)
-          if (existing) {
-            newMap.set(taskId, {
-              ...existing,
-              task: {
-                ...existing.task,
-                status: data.status,
-                progress: data.progress,
-                current_file: data.current_file,
-                message: data.message,
-                error: data.error,
-                sim_details: data.sim_details,
-              }
-            })
-          }
-          return newMap
-        })
-
-        // 任务完成时关闭连接
-        if (['completed', 'failed', 'cancelled'].includes(data.status)) {
-          ws.close(1000, 'Task completed')  // 传递正常关闭码，防止重连
-          wsConnectionsRef.current.delete(taskId)
-
-          // 延迟移除任务卡片（失败任务需手动关闭，不自动消失）
-          if (data.status !== 'failed') {
-            setTimeout(() => {
-              setRunningTasks(prev => {
-                const newMap = new Map(prev)
-                newMap.delete(taskId)
-                return newMap
-              })
-            }, 3000)
-          }
-
-          loadHistory()
-
-          if (!messageShown) {
-            messageShown = true
-            const expName = data.experiment_name || taskId.slice(0, 8)
-            if (data.status === 'completed') message.success(`任务完成: ${expName}`)
-            else if (data.status === 'failed') message.error(`任务失败: ${expName}，详情请查看任务卡片`)
-          }
-        }
-      } catch (e) {
-        console.error('Failed to parse WebSocket message:', e)
-      }
-    }
-
-    ws.onerror = (error) => {
-      console.error(`WebSocket error for task ${taskId}:`, error)
-      // 发生错误时关闭连接，不再回退到轮询（避免轮询超时问题）
-      ws.close()
-      wsConnectionsRef.current.delete(taskId)
-    }
-
-    ws.onclose = (event) => {
-      wsConnectionsRef.current.delete(taskId)
-      // 非正常关闭时尝试重连（2秒后）
-      if (event.code !== 1000) {
-        setTimeout(() => {
-          // 重连前检查任务是否仍在运行
-          const taskEntry = runningTasksRef.current.get(taskId)
-          if (taskEntry && !['completed', 'failed', 'cancelled'].includes(taskEntry.task.status)) {
-            console.log(`WebSocket reconnecting for task ${taskId}...`)
-            connectTaskWebSocket(taskId)
-          }
-        }, 2000)
-      }
-    }
-
-    wsConnectionsRef.current.set(taskId, ws)
   }
 
   const startPolling = (taskId: string) => {
@@ -660,12 +579,6 @@ const Simulation: React.FC = () => {
       if (interval) {
         clearInterval(interval)
         pollIntervalsRef.current.delete(taskId)
-      }
-      // 关闭 WebSocket 连接
-      const ws = wsConnectionsRef.current.get(taskId)
-      if (ws) {
-        ws.close()
-        wsConnectionsRef.current.delete(taskId)
       }
       // 从列表移除
       setRunningTasks(prev => {
@@ -926,8 +839,6 @@ const Simulation: React.FC = () => {
         return newMap
       })
 
-      // 建立 WebSocket 连接
-      connectTaskWebSocket(response.task_id)
       message.success(`参数遍历任务已创建: ${totalUnits} 个执行单元`)
     } catch (error: any) {
       message.error(`任务创建失败: ${error.response?.data?.detail || error.message}`)
@@ -1022,33 +933,11 @@ const Simulation: React.FC = () => {
                   <Form.Item label="拓扑配置" required>
                     <Space>
                       <Form.Item name="rows" noStyle rules={[{ required: true, message: '请输入行数' }]}>
-                        <InputNumber min={1} max={20} placeholder="行" style={{ width: 70 }} onChange={(rows) => {
-                          const cols = form.getFieldValue('cols')
-                          if (rows && cols) {
-                            const topoName = `${rows}x${cols}`
-                            const configList = mode === 'kcin' ? configs.kcin : configs.dcin
-                            const matchedConfig = configList.find(c => c.name === topoName || c.path.includes(topoName))
-                            if (matchedConfig) {
-                              form.setFieldValue('config_path', matchedConfig.path)
-                              loadConfigContent(matchedConfig.path)
-                            }
-                          }
-                        }} />
+                        <InputNumber min={1} max={20} placeholder="行" style={{ width: 70 }} />
                       </Form.Item>
                       <Text type="secondary">×</Text>
                       <Form.Item name="cols" noStyle rules={[{ required: true, message: '请输入列数' }]}>
-                        <InputNumber min={1} max={20} placeholder="列" style={{ width: 70 }} onChange={(cols) => {
-                          const rows = form.getFieldValue('rows')
-                          if (rows && cols) {
-                            const topoName = `${rows}x${cols}`
-                            const configList = mode === 'kcin' ? configs.kcin : configs.dcin
-                            const matchedConfig = configList.find(c => c.name === topoName || c.path.includes(topoName))
-                            if (matchedConfig) {
-                              form.setFieldValue('config_path', matchedConfig.path)
-                              loadConfigContent(matchedConfig.path)
-                            }
-                          }
-                        }} />
+                        <InputNumber min={1} max={20} placeholder="列" style={{ width: 70 }} />
                       </Form.Item>
                     </Space>
                   </Form.Item>

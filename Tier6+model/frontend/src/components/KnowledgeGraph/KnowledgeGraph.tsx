@@ -39,18 +39,24 @@ const NODE_RADIUS_MAX = 40
 export const KnowledgeGraph: React.FC = () => {
   const { ui } = useWorkbench()
   const {
-    knowledgeSelectedNode: selectedNode,
+    knowledgeHighlightedNodeId: highlightedNodeId,
     knowledgeVisibleCategories: visibleCategories,
     knowledgeNodes,
     knowledgeInitialized,
     knowledgeViewBox: savedViewBox,
-    setKnowledgeSelectedNode: setSelectedNode,
+    addKnowledgeSelectedNode,
+    clearKnowledgeHighlight,
     setKnowledgeVisibleCategories: setVisibleCategories,
     setKnowledgeNodes,
     setKnowledgeInitialized,
     setKnowledgeViewBox: saveViewBox,
     resetKnowledgeCategories,
   } = ui
+
+  // 获取高亮节点用于高亮相邻节点和边
+  const highlightedNode = useMemo(() =>
+    knowledgeNodes.find(n => n.id === highlightedNodeId) || null
+  , [knowledgeNodes, highlightedNodeId])
 
   // 本地状态（仅用于渲染触发）
   const [, forceUpdate] = useState(0)
@@ -263,10 +269,10 @@ export const KnowledgeGraph: React.FC = () => {
     return matched
   }, [searchQuery, knowledgeNodes])
 
-  // 节点点击
+  // 节点点击 - 添加到选中列表
   const handleNodeClick = useCallback((node: ForceKnowledgeNode) => {
-    setSelectedNode(selectedNode?.id === node.id ? null : node)
-  }, [selectedNode, setSelectedNode])
+    addKnowledgeSelectedNode(node)
+  }, [addKnowledgeSelectedNode])
 
   // 画布拖拽
   const handlePanStart = useCallback((e: React.MouseEvent) => {
@@ -340,10 +346,11 @@ export const KnowledgeGraph: React.FC = () => {
       if (!visibleCategories.has(source.category) || !visibleCategories.has(target.category)) return null
 
       const style = RELATION_STYLES[rel.type] || RELATION_STYLES.related_to
-      const isHighlighted = selectedNode && (rel.source === selectedNode.id || rel.target === selectedNode.id)
+      // 使用高亮节点判断高亮
+      const isHighlighted = highlightedNode && (rel.source === highlightedNode.id || rel.target === highlightedNode.id)
       const isFiltered = matchedNodeIds && (!matchedNodeIds.has(rel.source) || !matchedNodeIds.has(rel.target))
-      // 当有选中节点时，非高亮的边变灰
-      const isDimmed = selectedNode && !isHighlighted
+      // 当有高亮节点时，非高亮的边变灰
+      const isDimmed = highlightedNode && !isHighlighted
 
       return (
         <line
@@ -367,13 +374,15 @@ export const KnowledgeGraph: React.FC = () => {
 
       const radius = getNodeRadius(node.id)
       const color = CATEGORY_COLORS[node.category]
-      const isSelected = selectedNode?.id === node.id
+      // 是否是当前高亮节点
+      const isHighlighted = node.id === highlightedNodeId
       const isHovered = hoveredNode === node.id
-      const isAdjacent = selectedNode ? getAdjacentNodeIds(selectedNode.id).has(node.id) : false
+      // 使用高亮节点判断相邻
+      const isAdjacent = highlightedNode ? getAdjacentNodeIds(highlightedNode.id).has(node.id) : false
       const isMatched = matchedNodeIds ? matchedNodeIds.has(node.id) : true
       const isFiltered = matchedNodeIds && !isMatched
-      // 当有选中节点时，非选中且非相邻的节点变灰
-      const isDimmed = selectedNode && !isSelected && !isAdjacent
+      // 当有高亮节点时，非高亮且非相邻的节点变灰
+      const isDimmed = highlightedNode && !isHighlighted && !isAdjacent
       // 根据节点大小调整字体
       const fontSize = Math.max(10, Math.min(14, radius * 0.5))
 
@@ -386,14 +395,14 @@ export const KnowledgeGraph: React.FC = () => {
           onMouseEnter={() => setHoveredNode(node.id)}
           onMouseLeave={() => setHoveredNode(null)}
         >
-          {/* 选中/高亮外圈 */}
-          {(isSelected || isAdjacent) && (
+          {/* 高亮外圈 */}
+          {(isHighlighted || isAdjacent) && (
             <circle
               r={radius + 6}
               fill="none"
               stroke={color}
               strokeWidth={3}
-              strokeOpacity={isSelected ? 0.6 : 0.3}
+              strokeOpacity={isHighlighted ? 0.6 : 0.3}
             />
           )}
 
@@ -528,14 +537,14 @@ export const KnowledgeGraph: React.FC = () => {
           viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
           style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
         >
-          {/* 背景 - 点击取消选中 */}
+          {/* 背景 - 点击清除高亮 */}
           <rect
             x={viewBox.x - 1000}
             y={viewBox.y - 1000}
             width={viewBox.width + 2000}
             height={viewBox.height + 2000}
             fill="#fafafa"
-            onClick={() => setSelectedNode(null)}
+            onClick={() => clearKnowledgeHighlight()}
           />
 
           {/* 边 */}

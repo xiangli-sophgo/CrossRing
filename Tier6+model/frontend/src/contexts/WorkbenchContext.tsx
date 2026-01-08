@@ -137,7 +137,8 @@ interface UIState {
   selectedLink: LinkDetail | null
   focusedLevel: 'datacenter' | 'pod' | 'rack' | 'board' | null
   // 知识图谱状态
-  knowledgeSelectedNode: ForceKnowledgeNode | null
+  knowledgeSelectedNodes: ForceKnowledgeNode[]  // 支持多个选中节点（用于详情卡片）
+  knowledgeHighlightedNodeId: string | null  // 当前高亮的节点ID（用于图中高亮效果）
   knowledgeVisibleCategories: Set<KnowledgeCategory>
   knowledgeNodes: ForceKnowledgeNode[]
   knowledgeInitialized: boolean
@@ -146,7 +147,9 @@ interface UIState {
   setSelectedNode: (node: NodeDetail | null) => void
   setSelectedLink: (link: LinkDetail | null) => void
   setFocusedLevel: (level: 'datacenter' | 'pod' | 'rack' | 'board' | null) => void
-  setKnowledgeSelectedNode: (node: ForceKnowledgeNode | null) => void
+  addKnowledgeSelectedNode: (node: ForceKnowledgeNode) => void  // 添加节点到列表
+  removeKnowledgeSelectedNode: (nodeId: string) => void  // 从列表移除节点
+  clearKnowledgeHighlight: () => void  // 清除高亮（不影响详情卡片）
   setKnowledgeVisibleCategories: (categories: Set<KnowledgeCategory>) => void
   setKnowledgeNodes: (nodes: ForceKnowledgeNode[]) => void
   setKnowledgeInitialized: (initialized: boolean) => void
@@ -236,12 +239,13 @@ export const WorkbenchProvider: React.FC<WorkbenchProviderProps> = ({ children }
   const [trafficResult, setTrafficResult] = useState<TopologyTrafficResult | null>(null)
 
   // ==================== UI 状态 ====================
-  const [viewMode, setViewMode] = useState<'3d' | 'topology' | 'analysis' | 'knowledge'>('topology')
+  const [viewMode, setViewModeInternal] = useState<'3d' | 'topology' | 'analysis' | 'knowledge'>('topology')
   const [selectedNode, setSelectedNode] = useState<NodeDetail | null>(null)
   const [selectedLink, setSelectedLink] = useState<LinkDetail | null>(null)
   const [focusedLevel, setFocusedLevel] = useState<'datacenter' | 'pod' | 'rack' | 'board' | null>(null)
   // 知识图谱状态
-  const [knowledgeSelectedNode, setKnowledgeSelectedNode] = useState<ForceKnowledgeNode | null>(null)
+  const [knowledgeSelectedNodes, setKnowledgeSelectedNodes] = useState<ForceKnowledgeNode[]>([])
+  const [knowledgeHighlightedNodeId, setKnowledgeHighlightedNodeId] = useState<string | null>(null)
   const [knowledgeVisibleCategories, setKnowledgeVisibleCategories] = useState<Set<KnowledgeCategory>>(
     new Set(['hardware', 'interconnect', 'parallel', 'communication', 'model', 'inference', 'protocol', 'system'])
   )
@@ -251,6 +255,32 @@ export const WorkbenchProvider: React.FC<WorkbenchProviderProps> = ({ children }
   const resetKnowledgeCategories = useCallback(() => {
     setKnowledgeVisibleCategories(new Set(['hardware', 'interconnect', 'parallel', 'communication', 'model', 'inference', 'protocol', 'system']))
   }, [])
+  // 添加知识节点到选中列表（新节点放在最前面，如果已存在则移到最前面），同时设置高亮
+  const addKnowledgeSelectedNode = useCallback((node: ForceKnowledgeNode) => {
+    setKnowledgeSelectedNodes(prev => {
+      const filtered = prev.filter(n => n.id !== node.id)
+      return [node, ...filtered]
+    })
+    setKnowledgeHighlightedNodeId(node.id)
+  }, [])
+  // 从选中列表移除节点
+  const removeKnowledgeSelectedNode = useCallback((nodeId: string) => {
+    setKnowledgeSelectedNodes(prev => prev.filter(n => n.id !== nodeId))
+    // 如果移除的是高亮节点，清除高亮
+    setKnowledgeHighlightedNodeId(prev => prev === nodeId ? null : prev)
+  }, [])
+  // 清除高亮（不影响详情卡片）
+  const clearKnowledgeHighlight = useCallback(() => {
+    setKnowledgeHighlightedNodeId(null)
+  }, [])
+  // 切换视图模式，离开knowledge时清空选中节点和高亮
+  const setViewMode = useCallback((mode: '3d' | 'topology' | 'analysis' | 'knowledge') => {
+    if (viewMode === 'knowledge' && mode !== 'knowledge') {
+      setKnowledgeSelectedNodes([])
+      setKnowledgeHighlightedNodeId(null)
+    }
+    setViewModeInternal(mode)
+  }, [viewMode])
 
   // ==================== 拓扑操作 ====================
   const loadTopology = useCallback(async () => {
@@ -648,7 +678,8 @@ export const WorkbenchProvider: React.FC<WorkbenchProviderProps> = ({ children }
       selectedNode,
       selectedLink,
       focusedLevel,
-      knowledgeSelectedNode,
+      knowledgeSelectedNodes,
+      knowledgeHighlightedNodeId,
       knowledgeVisibleCategories,
       knowledgeNodes,
       knowledgeInitialized,
@@ -657,7 +688,9 @@ export const WorkbenchProvider: React.FC<WorkbenchProviderProps> = ({ children }
       setSelectedNode,
       setSelectedLink,
       setFocusedLevel,
-      setKnowledgeSelectedNode,
+      addKnowledgeSelectedNode,
+      removeKnowledgeSelectedNode,
+      clearKnowledgeHighlight,
       setKnowledgeVisibleCategories,
       setKnowledgeNodes,
       setKnowledgeInitialized,
