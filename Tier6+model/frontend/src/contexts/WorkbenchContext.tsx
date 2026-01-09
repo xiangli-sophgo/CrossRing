@@ -4,6 +4,7 @@
  */
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, ReactNode } from 'react'
 import { message } from 'antd'
+import * as d3Force from 'd3-force'
 import {
   HierarchicalTopology,
   ManualConnectionConfig,
@@ -18,13 +19,41 @@ import { DeploymentAnalysisData, AnalysisHistoryItem, AnalysisViewMode } from '.
 import { getTopology, generateTopology, getLevelConnectionDefaults } from '../api/topology'
 import { useViewNavigation } from '../hooks/useViewNavigation'
 import { NodeDetail, LinkDetail } from '../components/TopologyGraph'
-import { ForceKnowledgeNode, KnowledgeCategory } from '../components/KnowledgeGraph'
+import { ForceKnowledgeNode, KnowledgeCategory, CORE_RELATION_TYPES, MAX_EDGES_PER_NODE } from '../components/KnowledgeGraph'
+import knowledgeData from '../data/knowledge-graph'
 
 // ============================================
 // 常量
 // ============================================
 const CONFIG_CACHE_KEY = 'tier6_topology_config_cache'
 const ANALYSIS_HISTORY_KEY = 'llm-deployment-analysis-history'
+
+// 知识图谱力导向布局参数 - 简化稳定版
+const KNOWLEDGE_FORCE_CONFIG = {
+  // 斥力配置
+  chargeStrength: -400,
+  chargeDistanceMax: 500,
+  // 连接力配置
+  linkDistance: 80,
+  linkStrength: 0.3,
+  // 径向力配置（主导布局）
+  radialStrength: 0.1,
+  radialMinRadius: 50,
+  radialMaxRadius: 500,
+  // 中心引力
+  centerStrength: 0.05,
+  // 碰撞配置
+  collisionRadius: 35,
+  collisionStrength: 1,
+  collisionIterations: 4,
+  // 预热 tick 数量
+  warmupTicks: 300,
+}
+
+const KNOWLEDGE_CATEGORY_ORDER: KnowledgeCategory[] = [
+  'hardware', 'interconnect', 'parallel', 'inference',
+  'model', 'communication', 'protocol', 'system'
+]
 
 // ============================================
 // 连接检查辅助函数
@@ -323,6 +352,140 @@ export const WorkbenchProvider: React.FC<WorkbenchProviderProps> = ({ children }
   useEffect(() => {
     loadTopology()
   }, [loadTopology])
+
+  // ==================== 知识图谱预初始化 ====================
+  // 在应用启动时就初始化知识图谱布局，避免切换页面时节点乱飞
+  useEffect(() => {
+    // 如果已经初始化过，跳过
+    if (knowledgeInitialized) return
+
+    // 使用 requestIdleCallback 或 setTimeout 避免阻塞主线程
+    const initKnowledgeGraph = () => {
+      const centerX = 600
+      const centerY = 400
+      const data = knowledgeData
+
+      // 计算节点度数
+      const initDegreeMap = new Map<string, number>()
+      data.nodes.forEach(n => initDegreeMap.set(n.id, 0))
+      data.relations.forEach(r => {
+        initDegreeMap.set(r.source, (initDegreeMap.get(r.source) || 0) + 1)
+        initDegreeMap.set(r.target, (initDegreeMap.get(r.target) || 0) + 1)
+      })
+      const maxDegree = Math.max(...initDegreeMap.values(), 1)
+
+      // 初始化节点位置 - 爆炸式发散：度数决定半径，类别决定角度
+      const totalCategories = KNOWLEDGE_CATEGORY_ORDER.length
+      const initialNodes: ForceKnowledgeNode[] = data.nodes.map((node) => {
+        const category = node.category as KnowledgeCategory
+        const categoryIndex = KNOWLEDGE_CATEGORY_ORDER.indexOf(category)
+        const degree = initDegreeMap.get(node.id) || 0
+
+        // 爆炸式初始位置：高度数靠中心，低度数在外围
+        const degreeRatio = degree / maxDegree
+        const distanceRatio = Math.pow(1 - degreeRatio, 1.5)
+        const minRadius = KNOWLEDGE_FORCE_CONFIG.radialMinRadius
+        const maxRadius = KNOWLEDGE_FORCE_CONFIG.radialMaxRadius
+        const radius = minRadius + distanceRatio * (maxRadius - minRadius)
+
+        // 同类别节点基础角度相近，形成"颜色射线束"
+        const categoryAngle = (categoryIndex / totalCategories) * 2 * Math.PI - Math.PI / 2
+        const angleSpread = Math.PI / totalCategories * 0.8
+        const randomOffset = (Math.random() - 0.5) * angleSpread
+        const angle = categoryAngle + randomOffset
+        const jitter = Math.random() * 30
+
+        return {
+          ...node,
+          category,
+          x: centerX + Math.cos(angle) * (radius + jitter),
+          y: centerY + Math.sin(angle) * (radius + jitter),
+          vx: 0,
+          vy: 0,
+        }
+      })
+
+      // 筛选可见关系用于力导向布局
+      const visibleNodeIds = new Set(initialNodes.map(n => n.id))
+      const coreRelations = data.relations.filter(
+        r => visibleNodeIds.has(r.source) && visibleNodeIds.has(r.target) && CORE_RELATION_TYPES.has(r.type)
+      )
+      const nodeEdgeCount = new Map<string, number>()
+      const visibleRelations = coreRelations.filter(r => {
+        const sourceCount = nodeEdgeCount.get(r.source) || 0
+        const targetCount = nodeEdgeCount.get(r.target) || 0
+        if (sourceCount >= MAX_EDGES_PER_NODE || targetCount >= MAX_EDGES_PER_NODE) {
+          return false
+        }
+        nodeEdgeCount.set(r.source, sourceCount + 1)
+        nodeEdgeCount.set(r.target, targetCount + 1)
+        return true
+      })
+
+      // 创建力导向模拟 - 简化稳定版
+      const simulation = d3Force.forceSimulation<ForceKnowledgeNode>(initialNodes)
+        .force('charge', d3Force.forceManyBody<ForceKnowledgeNode>()
+          .strength(KNOWLEDGE_FORCE_CONFIG.chargeStrength)
+          .distanceMax(KNOWLEDGE_FORCE_CONFIG.chargeDistanceMax)
+        )
+        .force('link', d3Force.forceLink<ForceKnowledgeNode, d3Force.SimulationLinkDatum<ForceKnowledgeNode>>(
+          visibleRelations.map(r => ({ source: r.source, target: r.target }))
+        )
+          .id(d => d.id)
+          .distance(KNOWLEDGE_FORCE_CONFIG.linkDistance)
+          .strength(KNOWLEDGE_FORCE_CONFIG.linkStrength)
+        )
+        .force('radial', d3Force.forceRadial<ForceKnowledgeNode>(
+          (d) => {
+            const degree = initDegreeMap.get(d.id) || 0
+            const radiusFactor = Math.pow(1 - degree / maxDegree, 1.2)
+            return KNOWLEDGE_FORCE_CONFIG.radialMinRadius +
+                   radiusFactor * (KNOWLEDGE_FORCE_CONFIG.radialMaxRadius - KNOWLEDGE_FORCE_CONFIG.radialMinRadius)
+          },
+          centerX, centerY
+        ).strength(KNOWLEDGE_FORCE_CONFIG.radialStrength))
+        .force('centerX', d3Force.forceX(centerX).strength(KNOWLEDGE_FORCE_CONFIG.centerStrength))
+        .force('centerY', d3Force.forceY(centerY).strength(KNOWLEDGE_FORCE_CONFIG.centerStrength))
+        .force('collision', d3Force.forceCollide<ForceKnowledgeNode>()
+          .radius(KNOWLEDGE_FORCE_CONFIG.collisionRadius)
+          .strength(KNOWLEDGE_FORCE_CONFIG.collisionStrength)
+          .iterations(KNOWLEDGE_FORCE_CONFIG.collisionIterations)
+        )
+        .stop()
+
+      // Warmup：静默运行直到稳定
+      for (let i = 0; i < KNOWLEDGE_FORCE_CONFIG.warmupTicks; i++) {
+        simulation.tick()
+      }
+
+      // 清零速度确保静止
+      initialNodes.forEach(node => {
+        node.vx = 0
+        node.vy = 0
+      })
+
+      // 计算适合所有节点的视口
+      const padding = 100
+      const minX = Math.min(...initialNodes.map(n => n.x ?? 0)) - padding
+      const maxX = Math.max(...initialNodes.map(n => n.x ?? 0)) + padding
+      const minY = Math.min(...initialNodes.map(n => n.y ?? 0)) - padding
+      const maxY = Math.max(...initialNodes.map(n => n.y ?? 0)) + padding
+      const width = Math.max(maxX - minX, 400)
+      const height = Math.max(maxY - minY, 300)
+
+      // 保存预计算的结果
+      setKnowledgeNodes(initialNodes)
+      setKnowledgeViewBox({ x: minX, y: minY, width, height })
+      setKnowledgeInitialized(true)
+    }
+
+    // 使用 requestIdleCallback 在空闲时初始化，如果不支持则使用 setTimeout
+    if ('requestIdleCallback' in window) {
+      (window as typeof window & { requestIdleCallback: (cb: () => void) => number }).requestIdleCallback(initKnowledgeGraph)
+    } else {
+      setTimeout(initKnowledgeGraph, 100)
+    }
+  }, [knowledgeInitialized])
 
   // 加载层级默认参数
   useEffect(() => {

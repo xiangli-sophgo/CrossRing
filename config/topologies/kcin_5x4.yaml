@@ -3,7 +3,7 @@
 TOPO_TYPE: 5x4  # 格式 AxB，自动计算拓扑参数
 FLIT_SIZE: 128
 BURST: 4
-NETWORK_FREQUENCY: 2.5
+NETWORK_FREQUENCY: 2.0
 IP_FREQUENCY: 1  # IP核频率(GHz)，默认为网络频率的一半
 
 # Buffer Size

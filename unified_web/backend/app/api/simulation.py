@@ -76,6 +76,7 @@ class SimDetailsResponse(BaseModel):
     file_index: int
     total_files: int
     current_file: str
+    is_parallel: bool = False
     sim_progress: int
     current_time: int
     max_time: int

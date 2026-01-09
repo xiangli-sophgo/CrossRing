@@ -17,7 +17,6 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from src.database import ResultManager
-from app.config import DATABASE_PATH
 
 # 临时文件存储目录
 TEMP_IMPORT_DIR = Path(tempfile.gettempdir()) / "crossring_import"
@@ -27,6 +26,9 @@ router = APIRouter()
 
 # 获取数据库管理器
 db_manager = ResultManager()
+
+# 使用 ResultManager 的数据库路径，确保一致性
+DATABASE_PATH = db_manager.db.db_path
 
 
 @router.get("/export/experiment/info")
@@ -50,31 +52,9 @@ async def get_experiment_export_info(
         results = db_manager.get_results(exp["id"])
         total_results += results["total"]
 
-    # 估算大小：只计算 result_analysis.html 文件
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-
-    placeholders = ",".join("?" * len(ids))
-    cursor.execute(f"""
-        SELECT COALESCE(SUM(LENGTH(file_content)), 0) FROM result_files
-        WHERE file_name = 'result_analysis.html'
-        AND result_id IN (
-            SELECT id FROM kcin_results WHERE experiment_id IN ({placeholders})
-            UNION
-            SELECT id FROM dcin_results WHERE experiment_id IN ({placeholders})
-        )
-    """, ids + ids)
-
-    html_size = cursor.fetchone()[0]
-    conn.close()
-
-    # ZIP压缩后大小估算（HTML压缩比约15%，SQLite结构数据约50%）
-    estimated_size = int(html_size * 0.15 + (512 * 1024 + total_results * 1024) * 0.5)
-
     return {
         "experiments_count": len(selected_experiments),
         "results_count": total_results,
-        "estimated_size": estimated_size,
     }
 
 
@@ -134,18 +114,30 @@ def create_experiment_export_database(experiment_ids: List[int], output_path: Pa
     dst_conn = sqlite3.connect(output_path)
     dst_cursor = dst_conn.cursor()
 
-    # 创建表结构（从源数据库复制schema）
-    src_cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='experiments'")
-    dst_cursor.execute(src_cursor.fetchone()[0])
+    # 创建表结构（从源数据库复制schema，检查表是否存在）
+    def copy_table_schema(table_name: str) -> bool:
+        src_cursor.execute(f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+        schema = src_cursor.fetchone()
+        if schema:
+            dst_cursor.execute(schema[0])
+            return True
+        return False
 
-    src_cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='kcin_results'")
-    dst_cursor.execute(src_cursor.fetchone()[0])
+    # 检查必要的表是否存在
+    has_experiments = copy_table_schema('experiments')
+    has_kcin_results = copy_table_schema('kcin_results')
+    has_dcin_results = copy_table_schema('dcin_results')
+    has_result_files = copy_table_schema('result_files')
 
-    src_cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='dcin_results'")
-    dst_cursor.execute(src_cursor.fetchone()[0])
+    if not has_experiments:
+        src_conn.close()
+        dst_conn.close()
+        raise ValueError("数据库中不存在 experiments 表，无法导出")
 
-    src_cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='result_files'")
-    dst_cursor.execute(src_cursor.fetchone()[0])
+    if not has_kcin_results and not has_dcin_results:
+        src_conn.close()
+        dst_conn.close()
+        raise ValueError("数据库中不存在结果表，无法导出")
 
     # 创建索引
     src_cursor.execute("SELECT sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL")
@@ -189,6 +181,14 @@ def create_experiment_export_database(experiment_ids: List[int], output_path: Pa
         exp_type = exp_info["experiment_type"]
         results_table = "kcin_results" if exp_type == "kcin" else "dcin_results"
 
+        # 检查结果表是否存在
+        if exp_type == "kcin" and not has_kcin_results:
+            exp_info["results_count"] = 0
+            continue
+        if exp_type == "dcin" and not has_dcin_results:
+            exp_info["results_count"] = 0
+            continue
+
         # 复制结果
         src_cursor.execute(f"SELECT * FROM {results_table} WHERE experiment_id = ?", (exp_id,))
         results = src_cursor.fetchall()
@@ -207,7 +207,7 @@ def create_experiment_export_database(experiment_ids: List[int], output_path: Pa
         exp_info["results_count"] = len(results)
 
         # 3. 只复制 result_analysis.html 文件（每个result_id只保留一个）
-        if result_ids:
+        if result_ids and has_result_files:
             for rid in result_ids:
                 src_cursor.execute("""
                     SELECT * FROM result_files
@@ -311,6 +311,8 @@ async def export_experiment(
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
 

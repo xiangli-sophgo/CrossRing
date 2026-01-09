@@ -30,14 +30,6 @@ interface ExportExperimentModalProps {
   experiments: Experiment[];
 }
 
-const formatBytes = (bytes: number): string => {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-};
-
 export default function ExportExperimentModal({
   open,
   onClose,
@@ -220,7 +212,7 @@ export default function ExportExperimentModal({
           </div>
         ) : exportInfo ? (
           <Row gutter={16}>
-            <Col span={8}>
+            <Col span={12}>
               <Card size="small" style={{ textAlign: 'center' }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   实验数量
@@ -230,23 +222,13 @@ export default function ExportExperimentModal({
                 </div>
               </Card>
             </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Card size="small" style={{ textAlign: 'center' }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   结果数量
                 </Text>
                 <div style={{ fontSize: 24, fontWeight: 600, color: primaryColor }}>
                   {exportInfo.results_count.toLocaleString()}
-                </div>
-              </Card>
-            </Col>
-            <Col span={8}>
-              <Card size="small" style={{ textAlign: 'center' }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  预估大小
-                </Text>
-                <div style={{ fontSize: 20, fontWeight: 600, color: primaryColor }}>
-                  {formatBytes(exportInfo.estimated_size)}
                 </div>
               </Card>
             </Col>

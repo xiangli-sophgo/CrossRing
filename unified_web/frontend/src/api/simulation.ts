@@ -32,6 +32,7 @@ export interface SimDetails {
   file_index: number
   total_files: number
   current_file: string
+  is_parallel: boolean
   sim_progress: number
   current_time: number
   max_time: number

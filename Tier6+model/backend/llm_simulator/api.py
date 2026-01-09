@@ -204,3 +204,18 @@ async def validate_config(request: SimulationRequest):
         "required_chips": required_chips,
         "available_chips": available_chips,
     }
+
+
+if __name__ == "__main__":
+    import os
+    import uvicorn
+    from pathlib import Path
+    from dotenv import load_dotenv
+
+    # 加载 Tier6+model/.env 共享配置
+    env_path = Path(__file__).parent.parent.parent / ".env"
+    load_dotenv(env_path)
+
+    port = int(os.environ["VITE_API_PORT"])
+    print(f"Tier6+互联建模平台启动在端口: {port}")
+    uvicorn.run("llm_simulator.api:app", host="0.0.0.0", port=port, reload=True)

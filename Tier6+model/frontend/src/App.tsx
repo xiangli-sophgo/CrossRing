@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Layout, Typography, Spin, Segmented, Card, Descriptions, Tag, Collapse, Button } from 'antd'
-import { ArrowLeftOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, BookOutlined, LinkOutlined, FileTextOutlined } from '@ant-design/icons'
 import { Scene3D } from './components/Scene3D'
 import { ConfigPanel } from './components/ConfigPanel'
 import { TopologyGraph, NodeDetail } from './components/TopologyGraph'
@@ -19,11 +19,8 @@ const DEFAULT_SIDER_WIDTH = 520
 const MIN_SIDER_WIDTH = 380
 const MAX_SIDER_WIDTH = 900
 
-// 卡片估计高度
-const CARD_ESTIMATED_HEIGHT = 280
-
 /**
- * 知识节点详情卡片组件 - 支持多卡片堆叠
+ * 知识节点详情卡片组件 - 单卡片全高显示
  */
 interface KnowledgeNodeCardsProps {
   nodes: ForceKnowledgeNode[]
@@ -32,115 +29,167 @@ interface KnowledgeNodeCardsProps {
 }
 
 const KnowledgeNodeCards: React.FC<KnowledgeNodeCardsProps> = ({ nodes, onClose, onNodeClick }) => {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [maxCards, setMaxCards] = useState(3)
+  // 只显示最近选中的一个节点
+  const node = nodes[0]
+  if (!node) return null
 
-  // 动态计算可显示的最大卡片数
-  useEffect(() => {
-    const updateMaxCards = () => {
-      if (containerRef.current) {
-        const containerHeight = containerRef.current.parentElement?.clientHeight || 600
-        // 预留一些空间给其他UI元素
-        const availableHeight = containerHeight - 100
-        const calculatedMax = Math.max(1, Math.floor(availableHeight / CARD_ESTIMATED_HEIGHT))
-        setMaxCards(calculatedMax)
-      }
-    }
-    updateMaxCards()
-    window.addEventListener('resize', updateMaxCards)
-    return () => window.removeEventListener('resize', updateMaxCards)
-  }, [])
-
-  // 只显示前maxCards个节点
-  const visibleNodes = nodes.slice(0, maxCards)
-
-  // 渲染来源链接
-  const renderSource = (source: string, url?: string) => {
-    const linkStyle: React.CSSProperties = { color: '#1677ff', cursor: 'pointer', textDecoration: 'underline' }
-    if (url) {
-      return <a href={url} target="_blank" rel="noopener noreferrer" style={linkStyle}>{source}</a>
-    }
-    return source
+  // 获取相关节点
+  const getRelatedNodes = (nodeId: string) => {
+    const relatedIds = new Set<string>()
+    knowledgeData.relations.forEach(r => {
+      if (r.source === nodeId) relatedIds.add(r.target)
+      if (r.target === nodeId) relatedIds.add(r.source)
+    })
+    return knowledgeData.nodes.filter(n => relatedIds.has(n.id))
   }
 
-  return (
-    <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
-      {visibleNodes.map((node, index) => {
-        // 计算相关节点
-        const relatedNodeIds = new Set<string>()
-        knowledgeData.relations.forEach(r => {
-          if (r.source === node.id) relatedNodeIds.add(r.target)
-          if (r.target === node.id) relatedNodeIds.add(r.source)
-        })
-        const relatedNodes = knowledgeData.nodes.filter(n => relatedNodeIds.has(n.id))
+  // 渲染定义文本（支持 Markdown 格式：**加粗**、\n换行）
+  const renderDefinition = (text: string) => {
+    // 1. 按换行符拆分
+    const lines = text.split('\n')
 
-        return (
-          <Card
-            key={node.id}
-            title={
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{
-                  width: 10, height: 10, borderRadius: '50%',
-                  background: CATEGORY_COLORS[node.category],
-                  flexShrink: 0,
-                }} />
-                <span style={{ fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {node.fullName || node.name}
-                </span>
-                {index === 0 && nodes.length > 1 && (
-                  <Tag color="blue" style={{ marginLeft: 'auto', fontSize: 10 }}>最新</Tag>
-                )}
-              </div>
-            }
-            size="small"
-            style={{
-              opacity: index === 0 ? 1 : 0.9,
-              transition: 'all 0.3s ease',
-            }}
-            extra={<a onClick={() => onClose(node.id)}>关闭</a>}
-          >
-            <Tag color={CATEGORY_COLORS[node.category]} style={{ marginBottom: 8 }}>
+    return lines.map((line, lineIndex) => {
+      // 2. 处理每行中的加粗标记 **text**
+      const segments: React.ReactNode[] = []
+      const boldRegex = /\*\*([^*]+)\*\*/g
+      let lastIndex = 0
+      let match
+
+      while ((match = boldRegex.exec(line)) !== null) {
+        if (match.index > lastIndex) {
+          segments.push(line.slice(lastIndex, match.index))
+        }
+        segments.push(
+          <strong key={`${lineIndex}-${match.index}`} style={{ color: '#4f46e5' }}>
+            {match[1]}
+          </strong>
+        )
+        lastIndex = boldRegex.lastIndex
+      }
+      if (lastIndex < line.length) {
+        segments.push(line.slice(lastIndex))
+      }
+
+      // 3. 判断是否是分点项（以数字+标点开头）
+      const isListItem = /^\d+[）\.\)]\s*/.test(line)
+
+      return (
+        <span
+          key={lineIndex}
+          style={{
+            display: lineIndex > 0 || isListItem ? 'block' : undefined,
+            marginTop: lineIndex > 0 ? 4 : 0,
+            paddingLeft: isListItem ? 12 : 0,
+          }}
+        >
+          {segments.length > 0 ? segments : line}
+        </span>
+      )
+    })
+  }
+
+  // 分区样式
+  const sectionStyle: React.CSSProperties = {
+    background: '#f9fafb',
+    border: '1px solid #f3f4f6',
+    borderRadius: 6,
+    padding: '10px 12px',
+    marginBottom: 10,
+  }
+  const sectionTitleStyle: React.CSSProperties = {
+    fontSize: 14,
+    fontWeight: 600,
+    color: '#374151',
+    marginBottom: 8,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+  }
+
+  const relatedNodes = getRelatedNodes(node.id)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, marginTop: 16, minHeight: 0 }}>
+      <Card
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Tag color={CATEGORY_COLORS[node.category]} style={{ margin: 0, fontSize: 12, flexShrink: 0 }}>
               {CATEGORY_NAMES[node.category]}
             </Tag>
-            <div style={{
-              fontSize: 13,
-              lineHeight: 1.6,
-              marginBottom: 8,
-              maxHeight: index === 0 ? 'none' : 60,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}>
-              {node.definition}
+            <span style={{ fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+              {node.fullName || node.name}
+            </span>
+          </div>
+        }
+        size="small"
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
+        bodyStyle={{ flex: 1, overflow: 'auto', minHeight: 0 }}
+        extra={<a onClick={() => onClose(node.id)}>关闭</a>}
+      >
+        {/* 定义区域 */}
+        <div style={sectionStyle}>
+          <div style={sectionTitleStyle}>
+            <BookOutlined style={{ color: '#6366f1' }} />
+            <span>定义</span>
+          </div>
+          <div style={{
+            fontSize: 15,
+            lineHeight: 1.8,
+            color: '#1f2937',
+          }}>
+            {renderDefinition(node.definition)}
+          </div>
+        </div>
+
+        {/* 相关概念区域 */}
+        {relatedNodes.length > 0 && (
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>
+              <LinkOutlined style={{ color: '#10b981' }} />
+              <span>相关概念 ({relatedNodes.length})</span>
             </div>
-            {node.source && (
-              <div style={{ marginBottom: 6 }}>
-                <div style={{ fontWeight: 500, marginBottom: 2, fontSize: 12 }}>来源</div>
-                <div style={{ fontSize: 11, color: '#666' }}>{renderSource(node.source, (node as any).url)}</div>
-              </div>
-            )}
-            {relatedNodes.length > 0 && (
-              <div>
-                <div style={{ fontWeight: 500, marginBottom: 4, fontSize: 12 }}>相关概念 ({relatedNodes.length})</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: index === 0 ? 'none' : 32, overflow: 'hidden' }}>
-                  {relatedNodes.slice(0, index === 0 ? undefined : 6).map(n => (
-                    <Tag
-                      key={n.id}
-                      color={CATEGORY_COLORS[n.category as keyof typeof CATEGORY_COLORS]}
-                      style={{ cursor: 'pointer', margin: 0, fontSize: 11 }}
-                      onClick={() => onNodeClick(n)}
-                    >
-                      {n.name}
-                    </Tag>
-                  ))}
-                  {index !== 0 && relatedNodes.length > 6 && (
-                    <Tag style={{ margin: 0, fontSize: 11 }}>+{relatedNodes.length - 6}</Tag>
-                  )}
-                </div>
-              </div>
-            )}
-          </Card>
-        )
-      })}
+            <div style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 6,
+            }}>
+              {relatedNodes.map(n => (
+                <Tag
+                  key={n.id}
+                  color={CATEGORY_COLORS[n.category as keyof typeof CATEGORY_COLORS]}
+                  style={{ cursor: 'pointer', margin: 0, fontSize: 13 }}
+                  onClick={() => onNodeClick(n)}
+                >
+                  {n.name}
+                </Tag>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 参考资料区域（仅当有 source 时显示）*/}
+        {node.source && (
+          <div style={{ ...sectionStyle, marginBottom: 0 }}>
+            <div style={sectionTitleStyle}>
+              <FileTextOutlined style={{ color: '#8b5cf6' }} />
+              <span>参考资料</span>
+            </div>
+            <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.6 }}>
+              {node.source}
+              {(node as any).url && (
+                <a
+                  href={(node as any).url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ marginLeft: 8, color: '#6366f1' }}
+                >
+                  <LinkOutlined /> 链接
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+      </Card>
     </div>
   )
 }

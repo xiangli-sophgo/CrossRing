@@ -4,7 +4,7 @@
  */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Input, Tag, Button, Spin, Typography } from 'antd'
-import { SearchOutlined, ReloadOutlined } from '@ant-design/icons'
+import { SearchOutlined, ReloadOutlined, ApartmentOutlined } from '@ant-design/icons'
 import * as d3Force from 'd3-force'
 import {
   KnowledgeRelation,
@@ -14,23 +14,41 @@ import {
   CATEGORY_COLORS,
   CATEGORY_NAMES,
   RELATION_STYLES,
+  CORE_RELATION_TYPES,
+  MAX_EDGES_PER_NODE,
 } from './types'
 import { useWorkbench } from '../../contexts/WorkbenchContext'
 import knowledgeData from '../../data/knowledge-graph'
 
 const { Text } = Typography
 
-// 力导向布局参数 - 优化版
+// 力导向布局参数 - 简化稳定版
 const FORCE_CONFIG = {
-  chargeStrength: -800,      // 增加斥力让节点分散
-  chargeDistanceMax: 800,    // 斥力作用距离
-  linkDistance: 80,         // 连接距离
-  linkStrength: 0.5,         // 增加连接强度，让相连节点靠近
-  collisionIterations: 6,    // 碰撞检测迭代次数
-  alphaDecay: 0.02,
-  alphaMin: 0.001,
-  velocityDecay: 0.3,
+  // 斥力配置
+  chargeStrength: -400,
+  chargeDistanceMax: 500,
+  // 连接力配置
+  linkDistance: 80,
+  linkStrength: 0.3,
+  // 径向力配置（主导布局）
+  radialStrength: 0.1,
+  radialMinRadius: 50,
+  radialMaxRadius: 500,
+  // 中心引力
+  centerStrength: 0.05,
+  // 碰撞配置
+  collisionRadius: 35,
+  collisionStrength: 1,
+  collisionIterations: 4,
+  // 预热 tick 数量
+  warmupTicks: 300,
 }
+
+// 8个类别的顺序（用于初始角度分布）
+const CATEGORY_ORDER: KnowledgeCategory[] = [
+  'hardware', 'interconnect', 'parallel', 'inference',
+  'model', 'communication', 'protocol', 'system'
+]
 
 // 节点半径范围
 const NODE_RADIUS_MIN = 20
@@ -48,7 +66,6 @@ export const KnowledgeGraph: React.FC = () => {
     clearKnowledgeHighlight,
     setKnowledgeVisibleCategories: setVisibleCategories,
     setKnowledgeNodes,
-    setKnowledgeInitialized,
     setKnowledgeViewBox: saveViewBox,
     resetKnowledgeCategories,
   } = ui
@@ -58,8 +75,7 @@ export const KnowledgeGraph: React.FC = () => {
     knowledgeNodes.find(n => n.id === highlightedNodeId) || null
   , [knowledgeNodes, highlightedNodeId])
 
-  // 本地状态（仅用于渲染触发）
-  const [, forceUpdate] = useState(0)
+  // 本地状态
   const [relations, setRelations] = useState<KnowledgeRelation[]>([])
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -68,7 +84,6 @@ export const KnowledgeGraph: React.FC = () => {
   // Refs
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const simulationRef = useRef<d3Force.Simulation<ForceKnowledgeNode, d3Force.SimulationLinkDatum<ForceKnowledgeNode>> | null>(null)
 
   // 视口状态 - 优先使用保存的viewBox，避免切换页面时视口跳变
   const [viewBox, setViewBoxLocal] = useState(() =>
@@ -85,141 +100,40 @@ export const KnowledgeGraph: React.FC = () => {
   const [isPanning, setIsPanning] = useState(false)
   const panStartRef = useRef({ x: 0, y: 0, viewX: 0, viewY: 0 })
 
-  // 加载数据（只在首次加载时初始化，避免切换视图重复计算）
+  // 加载关系数据（节点数据已在 WorkbenchContext 中预初始化）
   useEffect(() => {
     const data = knowledgeData as KnowledgeGraphData
     // relations 是静态数据，每次组件挂载都需要加载
     setRelations(data.relations)
-
+    // 如果已预初始化，直接完成加载；否则等待 context 初始化完成
     if (knowledgeInitialized) {
       setLoading(false)
-      return
     }
-
-    // 初始化节点位置
-    const centerX = viewBox.width / 2
-    const centerY = viewBox.height / 2
-    const initialNodes: ForceKnowledgeNode[] = data.nodes.map((node) => ({
-      ...node,
-      category: node.category as KnowledgeCategory,
-      x: centerX + (Math.random() - 0.5) * 200,
-      y: centerY + (Math.random() - 0.5) * 200,
-    }))
-
-    setKnowledgeNodes(initialNodes)
-    setKnowledgeInitialized(true)
-    setLoading(false)
-  }, [knowledgeInitialized, viewBox.width, viewBox.height, setKnowledgeNodes, setKnowledgeInitialized])
-
-  // 计算适合所有节点的视口
-  const fitViewToNodes = useCallback(() => {
-    if (knowledgeNodes.length === 0) return
-
-    const visibleNodes = knowledgeNodes.filter(n => visibleCategories.has(n.category))
-    if (visibleNodes.length === 0) return
-
-    const padding = 100
-    const minX = Math.min(...visibleNodes.map(n => n.x ?? 0)) - padding
-    const maxX = Math.max(...visibleNodes.map(n => n.x ?? 0)) + padding
-    const minY = Math.min(...visibleNodes.map(n => n.y ?? 0)) - padding
-    const maxY = Math.max(...visibleNodes.map(n => n.y ?? 0)) + padding
-
-    const width = Math.max(maxX - minX, 400)
-    const height = Math.max(maxY - minY, 300)
-
-    setViewBox({ x: minX, y: minY, width, height })
-  }, [knowledgeNodes, visibleCategories])
+  }, [knowledgeInitialized])
 
   // 记录上一次的分类，用于检测分类切换
   const prevCategoriesRef = useRef<Set<KnowledgeCategory> | null>(null)
 
-  // 初始化力导向模拟
+  // 静态渲染模式：已有稳定位置时不创建 simulation
   useEffect(() => {
     if (knowledgeNodes.length === 0 || relations.length === 0) return
 
-    // 使用固定的中心点
-    const centerX = 600
-    const centerY = 400
-
-    // 过滤可见节点和关系
-    const visibleNodeIds = new Set(
-      knowledgeNodes.filter(n => visibleCategories.has(n.category)).map(n => n.id)
-    )
-    const visibleRelations = relations.filter(
-      r => visibleNodeIds.has(r.source) && visibleNodeIds.has(r.target)
+    // 检查节点是否已有稳定位置（从 WorkbenchContext 预计算）
+    const hasStablePositions = knowledgeNodes.every(n =>
+      n.x !== undefined && n.y !== undefined
     )
 
-    // 检测是否是分类切换
-    const isCategoryChange = prevCategoriesRef.current !== null &&
-      (prevCategoriesRef.current.size !== visibleCategories.size ||
-       ![...visibleCategories].every(c => prevCategoriesRef.current!.has(c)))
-    prevCategoriesRef.current = new Set(visibleCategories)
-
-    // 如果已有simulation，更新link并根据情况重启
-    if (simulationRef.current) {
-      const linkForce = simulationRef.current.force('link') as d3Force.ForceLink<ForceKnowledgeNode, d3Force.SimulationLinkDatum<ForceKnowledgeNode>>
-      if (linkForce) {
-        linkForce.links(visibleRelations.map(r => ({ source: r.source, target: r.target })))
-      }
-      // 分类切换时用适当的动画
-      if (isCategoryChange) {
-        simulationRef.current.alpha(0.3).restart()
-      }
-      forceUpdate(n => n + 1)
+    // 已有稳定位置，直接使用静态渲染，不创建 simulation
+    if (hasStablePositions) {
+      setLoading(false)
+      prevCategoriesRef.current = new Set(visibleCategories)
       return
     }
 
-    // 检查节点是否已有稳定位置（从context恢复）
-    const hasStablePositions = knowledgeNodes.every(n =>
-      n.x !== undefined && n.y !== undefined &&
-      n.vx !== undefined && n.vy !== undefined
-    )
-
-    // 首次创建simulation - 优化布局
-    const simulation = d3Force.forceSimulation<ForceKnowledgeNode>(knowledgeNodes)
-      .force('charge', d3Force.forceManyBody<ForceKnowledgeNode>()
-        .strength(FORCE_CONFIG.chargeStrength)
-        .distanceMax(FORCE_CONFIG.chargeDistanceMax)
-      )
-      .force('link', d3Force.forceLink<ForceKnowledgeNode, d3Force.SimulationLinkDatum<ForceKnowledgeNode>>(
-        visibleRelations.map(r => ({ source: r.source, target: r.target }))
-      )
-        .id(d => d.id)
-        .distance(FORCE_CONFIG.linkDistance)
-        .strength(FORCE_CONFIG.linkStrength)
-      )
-      // 只用弱中心力防止飘太远，不用 x/y 约束
-      .force('center', d3Force.forceCenter(centerX, centerY))
-      .force('collision', d3Force.forceCollide<ForceKnowledgeNode>()
-        .radius(NODE_RADIUS_MAX + 15)
-        .strength(1)
-        .iterations(FORCE_CONFIG.collisionIterations)
-      )
-      .alphaDecay(FORCE_CONFIG.alphaDecay)
-      .alphaMin(FORCE_CONFIG.alphaMin)
-      .velocityDecay(FORCE_CONFIG.velocityDecay)
-
-    // 如果已有稳定位置，用很低的alpha微调，不会大幅抖动
-    if (hasStablePositions) {
-      simulation.alpha(0.05)
-      // 自动调整视口
-      setTimeout(fitViewToNodes, 100)
-    } else {
-      // 首次布局完成后自动调整视口
-      simulation.on('end', fitViewToNodes)
-    }
-
-    simulation.on('tick', () => {
-      forceUpdate(n => n + 1)
-    })
-
-    simulationRef.current = simulation
-
-    return () => {
-      simulation.stop()
-      simulationRef.current = null
-    }
-  }, [knowledgeNodes, relations, visibleCategories, fitViewToNodes])
+    // 没有稳定位置的情况（理论上不应发生，因为 WorkbenchContext 会预计算）
+    setLoading(false)
+    prevCategoriesRef.current = new Set(visibleCategories)
+  }, [knowledgeNodes, relations, visibleCategories])
 
   // 计算每个节点的连接数（度数）
   const nodeDegrees = useMemo(() => {
@@ -319,6 +233,101 @@ export const KnowledgeGraph: React.FC = () => {
     })
   }, [])
 
+  // 重新布局 - 使用 warmup 模式：静默运行直到稳定后再渲染
+  const handleRelayout = useCallback(() => {
+    setLoading(true)
+
+    const centerX = 600
+    const centerY = 400
+    const maxDegree = Math.max(...nodeDegrees.values(), 1)
+    const totalCategories = CATEGORY_ORDER.length
+
+    // 计算初始位置：高度数靠中心，低度数在外围
+    const relayoutNodes: ForceKnowledgeNode[] = knowledgeNodes.map(node => {
+      const categoryIndex = CATEGORY_ORDER.indexOf(node.category)
+      const degree = nodeDegrees.get(node.id) || 0
+
+      const degreeRatio = degree / maxDegree
+      const distanceRatio = Math.pow(1 - degreeRatio, 1.5)
+      const radius = FORCE_CONFIG.radialMinRadius +
+                     distanceRatio * (FORCE_CONFIG.radialMaxRadius - FORCE_CONFIG.radialMinRadius)
+
+      const categoryAngle = (categoryIndex / totalCategories) * 2 * Math.PI - Math.PI / 2
+      const angleSpread = Math.PI / totalCategories * 0.8
+      const randomOffset = (Math.random() - 0.5) * angleSpread
+      const angle = categoryAngle + randomOffset
+      const jitter = Math.random() * 30
+
+      return {
+        ...node,
+        x: centerX + Math.cos(angle) * (radius + jitter),
+        y: centerY + Math.sin(angle) * (radius + jitter),
+        vx: 0,
+        vy: 0,
+      }
+    })
+
+    // 筛选可见关系用于力导向
+    const visibleNodeIds = new Set(relayoutNodes.map(n => n.id))
+    const coreRelations = relations.filter(
+      r => visibleNodeIds.has(r.source) && visibleNodeIds.has(r.target) && CORE_RELATION_TYPES.has(r.type)
+    )
+    const nodeEdgeCount = new Map<string, number>()
+    const visibleRelations = coreRelations.filter(r => {
+      const sourceCount = nodeEdgeCount.get(r.source) || 0
+      const targetCount = nodeEdgeCount.get(r.target) || 0
+      if (sourceCount >= MAX_EDGES_PER_NODE || targetCount >= MAX_EDGES_PER_NODE) return false
+      nodeEdgeCount.set(r.source, sourceCount + 1)
+      nodeEdgeCount.set(r.target, targetCount + 1)
+      return true
+    })
+
+    // 创建 simulation 并配置力
+    const simulation = d3Force.forceSimulation<ForceKnowledgeNode>(relayoutNodes)
+      .force('charge', d3Force.forceManyBody<ForceKnowledgeNode>()
+        .strength(FORCE_CONFIG.chargeStrength)
+        .distanceMax(FORCE_CONFIG.chargeDistanceMax)
+      )
+      .force('link', d3Force.forceLink<ForceKnowledgeNode, d3Force.SimulationLinkDatum<ForceKnowledgeNode>>(
+        visibleRelations.map(r => ({ source: r.source, target: r.target }))
+      )
+        .id(d => d.id)
+        .distance(FORCE_CONFIG.linkDistance)
+        .strength(FORCE_CONFIG.linkStrength)
+      )
+      .force('radial', d3Force.forceRadial<ForceKnowledgeNode>(
+        (d) => {
+          const degree = nodeDegrees.get(d.id) || 0
+          const radiusFactor = Math.pow(1 - degree / maxDegree, 1.2)
+          return FORCE_CONFIG.radialMinRadius + radiusFactor * (FORCE_CONFIG.radialMaxRadius - FORCE_CONFIG.radialMinRadius)
+        },
+        centerX, centerY
+      ).strength(FORCE_CONFIG.radialStrength))
+      .force('centerX', d3Force.forceX(centerX).strength(FORCE_CONFIG.centerStrength))
+      .force('centerY', d3Force.forceY(centerY).strength(FORCE_CONFIG.centerStrength))
+      .force('collision', d3Force.forceCollide<ForceKnowledgeNode>()
+        .radius(FORCE_CONFIG.collisionRadius)
+        .strength(FORCE_CONFIG.collisionStrength)
+        .iterations(FORCE_CONFIG.collisionIterations)
+      )
+      .stop()
+
+    // Warmup：静默运行直到稳定
+    for (let i = 0; i < FORCE_CONFIG.warmupTicks; i++) {
+      simulation.tick()
+    }
+
+    // 清零速度确保静止
+    relayoutNodes.forEach(node => {
+      node.vx = 0
+      node.vy = 0
+    })
+
+    // 更新节点位置
+    setKnowledgeNodes([...relayoutNodes])
+    setLoading(false)
+  }, [knowledgeNodes, nodeDegrees, relations, setKnowledgeNodes])
+
   // 分类过滤切换 (普通点击切换，Ctrl+点击只显示该分类)
   const handleCategoryClick = useCallback((category: KnowledgeCategory, ctrlKey: boolean) => {
     if (ctrlKey) {
@@ -336,14 +345,60 @@ export const KnowledgeGraph: React.FC = () => {
     }
   }, [visibleCategories, setVisibleCategories])
 
+  // 计算可见的边（应用核心关系筛选和连接数限制，确保每个节点至少有一条连接）
+  const visibleEdges = useMemo(() => {
+    const visibleNodeIds = new Set(
+      knowledgeNodes.filter(n => visibleCategories.has(n.category)).map(n => n.id)
+    )
+    // 所有可见关系（用于确保每个节点至少有一条连接）
+    const allVisibleRelations = relations.filter(
+      r => visibleNodeIds.has(r.source) && visibleNodeIds.has(r.target)
+    )
+    // 核心关系优先
+    const coreRelations = allVisibleRelations.filter(r => CORE_RELATION_TYPES.has(r.type))
+
+    const nodeEdgeCount = new Map<string, number>()
+    const selectedEdges: typeof relations = []
+
+    // 第一轮：添加核心关系（受连接数限制）
+    for (const r of coreRelations) {
+      const sourceCount = nodeEdgeCount.get(r.source) || 0
+      const targetCount = nodeEdgeCount.get(r.target) || 0
+      if (sourceCount < MAX_EDGES_PER_NODE && targetCount < MAX_EDGES_PER_NODE) {
+        selectedEdges.push(r)
+        nodeEdgeCount.set(r.source, sourceCount + 1)
+        nodeEdgeCount.set(r.target, targetCount + 1)
+      }
+    }
+
+    // 第二轮：确保每个节点至少有一条连接
+    const connectedNodes = new Set<string>()
+    selectedEdges.forEach(r => {
+      connectedNodes.add(r.source)
+      connectedNodes.add(r.target)
+    })
+    for (const nodeId of visibleNodeIds) {
+      if (!connectedNodes.has(nodeId)) {
+        // 找一条连接这个节点的关系
+        const edge = allVisibleRelations.find(r => r.source === nodeId || r.target === nodeId)
+        if (edge && !selectedEdges.includes(edge)) {
+          selectedEdges.push(edge)
+          connectedNodes.add(edge.source)
+          connectedNodes.add(edge.target)
+        }
+      }
+    }
+
+    return selectedEdges
+  }, [knowledgeNodes, relations, visibleCategories])
+
   // 渲染边
   const renderEdges = () => {
     const nodeMap = new Map(knowledgeNodes.map(n => [n.id, n]))
-    return relations.map((rel, i) => {
+    return visibleEdges.map((rel, i) => {
       const source = nodeMap.get(rel.source)
       const target = nodeMap.get(rel.target)
       if (!source || !target) return null
-      if (!visibleCategories.has(source.category) || !visibleCategories.has(target.category)) return null
 
       const style = RELATION_STYLES[rel.type] || RELATION_STYLES.related_to
       // 使用高亮节点判断高亮
@@ -503,6 +558,15 @@ export const KnowledgeGraph: React.FC = () => {
           })}
         </div>
 
+        {/* 重新布局按钮 */}
+        <Button
+          size="small"
+          icon={<ApartmentOutlined />}
+          onClick={handleRelayout}
+        >
+          重新布局
+        </Button>
+
         {/* 全部显示按钮 */}
         {visibleCategories.size < 8 && (
           <Button
@@ -516,7 +580,7 @@ export const KnowledgeGraph: React.FC = () => {
 
         {/* 统计信息 */}
         <Text type="secondary" style={{ fontSize: 12 }}>
-          {knowledgeNodes.filter(n => visibleCategories.has(n.category)).length} 个节点 · {relations.length} 条关系
+          {knowledgeNodes.filter(n => visibleCategories.has(n.category)).length} 个节点 · {visibleEdges.length} 条连接
         </Text>
       </div>
 

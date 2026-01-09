@@ -55,6 +55,7 @@ import {
 import { getExperiments } from '@/api/experiments'
 import type { Experiment } from '@/types'
 import { useSimulationStore } from '@/stores/simulationStore'
+import { useExperimentStore } from '@/stores/experimentStore'
 
 // 导入拆分的组件
 import {
@@ -228,6 +229,11 @@ const Simulation: React.FC = () => {
 
       // 刷新历史列表
       loadHistory()
+
+      // 通知结果管理页面需要刷新
+      if (update.status === 'completed') {
+        useExperimentStore.getState().setNeedsRefresh(true)
+      }
 
       // 显示完成消息
       const expName = update.experiment_name || update.task_id.slice(0, 8)
@@ -477,6 +483,22 @@ const Simulation: React.FC = () => {
         newMap.set(response.task_id, { task: initialStatus, startTime: Date.now() })
         return newMap
       })
+      // 短延迟后获取真实状态，避免显示"等待中"
+      setTimeout(async () => {
+        try {
+          const realStatus = await getTaskStatus(response.task_id)
+          setRunningTasks(prev => {
+            const newMap = new Map(prev)
+            const existing = newMap.get(response.task_id)
+            if (existing) {
+              newMap.set(response.task_id, { ...existing, task: realStatus })
+            }
+            return newMap
+          })
+        } catch (e) {
+          console.error('获取任务状态失败:', e)
+        }
+      }, 500)
     } catch (error: any) {
       message.error(error.response?.data?.detail || '启动仿真失败')
     } finally {
@@ -838,6 +860,23 @@ const Simulation: React.FC = () => {
         newMap.set(response.task_id, { task: initialStatus, startTime: Date.now() })
         return newMap
       })
+
+      // 短延迟后获取真实状态，避免显示"等待中"
+      setTimeout(async () => {
+        try {
+          const realStatus = await getTaskStatus(response.task_id)
+          setRunningTasks(prev => {
+            const newMap = new Map(prev)
+            const existing = newMap.get(response.task_id)
+            if (existing) {
+              newMap.set(response.task_id, { ...existing, task: realStatus })
+            }
+            return newMap
+          })
+        } catch (e) {
+          console.error('获取任务状态失败:', e)
+        }
+      }, 500)
 
       message.success(`参数遍历任务已创建: ${totalUnits} 个执行单元`)
     } catch (error: any) {

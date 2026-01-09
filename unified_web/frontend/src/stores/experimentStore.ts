@@ -21,6 +21,9 @@ interface ExperimentState {
   // 选中的实验（用于对比）
   selectedExperimentIds: number[];
 
+  // 数据刷新标志（仿真完成时设置，结果管理页面检查）
+  needsRefresh: boolean;
+
   // Actions
   setExperiments: (experiments: Experiment[]) => void;
   setLoading: (loading: boolean) => void;
@@ -32,6 +35,7 @@ interface ExperimentState {
   clearFilters: () => void;
   toggleExperimentSelection: (id: number) => void;
   clearSelection: () => void;
+  setNeedsRefresh: (needsRefresh: boolean) => void;
 }
 
 export const useExperimentStore = create<ExperimentState>((set) => ({
@@ -43,6 +47,7 @@ export const useExperimentStore = create<ExperimentState>((set) => ({
   currentStatistics: null,
   filters: {},
   selectedExperimentIds: [],
+  needsRefresh: false,
 
   // Actions
   setExperiments: (experiments) => set({ experiments }),
@@ -74,4 +79,6 @@ export const useExperimentStore = create<ExperimentState>((set) => ({
     }),
 
   clearSelection: () => set({ selectedExperimentIds: [] }),
+
+  setNeedsRefresh: (needsRefresh) => set({ needsRefresh }),
 }));

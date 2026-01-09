@@ -272,11 +272,10 @@ export const buildExecutablePackage = (experimentIds?: number[]): string => {
 
 // ==================== 实验导出/导入 ====================
 
-/** 导出实验信息预估 */
+/** 导出实验信息 */
 export interface ExperimentExportInfo {
   experiments_count: number;
   results_count: number;
-  estimated_size: number;
 }
 
 /** 获取导出预估信息 */

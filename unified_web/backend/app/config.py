@@ -3,8 +3,14 @@
 合并 tool_web 和 result_db_web 的配置
 """
 
+import os
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
+
+# 加载 unified_web/.env 共享配置
+_env_path = Path(__file__).parent.parent.parent / ".env"
+load_dotenv(_env_path)
 
 
 def get_base_dir() -> Path:
@@ -50,7 +56,7 @@ FRONTEND_DIST_DIR = BASE_DIR / "unified_web" / "frontend" / "dist"
 
 # ==================== API配置 ====================
 API_PREFIX = "/api"
-API_PORT = 8000
+API_PORT = int(os.environ["VITE_API_PORT"])
 
 # ==================== CORS配置 ====================
 CORS_ORIGINS = [

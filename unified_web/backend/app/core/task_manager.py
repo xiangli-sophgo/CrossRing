@@ -408,6 +408,24 @@ class TaskManager:
             total_units = len(execution_units)
             results_list = []
             experiment_id = None
+            is_parallel = total_units > 1
+
+            # 立即初始化 sim_details，避免前端显示空状态
+            task.sim_details = {
+                "file_index": 0,
+                "total_files": total_units,
+                "current_file": "正在初始化...",
+                "is_parallel": is_parallel,
+                "sim_progress": 0,
+                "current_time": 0,
+                "max_time": task.max_time,
+                "req_count": 0,
+                "total_req": 0,
+                "recv_flits": 0,
+                "total_flits": 0,
+                "trans_flits": 0,
+            }
+            self.update_task_status(task_id, TaskStatus.RUNNING, message="正在初始化仿真...")
 
             # 单执行单元时使用串行执行，显示详细进度
             if total_units == 1:
@@ -415,8 +433,6 @@ class TaskManager:
                 return
 
             # 多执行单元时使用并行执行
-            self.update_task_status(task_id, TaskStatus.RUNNING, message="正在初始化并行仿真...")
-
             # 准备所有仿真参数
             sim_params_list = []
             for unit in execution_units:
@@ -452,6 +468,7 @@ class TaskManager:
                 "file_index": 0,
                 "total_files": total_units,
                 "current_file": f"并行执行中 ({max_workers} 进程)",
+                "is_parallel": True,
                 "sim_progress": 0,
                 "current_time": 0,
                 "max_time": task.max_time,
@@ -529,6 +546,7 @@ class TaskManager:
                             "file_index": completed_count,
                             "total_files": total_units,
                             "current_file": f"已完成: {current_display}",
+                            "is_parallel": True,
                             "sim_progress": 100,
                             "current_time": task.max_time,
                             "max_time": task.max_time,
@@ -646,6 +664,7 @@ class TaskManager:
             "file_index": 0,
             "total_files": 1,
             "current_file": display_name,
+            "is_parallel": False,
             "sim_progress": 0,
             "current_time": 0,
             "max_time": task.max_time,

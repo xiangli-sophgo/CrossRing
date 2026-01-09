@@ -94,6 +94,8 @@ export default function ExperimentList() {
     selectedExperimentIds,
     toggleExperimentSelection,
     clearSelection,
+    needsRefresh,
+    setNeedsRefresh,
   } = useExperimentStore();
   const [importExpModalVisible, setImportExpModalVisible] = useState(false);
   const [exportExpModalVisible, setExportExpModalVisible] = useState(false);
@@ -116,13 +118,15 @@ export default function ExperimentList() {
     }
   };
 
-  // 首次加载（只在组件挂载时执行一次）
+  // 首次加载或需要刷新时加载
   useEffect(() => {
-    // 只有当 store 中没有数据时才加载
-    if (experiments.length === 0) {
+    if (experiments.length === 0 || needsRefresh) {
       loadExperiments();
+      if (needsRefresh) {
+        setNeedsRefresh(false);
+      }
     }
-  }, []);
+  }, [needsRefresh]);
 
   // 本地过滤实验列表
   const filteredExperiments = useMemo(() => {

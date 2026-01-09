@@ -62,7 +62,7 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
     return () => clearInterval(timer)
   }, [startTime, currentTask.status])
 
-  const taskName = currentTask.experiment_name || currentTask.task_id.slice(0, 8)
+  const taskName = currentTask.experiment_name || `任务 ${currentTask.task_id.slice(0, 8)}`
   return (
     <Card
       title={
@@ -106,14 +106,16 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
             valueStyle={{ color: currentTask.status === 'failed' ? errorColor : primaryColor }}
           />
         </Col>
-        <Col span={8}>
-          <Statistic
-            title="文件进度"
-            value={currentTask.sim_details?.file_index || 0}
-            suffix={`/ ${currentTask.sim_details?.total_files || 0}`}
-            valueStyle={{ color: primaryColor }}
-          />
-        </Col>
+        {currentTask.sim_details?.is_parallel && (
+          <Col span={8}>
+            <Statistic
+              title="子任务"
+              value={currentTask.sim_details?.file_index || 0}
+              suffix={`/ ${currentTask.sim_details?.total_files || 0}`}
+              valueStyle={{ color: primaryColor }}
+            />
+          </Col>
+        )}
         <Col span={8}>
           <Statistic
             title="运行时间"
@@ -140,7 +142,7 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
       )}
 
       {currentTask.sim_details && currentTask.status === 'running' &&
-       !currentTask.sim_details.current_file?.includes('并行执行中') && (
+       !currentTask.sim_details.is_parallel && (
         <Row gutter={[16, 16]}>
           <Col span={6}>
             <Statistic

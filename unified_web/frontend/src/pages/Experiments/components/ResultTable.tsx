@@ -432,8 +432,35 @@ export default function ResultTable({
 
   // 处理列选择
   const handleColumnCheck = (checkedKeys: React.Key[]) => {
-    const columnKeys = (checkedKeys as string[]).filter((key) => !key.startsWith('category_'));
-    setVisibleColumns(columnKeys);
+    const newCheckedColumns = (checkedKeys as string[]).filter((key) => !key.startsWith('category_'));
+
+    // 如果没有搜索，直接替换（原有逻辑）
+    if (!searchValue.trim()) {
+      setVisibleColumns(newCheckedColumns);
+      return;
+    }
+
+    // 搜索模式：获取当前搜索结果中的所有列 key
+    const getLeafKeys = (nodes: DataNode[]): string[] => {
+      const keys: string[] = [];
+      for (const node of nodes) {
+        if (!node.children || node.children.length === 0) {
+          keys.push(String(node.key));
+        } else {
+          keys.push(...getLeafKeys(node.children));
+        }
+      }
+      return keys;
+    };
+    const searchResultColumns = getLeafKeys(filteredTreeData);
+
+    // 计算变更：
+    // - 保留：visibleColumns 中不在搜索结果里的列（不受影响）
+    // - 添加/保留：搜索结果中当前勾选的列
+    const unchanged = visibleColumns.filter(col => !searchResultColumns.includes(col));
+    const nowSelected = newCheckedColumns.filter(col => searchResultColumns.includes(col));
+
+    setVisibleColumns([...unchanged, ...nowSelected]);
   };
 
   const checkedKeys = useMemo(() => visibleColumns, [visibleColumns]);
