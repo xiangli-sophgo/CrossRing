@@ -363,10 +363,12 @@ class DataflowMixin:
                 network.plan_move(flit, self.cycle)
 
         # 第二步：执行execute_moves并收集需要移除的flit
+        # 只处理在Link上的flit，避免误移除CP中的flit
         executed_flits = set()
         for flit in flits:
-            if network.execute_moves(flit, self.cycle):
-                executed_flits.add(id(flit))
+            if flit.flit_position == "Link":
+                if network.execute_moves(flit, self.cycle):
+                    executed_flits.add(id(flit))
 
         # 第三步：一次过滤重建列表（O(n)，比多次remove快）
         if executed_flits:
@@ -565,11 +567,12 @@ class DataflowMixin:
         处理顺序：
         1. IQ_channel_buffer → IQ仲裁输入FIFO
         2. IQ仲裁（从仲裁输入FIFO读取）
-        3. Link传输
-        4. RB仲裁
-        5. EQ输入端口 → EQ仲裁输入FIFO
-        6. EQ仲裁（从仲裁输入FIFO读取）
-        7. CP处理
+        3. CP slice处理（内部移动 + 边界环回 + 输出到Link）
+        4. Link传输
+        5. RB仲裁
+        6. EQ输入端口 → EQ仲裁输入FIFO
+        7. EQ仲裁（从仲裁输入FIFO读取）
+        8. CP处理（上环/下环）
 
         Args:
             network: 网络实例
@@ -585,19 +588,23 @@ class DataflowMixin:
         # 1b. IQ模块：IQ仲裁（从仲裁输入FIFO读取）
         self._IQ_process(network, flit_type)
 
-        # 2. Link模块：Link传输
+        # 2. Link模块：Link传输（先处理已在Link上的flit）
         flits = self._Link_process(network, flits)
 
-        # 3. RB模块：Ring Bridge仲裁
+        # 3. CP slice处理（内部移动 + 边界环回 + 输出到Link）
+        # 放在Link处理之后，避免同一周期内flit被移动两次
+        network.process_cp_slices(self.cycle)
+
+        # 4. RB模块：Ring Bridge仲裁
         self._RB_process(network)
 
-        # 4a. 移动EQ输入端口到仲裁输入FIFO
+        # 5a. 移动EQ输入端口到仲裁输入FIFO
         self._move_eject_queues_to_arbiter_input(network)
 
-        # 4b. EQ模块：Eject Queue仲裁（从仲裁输入FIFO读取）
+        # 5b. EQ模块：Eject Queue仲裁（从仲裁输入FIFO读取）
         self._EQ_process(network, flit_type)
 
-        # 5. CP模块：CrossPoint处理（包含上环和下环）
+        # 6. CP模块：CrossPoint处理（包含上环和下环）
         flits = self._CP_process(network, flits, flit_type)
 
         return flits
@@ -833,109 +840,169 @@ class DataflowMixin:
         self._tag_move(self.data_network)
 
     def _tag_move(self, network: Network):
+        """移动ITag标记
+
+        新架构：self-link已移除，CP有独立的slice。
+        tag移动顺序：Link slice → CP slice → 下一个Link slice
+        边缘节点：CP out_slice → 另一方向的CP slice_0
+        """
+        cp_slice_count = self.config.CP_SLICE_COUNT
+
         # 第一部分：纵向环处理
         for col_start in range(self.config.NUM_COL):
-            interval = self.config.NUM_COL  # 新架构: 直接使用NUM_COL
-            col_end = col_start + interval * (self.config.NUM_ROW - 1)  # 最后一行节点
+            interval = self.config.NUM_COL
+            col_end = col_start + interval * (self.config.NUM_ROW - 1)
 
-            # 保存起始位置的tag（使用垂直自环键）
-            v_key_start = (col_start, col_start, "v")
-            last_position = network.links_tag[v_key_start][0]
+            # 保存边缘环回需要的tag值（在移动前保存）
+            # 上边缘（col_start）：TU方向CP的out_slice
+            saved_tu_edge_out = network.cp_slices_tag[col_start]["TU"][-1]
+            # 下边缘（col_end）：TD方向CP的out_slice
+            saved_td_edge_out = network.cp_slices_tag[col_end]["TD"][-1]
 
-            # 前向传递：从起点到终点
-            network.links_tag[v_key_start][0] = network.links_tag[(col_start + interval, col_start)][-1]
-
-            for i in range(1, self.config.NUM_ROW):  # 新架构: 遍历所有行
+            # TU方向处理（从下边缘到上边缘）
+            for i in range(self.config.NUM_ROW - 1, 0, -1):
                 current_node = col_start + i * interval
                 next_node = col_start + (i - 1) * interval
+                link = (current_node, next_node)
 
-                for j in range(self.config.SLICE_PER_LINK_VERTICAL - 1, -1, -1):
-                    if j == 0 and current_node == col_end:
-                        v_key_current = (current_node, current_node, "v")
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[v_key_current][-1]
-                    elif j == 0:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node + interval, current_node)][-1]
-                    else:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
+                # 1. 移动Link内的tag（从后向前）
+                for j in range(self.config.SLICE_PER_LINK_VERTICAL - 1, 0, -1):
+                    network.links_tag[link][j] = network.links_tag[link][j - 1]
 
-            # 终点自环处理（使用垂直自环键）
-            v_key_end = (col_end, col_end, "v")
-            network.links_tag[v_key_end][-1] = network.links_tag[v_key_end][0]
-            network.links_tag[v_key_end][0] = network.links_tag[(col_end - interval, col_end)][-1]
+                # 2. Link[0] 从 当前节点TU方向CP的out_slice 获取
+                network.links_tag[link][0] = network.cp_slices_tag[current_node]["TU"][-1]
 
-            # 回程传递：从终点回到起点
-            # 修复：确保处理所有回程连接
-            for i in range(1, self.config.NUM_ROW):  # 新架构: 遍历所有行
-                current_node = col_end - i * interval
-                next_node = col_end - (i - 1) * interval
+            # TU方向CP slice处理
+            for i in range(self.config.NUM_ROW - 1, -1, -1):
+                node = col_start + i * interval
 
-                for j in range(self.config.SLICE_PER_LINK_VERTICAL - 1, -1, -1):
-                    if j == 0 and current_node == col_start:
-                        v_key_current = (current_node, current_node, "v")
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[v_key_current][-1]
-                    elif j == 0:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node - interval, current_node)][-1]
-                    else:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
+                # 移动CP内的tag（从后向前）
+                for j in range(cp_slice_count - 1, 0, -1):
+                    network.cp_slices_tag[node]["TU"][j] = network.cp_slices_tag[node]["TU"][j - 1]
 
-            # 起点自环处理（使用垂直自环键）
-            network.links_tag[v_key_start][-1] = last_position
+                # CP[0] 获取来源
+                if node == col_end:
+                    # 下边缘：从TD方向CP的out_slice环回（使用保存值）
+                    network.cp_slices_tag[node]["TU"][0] = saved_td_edge_out
+                else:
+                    # 非边缘：从下游Link的最后一个slot获取
+                    downstream_link = (node + interval, node)
+                    network.cp_slices_tag[node]["TU"][0] = network.links_tag[downstream_link][-1]
+
+            # TD方向处理（从上边缘到下边缘）
+            for i in range(0, self.config.NUM_ROW - 1):
+                current_node = col_start + i * interval
+                next_node = col_start + (i + 1) * interval
+                link = (current_node, next_node)
+
+                # 1. 移动Link内的tag（从后向前）
+                for j in range(self.config.SLICE_PER_LINK_VERTICAL - 1, 0, -1):
+                    network.links_tag[link][j] = network.links_tag[link][j - 1]
+
+                # 2. Link[0] 从 当前节点TD方向CP的out_slice 获取
+                network.links_tag[link][0] = network.cp_slices_tag[current_node]["TD"][-1]
+
+            # TD方向CP slice处理
+            for i in range(0, self.config.NUM_ROW):
+                node = col_start + i * interval
+
+                # 移动CP内的tag（从后向前）
+                for j in range(cp_slice_count - 1, 0, -1):
+                    network.cp_slices_tag[node]["TD"][j] = network.cp_slices_tag[node]["TD"][j - 1]
+
+                # CP[0] 获取来源
+                if node == col_start:
+                    # 上边缘：从TU方向CP的out_slice环回（使用保存值）
+                    network.cp_slices_tag[node]["TD"][0] = saved_tu_edge_out
+                else:
+                    # 非边缘：从上游Link的最后一个slot获取
+                    upstream_link = (node - interval, node)
+                    network.cp_slices_tag[node]["TD"][0] = network.links_tag[upstream_link][-1]
 
         # 第二部分：横向环处理
-        # Skip horizontal tag movement if only one column or links_tag missing
         if self.config.NUM_COL <= 1:
             return
-        # 新架构: 遍历所有行 (包括第一行row=0)
+
         for row_start in range(0, self.config.NUM_NODE, self.config.NUM_COL):
             row_end = row_start + self.config.NUM_COL - 1
-            # 使用水平自环键
-            h_key_start = (row_start, row_start, "h")
-            if h_key_start not in network.links_tag:
+
+            # 检查link是否存在
+            if (row_end, row_end - 1) not in network.links_tag:
                 continue
-            last_position = network.links_tag[h_key_start][0]
-            if (row_start + 1, row_start) in network.links_tag:
-                network.links_tag[h_key_start][0] = network.links_tag[(row_start + 1, row_start)][-1]
-            else:
-                network.links_tag[h_key_start][0] = last_position
 
-            for i in range(1, self.config.NUM_COL):
-                current_node, next_node = row_start + i, row_start + i - 1
-                for j in range(self.config.SLICE_PER_LINK_HORIZONTAL - 1, -1, -1):
-                    if j == 0 and current_node == row_end:
-                        h_key_end = (current_node, current_node, "h")
-                        if h_key_end in network.links_tag and (current_node, next_node) in network.links_tag:
-                            network.links_tag[(current_node, next_node)][j] = network.links_tag[h_key_end][-1]
-                    elif j == 0:
-                        if (current_node + 1, current_node) in network.links_tag and (current_node, next_node) in network.links_tag:
-                            network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node + 1, current_node)][-1]
-                    else:
-                        if (current_node, next_node) in network.links_tag:
-                            network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
+            # 保存边缘环回需要的tag值
+            # 左边缘（row_start）：TL方向CP的out_slice
+            saved_tl_edge_out = network.cp_slices_tag[row_start]["TL"][-1]
+            # 右边缘（row_end）：TR方向CP的out_slice
+            saved_tr_edge_out = network.cp_slices_tag[row_end]["TR"][-1]
 
-            h_key_end = (row_end, row_end, "h")
-            if h_key_end in network.links_tag:
-                network.links_tag[h_key_end][-1] = network.links_tag[h_key_end][0]
-                if (row_end - 1, row_end) in network.links_tag:
-                    network.links_tag[h_key_end][0] = network.links_tag[(row_end - 1, row_end)][-1]
+            # TL方向处理（从右边缘到左边缘）
+            for i in range(self.config.NUM_COL - 1, 0, -1):
+                current_node = row_start + i
+                next_node = row_start + i - 1
+                link = (current_node, next_node)
+
+                if link not in network.links_tag:
+                    continue
+
+                # 1. 移动Link内的tag（从后向前）
+                for j in range(self.config.SLICE_PER_LINK_HORIZONTAL - 1, 0, -1):
+                    network.links_tag[link][j] = network.links_tag[link][j - 1]
+
+                # 2. Link[0] 从 当前节点TL方向CP的out_slice 获取
+                network.links_tag[link][0] = network.cp_slices_tag[current_node]["TL"][-1]
+
+            # TL方向CP slice处理
+            for i in range(self.config.NUM_COL - 1, -1, -1):
+                node = row_start + i
+
+                # 移动CP内的tag（从后向前）
+                for j in range(cp_slice_count - 1, 0, -1):
+                    network.cp_slices_tag[node]["TL"][j] = network.cp_slices_tag[node]["TL"][j - 1]
+
+                # CP[0] 获取来源
+                if node == row_end:
+                    # 右边缘：从TR方向CP的out_slice环回（使用保存值）
+                    network.cp_slices_tag[node]["TL"][0] = saved_tr_edge_out
                 else:
-                    network.links_tag[h_key_end][0] = last_position
+                    # 非边缘：从下游Link的最后一个slot获取
+                    downstream_link = (node + 1, node)
+                    if downstream_link in network.links_tag:
+                        network.cp_slices_tag[node]["TL"][0] = network.links_tag[downstream_link][-1]
 
-            for i in range(1, self.config.NUM_COL):
-                current_node, next_node = row_end - i, row_end - i + 1
-                for j in range(self.config.SLICE_PER_LINK_HORIZONTAL - 1, -1, -1):
-                    if j == 0 and current_node == row_start:
-                        h_key_current = (current_node, current_node, "h")
-                        if h_key_current in network.links_tag and (current_node, next_node) in network.links_tag:
-                            network.links_tag[(current_node, next_node)][j] = network.links_tag[h_key_current][-1]
-                    elif j == 0:
-                        if (current_node - 1, current_node) in network.links_tag and (current_node, next_node) in network.links_tag:
-                            network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node - 1, current_node)][-1]
-                    else:
-                        if (current_node, next_node) in network.links_tag:
-                            network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
+            # TR方向处理（从左边缘到右边缘）
+            for i in range(0, self.config.NUM_COL - 1):
+                current_node = row_start + i
+                next_node = row_start + i + 1
+                link = (current_node, next_node)
 
-            if h_key_start in network.links_tag:
-                network.links_tag[h_key_start][-1] = last_position
+                if link not in network.links_tag:
+                    continue
+
+                # 1. 移动Link内的tag（从后向前）
+                for j in range(self.config.SLICE_PER_LINK_HORIZONTAL - 1, 0, -1):
+                    network.links_tag[link][j] = network.links_tag[link][j - 1]
+
+                # 2. Link[0] 从 当前节点TR方向CP的out_slice 获取
+                network.links_tag[link][0] = network.cp_slices_tag[current_node]["TR"][-1]
+
+            # TR方向CP slice处理
+            for i in range(0, self.config.NUM_COL):
+                node = row_start + i
+
+                # 移动CP内的tag（从后向前）
+                for j in range(cp_slice_count - 1, 0, -1):
+                    network.cp_slices_tag[node]["TR"][j] = network.cp_slices_tag[node]["TR"][j - 1]
+
+                # CP[0] 获取来源
+                if node == row_start:
+                    # 左边缘：从TL方向CP的out_slice环回（使用保存值）
+                    network.cp_slices_tag[node]["TR"][0] = saved_tl_edge_out
+                else:
+                    # 非边缘：从上游Link的最后一个slot获取
+                    upstream_link = (node - 1, node)
+                    if upstream_link in network.links_tag:
+                        network.cp_slices_tag[node]["TR"][0] = network.links_tag[upstream_link][-1]
 
     def _move_eject_queues_to_arbiter_input(self, network: Network):
         """EQ模块：将4个输入端口的数据移动到仲裁输入FIFO的pre缓冲

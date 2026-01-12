@@ -41,9 +41,14 @@ class V1Config(KCINConfigBase):
         self.EQ_CH_FIFO_DEPTH = config.get("EQ_CH_FIFO_DEPTH", 16)
 
         # ==================== Slice 配置 ====================
+        # Link slice（节点间传输）
         self.SLICE_PER_LINK_HORIZONTAL = config.get("SLICE_PER_LINK_HORIZONTAL", 1)
         self.SLICE_PER_LINK_VERTICAL = config.get("SLICE_PER_LINK_VERTICAL", 1)
-        self.SLICE_PER_LINK_SELF = config.get("SLICE_PER_LINK_SELF", 1)
+
+        # CP slice（CrossPoint内部，独立于Link）
+        # 结构：[slice_0, slice_1, ..., in_slice, out_slice]
+        # 最后两个固定是in和out，增加slice时在前面增加
+        self.CP_SLICE_COUNT = config.get("CP_SLICE_COUNT", 2)  # 最小为2
 
         # ==================== ITag 配置 ====================
         self.ITag_TRIGGER_Th_H = config.get("ITag_TRIGGER_Th_H", 2)

@@ -825,7 +825,7 @@ class DCINConfig:
         if not self.IP_FREQUENCY:
             self.IP_FREQUENCY = 1
 
-        max_denominator = 5  # 限制分母，避免仿真周期数过大
+        max_denominator = 16  # 限制分母，支持17/8、33/16等精确分数
 
         # 转换为分数
         net_frac = Fraction(self.NETWORK_FREQUENCY).limit_denominator(max_denominator)

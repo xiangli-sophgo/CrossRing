@@ -32,6 +32,7 @@ test_data/
 
 # AI-generated files
 # CLAUDE.md
+tmpclaude-*-cwd
 **/.claude/
 */*/.claude/
 .gemini/

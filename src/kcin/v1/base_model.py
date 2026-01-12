@@ -20,6 +20,7 @@ from src.utils.arbitration import create_arbiter_from_config
 import threading
 
 from src.kcin.v1.mixins import StatsMixin, DataflowMixin
+from src.utils.statistical_fifo import StatisticalFIFO
 
 
 class BaseModel(StatsMixin, DataflowMixin):
@@ -47,6 +48,9 @@ class BaseModel(StatsMixin, DataflowMixin):
             topo_type: 拓扑类型（如"5x4", "4x4"等）
             verbose: 详细程度（0=静默，1=正常）
         """
+        # 清空 StatisticalFIFO 注册表（新仿真开始时）
+        StatisticalFIFO.clear_registry()
+
         self.model_type_stat = model_type
         self.config = config
         self.topo_type_stat = topo_type

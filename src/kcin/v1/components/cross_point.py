@@ -57,6 +57,54 @@ class CrossPoint:
             self.itag_req_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
             self.excess_ITag_to_remove = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
 
+        # ==================== CP独立Slice ====================
+        # 结构：[slice_0, slice_1, ..., in_slice, out_slice]
+        # 最后两个固定是in和out，增加slice时在前面增加
+        slice_count = config.CP_SLICE_COUNT
+        self.cp_slices = {
+            dir: [None] * slice_count for dir in self.managed_directions
+        }
+        # cp_slices[dir][-2] = in_slice 位置
+        # cp_slices[dir][-1] = out_slice 位置
+
+        # pre缓冲（用于时序管理，接收上游Link的flit）
+        self.cp_slices_pre = {dir: None for dir in self.managed_directions}
+
+        # 边缘检测
+        self._edge_status = self._detect_edge_status()
+        self._edge_loop_map = self._build_edge_loop_map()
+
+    def _detect_edge_status(self) -> dict:
+        """检测当前节点是否为边缘"""
+        row = self.node_id // self.config.NUM_COL
+        col = self.node_id % self.config.NUM_COL
+
+        if self.direction == "horizontal":
+            return {
+                "TL": col == 0,  # 左边缘
+                "TR": col == self.config.NUM_COL - 1  # 右边缘
+            }
+        else:  # vertical
+            return {
+                "TU": row == 0,  # 上边缘
+                "TD": row == self.config.NUM_ROW - 1  # 下边缘
+            }
+
+    def _build_edge_loop_map(self) -> dict:
+        """边缘节点的环回映射：out_dir → in_dir"""
+        mapping = {}
+        if self.direction == "horizontal":
+            if self._edge_status.get("TL"):
+                mapping["TL"] = "TR"  # 左边缘：TL出口 → TR入口
+            if self._edge_status.get("TR"):
+                mapping["TR"] = "TL"  # 右边缘：TR出口 → TL入口
+        else:  # vertical
+            if self._edge_status.get("TU"):
+                mapping["TU"] = "TD"  # 上边缘：TU出口 → TD入口
+            if self._edge_status.get("TD"):
+                mapping["TD"] = "TU"  # 下边缘：TD出口 → TU入口
+        return mapping
+
     def setup_itag(self, direction: str, pos: int, max_num: int):
         """
         设置ITag配置
@@ -765,11 +813,13 @@ class CrossPoint:
 
     def _can_inject_to_link(self, flit: Flit, link: tuple, direction: str, cycle: int) -> bool:
         """
-        检查flit是否可以上环到指定link（统一的I-Tag检查逻辑）
+        检查flit是否可以上环到CP的out_slice（统一的I-Tag检查逻辑）
+
+        新架构：上环目标是CP的out_slice，而不是直接进入Link
 
         检查流程：
         0. 检查CrossPoint冲突（根据ENABLE_CROSSPOINT_CONFLICT_CHECK配置）
-        1. 检查link是否被占用
+        1. 检查CP的out_slice是否被占用
         2. 如果占用：
            - 检查是否已有I-Tag预约
            - 如果没有预约且等待时间达到阈值，尝试创建I-Tag
@@ -780,7 +830,7 @@ class CrossPoint:
 
         Args:
             flit: 要注入的flit
-            link: 目标link (current, next_node)
+            link: 目标link (current, next_node)，边界情况为None（仅用于确定节点位置）
             direction: 注入方向 ("TL"/"TR"/"TU"/"TD")
             cycle: 当前周期
 
@@ -789,6 +839,10 @@ class CrossPoint:
         """
         if self.network is None:
             return False
+
+        # 边界情况：link为None时，需要检查CP slice是否可用
+        if link is None:
+            return self._can_inject_to_cp_edge(flit, direction, cycle)
 
         current_pos = link[0]
 
@@ -804,7 +858,11 @@ class CrossPoint:
             if conflict_status[0]:
                 return False
 
-        link_occupied = self.network.links[link][0] is not None
+        # 新架构：检查CP的out_slice是否可用（取代原来的link[0]检查）
+        cp = self.network.crosspoints[current_pos][dim]
+        out_slice_occupied = cp.cp_slices[direction][-1] is not None
+
+        # 获取对应的ITag slot（仍然使用link的tag结构）
         slot = self.network.links_tag[link][0]
 
         # 区分横向和纵向配置
@@ -813,8 +871,8 @@ class CrossPoint:
         trigger_threshold = self.config.ITag_TRIGGER_Th_H if is_horizontal else self.config.ITag_TRIGGER_Th_V
         max_itag = self.config.ITag_MAX_NUM_H if is_horizontal else self.config.ITag_MAX_NUM_V
 
-        if link_occupied:
-            # Link被占用，无论是否有ITag都不能注入
+        if out_slice_occupied:
+            # CP的out_slice被占用，无论是否有ITag都不能注入
             # 但可以在没有预约时尝试创建ITag（为下次空闲时预约）
             if not slot.itag_reserved:
                 # 没有预约，尝试创建I-Tag
@@ -832,10 +890,10 @@ class CrossPoint:
                         flit.itag_h = True
                     else:
                         flit.itag_v = True
-            # 无论如何都不能注入到被占用的slice
+            # 无论如何都不能注入到被占用的out_slice
             return False
         else:
-            # Link未占用
+            # CP的out_slice未占用
             if not slot.itag_reserved:
                 # 没有预约，可以上环
                 return True
@@ -850,15 +908,17 @@ class CrossPoint:
         """
         统一的上环执行方法
 
+        新架构：上环到CP的out_slice，而不是直接进入Link
+        flit将在下一个周期由process_cp_slices传输到Link
+
         执行流程：
-        1. 注入flit到link的第0个slice
+        1. 注入flit到CP的out_slice
         2. 释放I-Tag预约（如果使用了预约）
         3. 重置E-Tag显示优先级为T2
-        4. 更新统计计数器
 
         Args:
             flit: 要注入的flit
-            link: 目标link
+            link: 目标link（仅用于确定节点位置）
             direction: 注入方向
             cycle: 当前周期
 
@@ -871,12 +931,15 @@ class CrossPoint:
         current_pos = link[0]
         slot = self.network.links_tag[link][0]
         is_horizontal = direction in ["TL", "TR"]
+        dim = "horizontal" if is_horizontal else "vertical"
 
-        # 1. 注入到link（直接赋值）
-        self.network.links[link][0] = flit
-        flit.current_link = link
-        flit.current_seat_index = 0
-        flit.set_position("Link", cycle)
+        # 1. 注入到CP的out_slice
+        cp = self.network.crosspoints[current_pos][dim]
+        cp.cp_slices[direction][-1] = flit
+        flit.current_link = None  # 在CP内部，不在Link上
+        flit.current_seat_index = -1
+        cp_pos = "CP_H" if is_horizontal else "CP_V"
+        flit.set_position(cp_pos, cycle)
 
         # 2. 处理I-Tag释放
         if slot.itag_reserved and slot.check_itag_match(current_pos, direction):
@@ -894,7 +957,62 @@ class CrossPoint:
         # 3. 重置E-Tag显示优先级为T2
         flit.ETag_priority = "T2"
 
-        # 4. 更新统计（network层会处理）
+        return True
+
+    def _can_inject_to_cp_edge(self, flit: Flit, direction: str, cycle: int) -> bool:
+        """
+        边界情况：检查是否可以注入到CP slice进行环回
+
+        边界节点的上环：flit进入当前方向的CP slice，然后环回到另一方向
+
+        Args:
+            flit: 要注入的flit
+            direction: 注入方向
+            cycle: 当前周期
+
+        Returns:
+            bool: 是否可以注入到CP slice
+        """
+        # 检查是否是边缘方向
+        if direction not in self._edge_loop_map:
+            return False
+
+        # 检查当前方向的CP slice的第一个位置是否空闲
+        if self.cp_slices[direction][0] is not None:
+            return False
+
+        return True
+
+    def _inject_flit_to_cp_edge(self, flit: Flit, direction: str, cycle: int) -> bool:
+        """
+        边界情况：将flit注入到CP slice进行环回
+
+        Args:
+            flit: 要注入的flit
+            direction: 注入方向
+            cycle: 当前周期
+
+        Returns:
+            bool: 是否注入成功
+        """
+        # 检查是否是边缘方向
+        if direction not in self._edge_loop_map:
+            return False
+
+        # 注入到CP slice的第一个位置
+        self.cp_slices[direction][0] = flit
+        flit.set_position("CP_EDGE", cycle)
+
+        # 重置E-Tag显示优先级为T2
+        flit.ETag_priority = "T2"
+
+        # 清除I-Tag标记
+        is_horizontal = direction in ["TL", "TR"]
+        if is_horizontal and flit.itag_h:
+            flit.itag_h = False
+        elif not is_horizontal and flit.itag_v:
+            flit.itag_v = False
+
         return True
 
     def _increment_wait_cycles(self, queue: "deque", direction: str):
@@ -937,46 +1055,8 @@ class CrossPoint:
 
         flit = queue[0]  # 先peek
 
-        # 计算目标link（根据方向不同采用不同策略）
-        if direction in ["TL", "TR"]:
-            # 横向注入：根据direction计算横向邻居
-            num_col = self.config.NUM_COL
-            col = node_pos % num_col
-
-            if direction == "TR":
-                # TR方向：向右
-                if col == num_col - 1:
-                    # 右边界：自环
-                    link = (node_pos, node_pos, "h")
-                else:
-                    link = (node_pos, node_pos + 1)
-            else:  # TL
-                # TL方向：向左
-                if col == 0:
-                    # 左边界：自环
-                    link = (node_pos, node_pos, "h")
-                else:
-                    link = (node_pos, node_pos - 1)
-        else:  # TU/TD
-            # 纵向注入：根据方向计算垂直邻居
-            num_col = self.config.NUM_COL
-            num_row = self.config.NUM_ROW
-            row = node_pos // num_col
-
-            if direction == "TU":
-                # TU方向：向上
-                if row == 0:
-                    # 上边界：自环
-                    link = (node_pos, node_pos, "v")
-                else:
-                    link = (node_pos, node_pos - num_col)
-            else:  # TD
-                # TD方向：向下
-                if row == num_row - 1:
-                    # 下边界：自环
-                    link = (node_pos, node_pos, "v")
-                else:
-                    link = (node_pos, node_pos + num_col)
+        # 计算目标link（边界情况返回None）
+        link = self._calculate_inject_link(node_pos, direction)
 
         # 检查是否可以注入
         if self._can_inject_to_link(flit, link, direction, cycle):
@@ -984,7 +1064,12 @@ class CrossPoint:
             flit = queue.popleft()
 
             # 执行注入
-            success = self._inject_flit_to_link(flit, link, direction, cycle)
+            if link is None:
+                # 边界情况：注入到CP slice进行环回
+                success = self._inject_flit_to_cp_edge(flit, direction, cycle)
+            else:
+                # 正常情况：注入到下游Link
+                success = self._inject_flit_to_link(flit, link, direction, cycle)
 
             if success:
                 return flit
@@ -996,3 +1081,44 @@ class CrossPoint:
             # 不能注入，更新等待时间
             self._increment_wait_cycles(queue, direction)
             return None
+
+    def _calculate_inject_link(self, node_pos: int, direction: str) -> tuple:
+        """
+        根据节点位置和方向计算目标link
+
+        Args:
+            node_pos: 节点位置
+            direction: 注入方向 ("TL"/"TR"/"TU"/"TD")
+
+        Returns:
+            tuple: 目标link，边界情况返回None
+        """
+        num_col = self.config.NUM_COL
+        num_row = self.config.NUM_ROW
+
+        if direction in ["TL", "TR"]:
+            col = node_pos % num_col
+
+            if direction == "TR":
+                if col == num_col - 1:
+                    return None  # 右边界：由CP内部环回处理
+                else:
+                    return (node_pos, node_pos + 1)
+            else:  # TL
+                if col == 0:
+                    return None  # 左边界：由CP内部环回处理
+                else:
+                    return (node_pos, node_pos - 1)
+        else:  # TU/TD
+            row = node_pos // num_col
+
+            if direction == "TU":
+                if row == 0:
+                    return None  # 上边界：由CP内部环回处理
+                else:
+                    return (node_pos, node_pos - num_col)
+            else:  # TD
+                if row == num_row - 1:
+                    return None  # 下边界：由CP内部环回处理
+                else:
+                    return (node_pos, node_pos + num_col)

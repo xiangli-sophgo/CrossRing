@@ -48,8 +48,8 @@ def main():
         "8x8": r"../config/topologies/kcin_8x8.yaml",
     }
 
-    # kcin_type = "5x4"  # SG2262 v1 架构
-    kcin_type = "5x4_v2"  # SG2262 v2 RingStation 架构
+    kcin_type = "5x4"  # SG2262 v1 架构
+    # kcin_type = "5x4_v2"  # SG2262 v2 RingStation 架构
     # kcin_type = "4x4_CWM"
     # kcin_type = "5x2"
     # kcin_type = "3x3"
@@ -94,8 +94,8 @@ def main():
         result_save_path=f"../Result/CrossRing/{model_type}/",
         show_result_analysis=1,
     )
-    # sim.setup_debug(print_trace=1, show_trace_id=[200], update_interval=0.1)
-    sim.setup_visualization(plot_link_state=1, plot_start_cycle=500, show_node_id=1)
+    sim.setup_debug(print_trace=1, show_trace_id=[1], update_interval=0.1)
+    # sim.setup_visualization(plot_link_state=1, plot_start_cycle=500, show_node_id=1)
     np.random.seed(801)
 
     sim.run_simulation(max_time=1000, print_interval=500)

@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import Dict, List, Tuple, Optional
 from collections import defaultdict
+from src.utils.statistical_fifo import StatisticalFIFO
 
 
 class FIFOUtilizationCollector:
@@ -28,6 +29,8 @@ class FIFOUtilizationCollector:
         """
         从单个Network对象收集FIFO使用率数据
 
+        使用 StatisticalFIFO 获取统计数据
+
         Args:
             network: Network对象
             die_id: Die ID
@@ -36,254 +39,143 @@ class FIFOUtilizationCollector:
 
         Returns:
             Dict: FIFO使用率数据
-                {
-                    'IQ': {node_pos: {'TL': {'avg': 0.5, 'peak': 0.8, 'capacity': 8}, ...}},
-                    'RB': {node_pos: {'TL': {'avg': 0.3, 'peak': 0.6, 'capacity': 16}, ...}},
-                    'EQ': {node_pos: {'TU': {'avg': 0.4, 'peak': 0.7, 'capacity': 8}, ...}},
-                    'IQ_CH': {node_pos: {'gdma': {'avg': 0.2, 'peak': 0.5, 'capacity': 4}, ...}},
-                    'EQ_CH': {node_pos: {'ddr': {'avg': 0.3, 'peak': 0.6, 'capacity': 4}, ...}}
-                }
         """
-        die_data = {"IQ": {}, "RB": {}, "EQ": {}, "IQ_CH": {}, "EQ_CH": {}}
+        die_data = {"IQ": {}, "RB": {}, "EQ": {}, "IQ_CH": {}, "EQ_CH": {},
+                    "RS_IN": {}, "RS_OUT": {}}  # v2 新增类别
 
         if total_cycles <= 0:
             print(f"警告: Die {die_id} 总周期数无效: {total_cycles}")
             return die_data
 
-        # 收集IQ方向队列数据 (inject_queues)
-        for direction in ["TL", "TR", "TU", "TD", "EQ"]:
-            for node_pos, depth_sum in network.fifo_depth_sum["IQ"].get(direction, {}).items():
-                if node_pos not in die_data["IQ"]:
-                    die_data["IQ"][node_pos] = {}
+        # 从 StatisticalFIFO 获取数据
+        all_fifos = StatisticalFIFO.get_all_fifos()
 
-                max_depth = network.fifo_max_depth["IQ"][direction].get(node_pos, 0)
-                capacity = self._get_fifo_capacity("IQ", direction, node_pos)
+        # FIFO名称后缀映射 (用于过滤当前网络的FIFO)
+        # 注意: 后缀是从 network.name 提取的前3字母，如 "Response Network" -> "res"
+        network_suffix = {"req": "_req", "rsp": "_res", "data": "_dat"}
+        suffix = network_suffix.get(network_type, "")
 
-                avg_util = (depth_sum / total_cycles / capacity * 100) if capacity > 0 else 0
-                peak_util = (max_depth / capacity * 100) if capacity > 0 else 0
+        for name, fifo in all_fifos.items():
+            # 过滤只属于当前网络的FIFO (名称以_req/_res/_dat结尾)
+            if suffix and not name.endswith(suffix):
+                continue
 
-                # 获取flit_count
-                flit_count = network.fifo_flit_count["IQ"][direction].get(node_pos, 0)
+            node_pos = fifo.node_pos
+            category = fifo.category
+            fifo_type = fifo.fifo_type
+            ip_type = fifo.ip_type
 
-                # ITag统计 (只统计TR/TL横向注入)
-                itag_cumulative = 0
-                itag_rate = 0.0
-                if direction in ["TR", "TL"]:
-                    if direction in network.fifo_itag_cumulative_count["IQ"]:
-                        if node_pos in network.fifo_itag_cumulative_count["IQ"][direction]:
-                            itag_cumulative = network.fifo_itag_cumulative_count["IQ"][direction][node_pos]
-                            if flit_count > 0 and total_cycles > 0:
-                                itag_rate = itag_cumulative / (total_cycles * flit_count) * 100
+            # 计算统计数据
+            capacity = fifo.maxlen
+            avg_depth = fifo.get_avg_depth()
+            peak_depth = fifo.max_depth
+            flit_count = fifo.flit_count
 
-                # 反方向上环统计 (只统计TR/TL横向注入)
-                reverse_inject_count = 0
-                reverse_inject_rate = 0.0
-                if direction in ["TR", "TL"]:
-                    if hasattr(network, "fifo_reverse_inject_count"):
-                        if direction in network.fifo_reverse_inject_count.get("IQ", {}):
-                            reverse_inject_count = network.fifo_reverse_inject_count["IQ"][direction].get(node_pos, 0)
-                            if flit_count > 0:
-                                reverse_inject_rate = reverse_inject_count / flit_count * 100
+            avg_util = (avg_depth / capacity * 100) if capacity > 0 else 0
+            peak_util = (peak_depth / capacity * 100) if capacity > 0 else 0
 
-                die_data["IQ"][node_pos][direction] = {
-                    "avg": avg_util,
-                    "peak": peak_util,
-                    "flit_count": flit_count,
-                    "capacity": capacity,
-                    "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
-                    "peak_depth": max_depth,
-                    "itag_cumulative_count": itag_cumulative,
-                    "itag_rate": itag_rate,
-                    "etag_t0_cumulative": 0,
-                    "etag_t1_cumulative": 0,
-                    "etag_t2_cumulative": 0,
-                    "etag_t0_rate": 0.0,
-                    "etag_t1_rate": 0.0,
-                    "etag_t2_rate": 0.0,
-                    "reverse_inject_count": reverse_inject_count,
-                    "reverse_inject_rate": reverse_inject_rate,
-                }
+            stat_data = {
+                "avg": avg_util,
+                "peak": peak_util,
+                "flit_count": flit_count,
+                "capacity": capacity,
+                "avg_depth": avg_depth,
+                "peak_depth": peak_depth,
+                "itag_cumulative_count": 0,
+                "itag_rate": 0.0,
+                "etag_t0_cumulative": 0,
+                "etag_t1_cumulative": 0,
+                "etag_t2_cumulative": 0,
+                "etag_t0_rate": 0.0,
+                "etag_t1_rate": 0.0,
+                "etag_t2_rate": 0.0,
+                "reverse_inject_count": 0,
+                "reverse_inject_rate": 0.0,
+            }
 
-        # 收集IQ通道缓冲数据 (IQ_channel_buffer)
-        for node_pos, ip_types in network.fifo_depth_sum["IQ"].get("CH_buffer", {}).items():
-            if node_pos not in die_data["IQ_CH"]:
-                die_data["IQ_CH"][node_pos] = {}
+            # 分类存储
+            if category in ["IQ", "RB", "EQ"]:
+                # v1 方向 FIFO
+                if fifo_type in ["TL", "TR", "TU", "TD", "EQ"]:
+                    if node_pos not in die_data[category]:
+                        die_data[category][node_pos] = {}
+                    die_data[category][node_pos][fifo_type] = stat_data
+                # v1 CH buffer
+                elif fifo_type == "CH" and ip_type:
+                    ch_key = f"{category}_CH"
+                    if node_pos not in die_data[ch_key]:
+                        die_data[ch_key][node_pos] = {}
+                    die_data[ch_key][node_pos][ip_type] = stat_data
 
-            for ip_type, depth_sum in ip_types.items():
-                max_depth = network.fifo_max_depth["IQ"]["CH_buffer"][node_pos].get(ip_type, 0)
-                capacity = self._get_fifo_capacity("IQ_CH", ip_type, node_pos)
+            elif category in ["RS_IN", "RS_OUT"]:
+                # v2 RingStation FIFO
+                if node_pos not in die_data[category]:
+                    die_data[category][node_pos] = {}
+                key = ip_type if ip_type else fifo_type
+                die_data[category][node_pos][key] = stat_data
 
-                avg_util = (depth_sum / total_cycles / capacity * 100) if capacity > 0 else 0
-                peak_util = (max_depth / capacity * 100) if capacity > 0 else 0
-
-                # 获取flit_count for CH_buffer
-                flit_count = 0
-                if node_pos in network.fifo_flit_count["IQ"].get("CH_buffer", {}):
-                    flit_count = network.fifo_flit_count["IQ"]["CH_buffer"][node_pos].get(ip_type, 0)
-
-                die_data["IQ_CH"][node_pos][ip_type] = {
-                    "avg": avg_util,
-                    "peak": peak_util,
-                    "flit_count": flit_count,
-                    "capacity": capacity,
-                    "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
-                    "peak_depth": max_depth,
-                }
-
-        # 收集RB数据 (ring_bridge)
-        for direction in ["TL", "TR", "TU", "TD", "EQ"]:
-            for node_pos, depth_sum in network.fifo_depth_sum["RB"].get(direction, {}).items():
-                if node_pos not in die_data["RB"]:
-                    die_data["RB"][node_pos] = {}
-
-                max_depth = network.fifo_max_depth["RB"][direction].get(node_pos, 0)
-                capacity = self._get_fifo_capacity("RB", direction, node_pos)
-
-                avg_util = (depth_sum / total_cycles / capacity * 100) if capacity > 0 else 0
-                peak_util = (max_depth / capacity * 100) if capacity > 0 else 0
-
-                # 获取flit_count
-                flit_count = network.fifo_flit_count["RB"][direction].get(node_pos, 0)
-
-                # ITag统计 (只统计TU/TD纵向转向)
-                itag_cumulative = 0
-                itag_rate = 0.0
-                if direction in ["TU", "TD"]:
-                    if direction in network.fifo_itag_cumulative_count["RB"]:
-                        if node_pos in network.fifo_itag_cumulative_count["RB"][direction]:
-                            itag_cumulative = network.fifo_itag_cumulative_count["RB"][direction][node_pos]
-                            if flit_count > 0 and total_cycles > 0:
-                                itag_rate = itag_cumulative / (total_cycles * flit_count) * 100
-
-                # ETag统计 (只统计TL/TR横向下环)
-                etag_t0_cumulative = 0
-                etag_t1_cumulative = 0
-                etag_t2_cumulative = 0
-                etag_t0_rate = 0.0
-                etag_t1_rate = 0.0
-                etag_t2_rate = 0.0
-                if direction in ["TL", "TR"]:
-                    if direction in network.fifo_etag_entry_count["RB"]:
-                        if node_pos in network.fifo_etag_entry_count["RB"][direction]:
-                            etag_dist = network.fifo_etag_entry_count["RB"][direction][node_pos]
-                            etag_t0_cumulative = etag_dist["T0"]
-                            etag_t1_cumulative = etag_dist["T1"]
-                            etag_t2_cumulative = etag_dist["T2"]
-
-                            total_etag = etag_t0_cumulative + etag_t1_cumulative + etag_t2_cumulative
-                            if total_etag > 0:
-                                etag_t0_rate = etag_t0_cumulative / total_etag * 100
-                                etag_t1_rate = etag_t1_cumulative / total_etag * 100
-                                etag_t2_rate = etag_t2_cumulative / total_etag * 100
-
-                # 反方向上环统计 (只统计TU/TD纵向转向)
-                reverse_inject_count = 0
-                reverse_inject_rate = 0.0
-                if direction in ["TU", "TD"]:
-                    if hasattr(network, "fifo_reverse_inject_count"):
-                        if direction in network.fifo_reverse_inject_count.get("RB", {}):
-                            reverse_inject_count = network.fifo_reverse_inject_count["RB"][direction].get(node_pos, 0)
-                            if flit_count > 0:
-                                reverse_inject_rate = reverse_inject_count / flit_count * 100
-
-                die_data["RB"][node_pos][direction] = {
-                    "avg": avg_util,
-                    "peak": peak_util,
-                    "flit_count": flit_count,
-                    "capacity": capacity,
-                    "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
-                    "peak_depth": max_depth,
-                    "itag_cumulative_count": itag_cumulative,
-                    "itag_rate": itag_rate,
-                    "etag_t0_cumulative": etag_t0_cumulative,
-                    "etag_t1_cumulative": etag_t1_cumulative,
-                    "etag_t2_cumulative": etag_t2_cumulative,
-                    "etag_t0_rate": etag_t0_rate,
-                    "etag_t1_rate": etag_t1_rate,
-                    "etag_t2_rate": etag_t2_rate,
-                    "reverse_inject_count": reverse_inject_count,
-                    "reverse_inject_rate": reverse_inject_rate,
-                }
-
-        # 收集EQ下环队列数据 (eject_queues)
-        for direction in ["TU", "TD"]:
-            for node_pos, depth_sum in network.fifo_depth_sum["EQ"].get(direction, {}).items():
-                if node_pos not in die_data["EQ"]:
-                    die_data["EQ"][node_pos] = {}
-
-                max_depth = network.fifo_max_depth["EQ"][direction].get(node_pos, 0)
-                capacity = self._get_fifo_capacity("EQ", direction, node_pos)
-
-                avg_util = (depth_sum / total_cycles / capacity * 100) if capacity > 0 else 0
-                peak_util = (max_depth / capacity * 100) if capacity > 0 else 0
-
-                # 获取flit_count
-                flit_count = network.fifo_flit_count["EQ"][direction].get(node_pos, 0)
-
-                # ETag统计 (TU/TD纵向下环)
-                etag_t0_cumulative = 0
-                etag_t1_cumulative = 0
-                etag_t2_cumulative = 0
-                etag_t0_rate = 0.0
-                etag_t1_rate = 0.0
-                etag_t2_rate = 0.0
-                if direction in network.fifo_etag_entry_count["EQ"]:
-                    if node_pos in network.fifo_etag_entry_count["EQ"][direction]:
-                        etag_dist = network.fifo_etag_entry_count["EQ"][direction][node_pos]
-                        etag_t0_cumulative = etag_dist["T0"]
-                        etag_t1_cumulative = etag_dist["T1"]
-                        etag_t2_cumulative = etag_dist["T2"]
-
-                        total_etag = etag_t0_cumulative + etag_t1_cumulative + etag_t2_cumulative
-                        if total_etag > 0:
-                            etag_t0_rate = etag_t0_cumulative / total_etag * 100
-                            etag_t1_rate = etag_t1_cumulative / total_etag * 100
-                            etag_t2_rate = etag_t2_cumulative / total_etag * 100
-
-                die_data["EQ"][node_pos][direction] = {
-                    "avg": avg_util,
-                    "peak": peak_util,
-                    "flit_count": flit_count,
-                    "capacity": capacity,
-                    "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
-                    "peak_depth": max_depth,
-                    "itag_cumulative_count": 0,
-                    "itag_rate": 0.0,
-                    "etag_t0_cumulative": etag_t0_cumulative,
-                    "etag_t1_cumulative": etag_t1_cumulative,
-                    "etag_t2_cumulative": etag_t2_cumulative,
-                    "etag_t0_rate": etag_t0_rate,
-                    "etag_t1_rate": etag_t1_rate,
-                    "etag_t2_rate": etag_t2_rate,
-                }
-
-        # 收集EQ通道缓冲数据 (EQ_channel_buffer)
-        for node_pos, ip_types in network.fifo_depth_sum["EQ"].get("CH_buffer", {}).items():
-            if node_pos not in die_data["EQ_CH"]:
-                die_data["EQ_CH"][node_pos] = {}
-
-            for ip_type, depth_sum in ip_types.items():
-                max_depth = network.fifo_max_depth["EQ"]["CH_buffer"][node_pos].get(ip_type, 0)
-                capacity = self._get_fifo_capacity("EQ_CH", ip_type, node_pos)
-
-                avg_util = (depth_sum / total_cycles / capacity * 100) if capacity > 0 else 0
-                peak_util = (max_depth / capacity * 100) if capacity > 0 else 0
-
-                # 获取flit_count for EQ CH_buffer
-                flit_count = 0
-                if node_pos in network.fifo_flit_count["EQ"].get("CH_buffer", {}):
-                    flit_count = network.fifo_flit_count["EQ"]["CH_buffer"][node_pos].get(ip_type, 0)
-
-                die_data["EQ_CH"][node_pos][ip_type] = {
-                    "avg": avg_util,
-                    "peak": peak_util,
-                    "flit_count": flit_count,
-                    "capacity": capacity,
-                    "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
-                    "peak_depth": max_depth,
-                }
+        # 附加 ITag/ETag 统计 (从 network 获取)
+        self._collect_itag_etag_stats(network, die_data, total_cycles)
 
         return die_data
+
+    def _collect_itag_etag_stats(self, network, die_data: Dict, total_cycles: int):
+        """收集 ITag/ETag 统计数据"""
+        # IQ ITag统计 (TR/TL横向注入)
+        for direction in ["TR", "TL"]:
+            if hasattr(network, "fifo_itag_cumulative_count"):
+                for node_pos in die_data.get("IQ", {}):
+                    if direction in die_data["IQ"].get(node_pos, {}):
+                        itag_cumulative = network.fifo_itag_cumulative_count.get("IQ", {}).get(direction, {}).get(node_pos, 0)
+                        flit_count = die_data["IQ"][node_pos][direction].get("flit_count", 0)
+                        itag_rate = (itag_cumulative / (total_cycles * flit_count) * 100) if flit_count > 0 and total_cycles > 0 else 0
+                        die_data["IQ"][node_pos][direction]["itag_cumulative_count"] = itag_cumulative
+                        die_data["IQ"][node_pos][direction]["itag_rate"] = itag_rate
+
+        # RB ITag统计 (TU/TD纵向转向)
+        for direction in ["TU", "TD"]:
+            if hasattr(network, "fifo_itag_cumulative_count"):
+                for node_pos in die_data.get("RB", {}):
+                    if direction in die_data["RB"].get(node_pos, {}):
+                        itag_cumulative = network.fifo_itag_cumulative_count.get("RB", {}).get(direction, {}).get(node_pos, 0)
+                        flit_count = die_data["RB"][node_pos][direction].get("flit_count", 0)
+                        itag_rate = (itag_cumulative / (total_cycles * flit_count) * 100) if flit_count > 0 and total_cycles > 0 else 0
+                        die_data["RB"][node_pos][direction]["itag_cumulative_count"] = itag_cumulative
+                        die_data["RB"][node_pos][direction]["itag_rate"] = itag_rate
+
+        # RB ETag统计 (TL/TR横向下环)
+        for direction in ["TL", "TR"]:
+            if hasattr(network, "fifo_etag_entry_count"):
+                for node_pos in die_data.get("RB", {}):
+                    if direction in die_data["RB"].get(node_pos, {}):
+                        etag_dist = network.fifo_etag_entry_count.get("RB", {}).get(direction, {}).get(node_pos, {})
+                        if etag_dist:
+                            t0, t1, t2 = etag_dist.get("T0", 0), etag_dist.get("T1", 0), etag_dist.get("T2", 0)
+                            total_etag = t0 + t1 + t2
+                            die_data["RB"][node_pos][direction]["etag_t0_cumulative"] = t0
+                            die_data["RB"][node_pos][direction]["etag_t1_cumulative"] = t1
+                            die_data["RB"][node_pos][direction]["etag_t2_cumulative"] = t2
+                            if total_etag > 0:
+                                die_data["RB"][node_pos][direction]["etag_t0_rate"] = t0 / total_etag * 100
+                                die_data["RB"][node_pos][direction]["etag_t1_rate"] = t1 / total_etag * 100
+                                die_data["RB"][node_pos][direction]["etag_t2_rate"] = t2 / total_etag * 100
+
+        # EQ ETag统计 (TU/TD纵向下环)
+        for direction in ["TU", "TD"]:
+            if hasattr(network, "fifo_etag_entry_count"):
+                for node_pos in die_data.get("EQ", {}):
+                    if direction in die_data["EQ"].get(node_pos, {}):
+                        etag_dist = network.fifo_etag_entry_count.get("EQ", {}).get(direction, {}).get(node_pos, {})
+                        if etag_dist:
+                            t0, t1, t2 = etag_dist.get("T0", 0), etag_dist.get("T1", 0), etag_dist.get("T2", 0)
+                            total_etag = t0 + t1 + t2
+                            die_data["EQ"][node_pos][direction]["etag_t0_cumulative"] = t0
+                            die_data["EQ"][node_pos][direction]["etag_t1_cumulative"] = t1
+                            die_data["EQ"][node_pos][direction]["etag_t2_cumulative"] = t2
+                            if total_etag > 0:
+                                die_data["EQ"][node_pos][direction]["etag_t0_rate"] = t0 / total_etag * 100
+                                die_data["EQ"][node_pos][direction]["etag_t1_rate"] = t1 / total_etag * 100
+                                die_data["EQ"][node_pos][direction]["etag_t2_rate"] = t2 / total_etag * 100
 
     def collect_from_dies(self, dies: Dict, total_cycles: int) -> Dict:
         """
@@ -495,10 +387,26 @@ class FIFOHeatmapVisualizer:
                             if option_tuple not in options:
                                 options.append(option_tuple)
 
+                # RS_IN (v2 RingStation 输入端)
+                for node_pos, fifo_types in die_data.get("RS_IN", {}).items():
+                    for fifo_key in fifo_types.keys():
+                        option_name = f"RS_IN-{fifo_key} ({net_label})"
+                        option_tuple = (option_name, "RS_IN", fifo_key, network_type)
+                        if option_tuple not in options:
+                            options.append(option_tuple)
+
+                # RS_OUT (v2 RingStation 输出端)
+                for node_pos, fifo_types in die_data.get("RS_OUT", {}).items():
+                    for fifo_key in fifo_types.keys():
+                        option_name = f"RS_OUT-{fifo_key} ({net_label})"
+                        option_tuple = (option_name, "RS_OUT", fifo_key, network_type)
+                        if option_tuple not in options:
+                            options.append(option_tuple)
+
         # 排序：先按category，再按network_type，最后按名称
         def sort_key(item):
             name, category, _, network_type = item
-            category_order = {"IQ": 0, "RB": 1, "EQ": 2, "IQ_CH": 3, "EQ_CH": 4}
+            category_order = {"IQ": 0, "RB": 1, "EQ": 2, "IQ_CH": 3, "EQ_CH": 4, "RS_IN": 5, "RS_OUT": 6}
             network_order = {"req": 0, "rsp": 1, "data": 2}
             return (category_order.get(category, 999), network_order.get(network_type, 999), name)
 
@@ -1081,9 +989,33 @@ class FIFOHeatmapVisualizer:
             ]
         )
 
+    def _short_name(self, name: str) -> str:
+        """将IP名称缩写: gdma_0 -> G0, ddr_0 -> D0"""
+        if "_" in name:
+            prefix, idx = name.rsplit("_", 1)
+            short = prefix[0].upper()
+            return f"{short}{idx}"
+        return name
+
     def _add_architecture_diagram(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str]], dies: Dict):
         """
-        在右侧子图添加CrossRing架构示意图（参考可视化效果重新设计）
+        在右侧子图添加CrossRing架构示意图
+        根据KCIN版本自动选择v1或v2布局
+        """
+        # 获取第一个Die的配置
+        first_die = list(dies.values())[0]
+        config = first_die.config
+
+        # 根据KCIN版本选择布局
+        kcin_version = getattr(config, "KCIN_VERSION", "v1")
+        if kcin_version == "v2":
+            self._add_architecture_diagram_v2(fig, fifo_options, dies)
+        else:
+            self._add_architecture_diagram_v1(fig, fifo_options, dies)
+
+    def _add_architecture_diagram_v1(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str]], dies: Dict):
+        """
+        v1架构示意图（IQ/RB/EQ三模块布局）
 
         布局：
         - 左侧：Inject Queue（纵向排列，通道在上，方向在下）
@@ -1173,6 +1105,84 @@ class FIFOHeatmapVisualizer:
         # 设置右侧子图的范围
         fig.update_xaxes(range=[-1, 26], row=1, col=2)
         fig.update_yaxes(range=[-1, 22], row=1, col=2)
+
+    def _add_architecture_diagram_v2(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str]], dies: Dict):
+        """
+        v2架构示意图（RingStation单框布局）
+
+        布局（单个RS框）：
+        - 左上角: IP channels (IQ_CH/EQ_CH) - 每个IP的I/O竖向排列
+        - 下方: TL/TR方向 (IQ/RB) - 每个方向的I/O竖向排列
+        - 右侧: TU/TD方向 (IQ/RB) - 每个方向的I/O横向排列
+        """
+        # 获取第一个Die的配置
+        first_die = list(dies.values())[0]
+        config = first_die.config
+        ch_names = config.CH_NAME_LIST if hasattr(config, "CH_NAME_LIST") else ["gdma_0", "gdma_1", "ddr_0"]
+
+        # === RS 框参数 (紧凑布局) ===
+        rs_x, rs_y = 0, 0
+        rs_padding = 0.5
+        fifo_gap = 1.2  # 同方向I/O之间的间距
+        dir_gap = 1.8   # 不同方向之间的间距
+        item_w, item_h = 1.2, 1.5  # FIFO项尺寸
+
+        # === 1. 左上角: IP channels (竖向) ===
+        ip_section_x = rs_x + rs_padding
+        ip_section_y = rs_y + 6
+
+        for i, ch_name in enumerate(ch_names):
+            base_x = ip_section_x + i * (fifo_gap + dir_gap)
+            short_name = self._short_name(ch_name)
+
+            # I (Input from IP) - RS_IN
+            label_i = f"{short_name}I"
+            self._draw_fifo_item(fig, base_x, ip_section_y, item_w, item_h, label_i, ("RS_IN", ch_name), fifo_options)
+
+            # O (Output to IP) - RS_OUT
+            label_o = f"{short_name}O"
+            self._draw_fifo_item(fig, base_x + fifo_gap, ip_section_y, item_w, item_h, label_o, ("RS_OUT", ch_name), fifo_options)
+
+        # === 2. 下方: TL/TR (竖向) ===
+        h_section_x = rs_x + rs_padding
+        h_section_y = rs_y + rs_padding
+
+        for i, direction in enumerate(["TL", "TR"]):
+            base_x = h_section_x + i * (fifo_gap + dir_gap)
+
+            # I (Input from ring) - RS_IN
+            label_i = f"{direction}I"
+            self._draw_fifo_item(fig, base_x, h_section_y, item_w, item_h, label_i, ("RS_IN", direction), fifo_options)
+
+            # O (Output to ring) - RS_OUT
+            label_o = f"{direction}O"
+            self._draw_fifo_item(fig, base_x + fifo_gap, h_section_y, item_w, item_h, label_o, ("RS_OUT", direction), fifo_options)
+
+        # === 3. 右侧: TU/TD (横向) ===
+        v_section_x = rs_x + max(len(ch_names), 2) * (fifo_gap + dir_gap) + rs_padding
+        v_section_y = rs_y + rs_padding + 0.5
+
+        h_item_w, h_item_h = 1.8, 1.0  # 横向FIFO项尺寸
+
+        for i, direction in enumerate(["TU", "TD"]):
+            base_y = v_section_y + i * (fifo_gap + dir_gap)
+
+            # I (Input from ring) - RS_IN
+            label_i = f"{direction}I"
+            self._draw_fifo_item(fig, v_section_x, base_y, h_item_w, h_item_h, label_i, ("RS_IN", direction), fifo_options)
+
+            # O (Output to ring) - RS_OUT
+            label_o = f"{direction}O"
+            self._draw_fifo_item(fig, v_section_x, base_y + fifo_gap, h_item_w, h_item_h, label_o, ("RS_OUT", direction), fifo_options)
+
+        # === RS 外轮廓框 ===
+        rs_w = v_section_x + h_item_w + rs_padding
+        rs_h = ip_section_y + item_h + rs_padding + 0.3
+        self._draw_module_box(fig, rs_x, rs_y, rs_w, rs_h, "RingStation", "lightblue")
+
+        # 设置右侧子图的范围
+        fig.update_xaxes(range=[-0.5, rs_w + 1], row=1, col=2)
+        fig.update_yaxes(range=[-0.5, rs_h + 1], row=1, col=2)
 
     def _draw_module_box(self, fig: go.Figure, x: float, y: float, w: float, h: float, title: str, color: str):
         """绘制模块边框和标题"""
@@ -1282,9 +1292,9 @@ class FIFOHeatmapVisualizer:
     // 当前选中的状态
     let currentFifoIndex = 0;  // 默认第一个FIFO
     let currentMode = 'avg';  // 默认平均模式
-    let currentNetworkType = 'data';  // 默认data网络
-    let currentCategory = null;  // 当前FIFO类别
-    let currentFifoType = null;  // 当前FIFO类型
+    let currentNetworkType = fifoOptionsData.length > 0 ? fifoOptionsData[0][3] : 'data';  // 从第一个选项获取网络类型
+    let currentCategory = fifoOptionsData.length > 0 ? fifoOptionsData[0][1] : null;  // 从第一个选项获取类别
+    let currentFifoType = fifoOptionsData.length > 0 ? fifoOptionsData[0][2] : null;  // 从第一个选项获取FIFO类型
 
     // 等待Plotly加载完成
     document.addEventListener('DOMContentLoaded', function() {{
@@ -1382,8 +1392,8 @@ class FIFOHeatmapVisualizer:
                 const expectedName = currentCategory + '_' + currentFifoType;
 
                 const newShapes = shapes.map((shape, idx) => {{
-                    // 跳过模块边框（前3个shape是模块边框）
-                    if (idx < 3 || !shape.name) {{
+                    // 跳过没有name的shape（模块边框没有name属性）
+                    if (!shape.name) {{
                         return shape;
                     }}
 
@@ -1490,7 +1500,7 @@ class FIFOHeatmapVisualizer:
             // 更新网络按钮高亮
             function updateNetworkButtonHighlight() {{
                 const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
-                const networkButtons = Array.from(allButtons).slice(2, 5);
+                const networkButtons = Array.from(allButtons).slice(3, 6);  // 网络按钮是第4-6个(索引3-5)
                 networkButtons.forEach(b => b.classList.remove('active'));
                 const networks = ['req', 'rsp', 'data'];
                 const netIdx = networks.indexOf(currentNetworkType);

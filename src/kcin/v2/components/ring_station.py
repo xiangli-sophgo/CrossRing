@@ -25,6 +25,7 @@ from collections import deque
 from typing import Optional, Dict, List, Tuple, Any
 from src.kcin.base.config import KCINConfigBase
 from src.utils.flit import Flit
+from src.utils.statistical_fifo import StatisticalFIFO
 
 
 class RingStation:
@@ -49,25 +50,51 @@ class RingStation:
         self.config = config
         self.network = network_ref
 
+        # 计算行列位置（用于FIFO命名）
+        self.row = node_id // config.NUM_COL
+        self.col = node_id % config.NUM_COL
+
         # 获取 IP 类型列表
         self.ch_names = config.CH_NAME_LIST if hasattr(config, 'CH_NAME_LIST') else []
+
+        # 获取网络类型后缀（用于区分三网络的FIFO名称）
+        # "Request Network" -> "req", "Response Network" -> "rsp", "Data Network" -> "dat"
+        self._network_suffix = ""
+        if network_ref and hasattr(network_ref, 'name'):
+            self._network_suffix = "_" + network_ref.name.split()[0].lower()[:3]
 
         # ========== 输入端 FIFO ==========
         # 每个 IP 类型有独立的 channel buffer
         self.input_fifos = {}
         for ch in self.ch_names:
-            self.input_fifos[ch] = deque(maxlen=config.RS_IN_CH_BUFFER)
+            name = f"RS({self.row},{self.col})_IN_{ch}{self._network_suffix}"
+            self.input_fifos[ch] = StatisticalFIFO(
+                name=name, maxlen=config.RS_IN_CH_BUFFER,
+                node_pos=node_id, category="RS_IN", fifo_type="CH", ip_type=ch
+            )
         for direction in self.RING_DIRECTIONS:
-            self.input_fifos[direction] = deque(maxlen=config.RS_IN_FIFO_DEPTH)
+            name = f"RS({self.row},{self.col})_IN_{direction}{self._network_suffix}"
+            self.input_fifos[direction] = StatisticalFIFO(
+                name=name, maxlen=config.RS_IN_FIFO_DEPTH,
+                node_pos=node_id, category="RS_IN", fifo_type=direction
+            )
         self.input_fifos_pre = {k: None for k in self.input_fifos.keys()}
 
         # ========== 输出端 FIFO ==========
         # 每个 IP 类型有独立的 channel buffer
         self.output_fifos = {}
         for ch in self.ch_names:
-            self.output_fifos[ch] = deque(maxlen=config.RS_OUT_CH_BUFFER)
+            name = f"RS({self.row},{self.col})_OUT_{ch}{self._network_suffix}"
+            self.output_fifos[ch] = StatisticalFIFO(
+                name=name, maxlen=config.RS_OUT_CH_BUFFER,
+                node_pos=node_id, category="RS_OUT", fifo_type="CH", ip_type=ch
+            )
         for direction in self.RING_DIRECTIONS:
-            self.output_fifos[direction] = deque(maxlen=config.RS_OUT_FIFO_DEPTH)
+            name = f"RS({self.row},{self.col})_OUT_{direction}{self._network_suffix}"
+            self.output_fifos[direction] = StatisticalFIFO(
+                name=name, maxlen=config.RS_OUT_FIFO_DEPTH,
+                node_pos=node_id, category="RS_OUT", fifo_type=direction
+            )
         self.output_fifos_pre = {k: None for k in self.output_fifos.keys()}
 
         # ========== 仲裁状态 ==========
@@ -107,11 +134,19 @@ class RingStation:
         self.ch_names.append(ip_type)
 
         # 添加输入端 FIFO
-        self.input_fifos[ip_type] = deque(maxlen=self.config.RS_IN_CH_BUFFER)
+        name_in = f"RS({self.row},{self.col})_IN_{ip_type}{self._network_suffix}"
+        self.input_fifos[ip_type] = StatisticalFIFO(
+            name=name_in, maxlen=self.config.RS_IN_CH_BUFFER,
+            node_pos=self.node_id, category="RS_IN", fifo_type="CH", ip_type=ip_type
+        )
         self.input_fifos_pre[ip_type] = None
 
         # 添加输出端 FIFO
-        self.output_fifos[ip_type] = deque(maxlen=self.config.RS_OUT_CH_BUFFER)
+        name_out = f"RS({self.row},{self.col})_OUT_{ip_type}{self._network_suffix}"
+        self.output_fifos[ip_type] = StatisticalFIFO(
+            name=name_out, maxlen=self.config.RS_OUT_CH_BUFFER,
+            node_pos=self.node_id, category="RS_OUT", fifo_type="CH", ip_type=ip_type
+        )
         self.output_fifos_pre[ip_type] = None
 
         # 添加仲裁指针

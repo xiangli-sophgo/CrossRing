@@ -30,10 +30,15 @@ class V2Config(KCINConfigBase):
         self.RS_OUT_CH_BUFFER = config.get("RS_OUT_CH_BUFFER", config.get("RS_OUTPUT_CH_DEPTH", 4))
         self.RS_OUT_FIFO_DEPTH = config.get("RS_OUT_FIFO_DEPTH", config.get("RS_OUTPUT_RING_DEPTH", 4))
 
-        # ==================== Slice 配置（v2 可能简化）====================
+        # ==================== Slice 配置 ====================
+        # Link slice（节点间传输）
         self.SLICE_PER_LINK_HORIZONTAL = config.get("SLICE_PER_LINK_HORIZONTAL", 1)
         self.SLICE_PER_LINK_VERTICAL = config.get("SLICE_PER_LINK_VERTICAL", 1)
-        self.SLICE_PER_LINK_SELF = config.get("SLICE_PER_LINK_SELF", 1)
+
+        # CP slice（CrossPoint内部，独立于Link）
+        # 结构：[slice_0, slice_1, ..., in_slice, out_slice]
+        # 最后两个固定是in和out，增加slice时在前面增加
+        self.CP_SLICE_COUNT = config.get("CP_SLICE_COUNT", 2)  # 最小为2
 
         # ==================== Tag 配置（v2 简化版）====================
         # v2 仍使用 ETag/ITag 但通过 RingStation 统一管理

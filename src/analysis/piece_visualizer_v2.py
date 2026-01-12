@@ -35,7 +35,7 @@ class PieceVisualizerV2:
         # 几何参数
         self.square = 0.3
         self.gap = 0.02
-        self.fontsize = 8
+        self.fontsize = 7
         self.slot_frame_lw = 0.4
 
         if ax is None:
@@ -86,8 +86,8 @@ class PieceVisualizerV2:
         square = self.square
         gap = self.gap
         fontsize = self.fontsize
-        fifo_gap = 0.5  # 同方向IN/OUT之间的间距
-        dir_gap = 0.8   # 不同方向之间的间距
+        fifo_gap = 0.6  # 同方向IN/OUT之间的间距
+        dir_gap = 1.0  # 不同方向之间的间距
 
         # 清空 patch 字典
         self.rs_patches.clear()
@@ -102,10 +102,11 @@ class PieceVisualizerV2:
             ch_names = self.config.CH_NAME_LIST if hasattr(self.config, "CH_NAME_LIST") else []
 
         RS_x, RS_y = 0, 0
+        rs_padding = 0.4  # RS 框内边距
 
         # === 1. 左上角: IP channel buffer (竖向) ===
-        ip_section_x = RS_x
-        ip_section_y = RS_y + 4
+        ip_section_x = RS_x + rs_padding
+        ip_section_y = RS_y + 3.5
 
         for i, ch in enumerate(ch_names):
             # 每个IP方向的IN和OUT放在一起
@@ -115,8 +116,8 @@ class PieceVisualizerV2:
             lane_in = f"I_{ch}"
             depth_in = self.rs_in_ch_depth
             lane_x_in = base_x
-            # 使用缩写显示标签: G0_IN
-            label_in = f"{self._short_name(ch)}_IN"
+            # 使用缩写显示标签: G0_I
+            label_in = f"{self._short_name(ch)}I"
             self.ax.text(lane_x_in + square / 2, ip_section_y + depth_in * (square + gap) + 0.05, label_in, ha="center", va="bottom", fontsize=fontsize)
             self.rs_patches[lane_in] = []
             self.rs_texts[lane_in] = []
@@ -137,8 +138,8 @@ class PieceVisualizerV2:
             lane_out = f"O_{ch}"
             depth_out = self.rs_out_ch_depth
             lane_x_out = base_x + fifo_gap
-            # 使用缩写显示标签: G0_OUT
-            label_out = f"{self._short_name(ch)}_OUT"
+            # 使用缩写显示标签: G0O
+            label_out = f"{self._short_name(ch)}O"
             self.ax.text(lane_x_out + square / 2, ip_section_y + depth_out * (square + gap) + 0.05, label_out, ha="center", va="bottom", fontsize=fontsize)
             self.rs_patches[lane_out] = []
             self.rs_texts[lane_out] = []
@@ -156,8 +157,8 @@ class PieceVisualizerV2:
                 self.rs_texts[lane_out].append(txt)
 
         # === 2. 下方: TL/TR (竖向) ===
-        h_section_x = RS_x
-        h_section_y = RS_y
+        h_section_x = RS_x + rs_padding
+        h_section_y = RS_y + rs_padding
 
         for i, direction in enumerate(["TL", "TR"]):
             base_x = h_section_x + i * (2 * fifo_gap + dir_gap)
@@ -166,7 +167,7 @@ class PieceVisualizerV2:
             lane_in = f"I_{direction}"
             depth_in = self.rs_in_fifo_depth
             lane_x_in = base_x
-            label_in = f"{direction}_IN"
+            label_in = f"{direction}I"
             self.ax.text(lane_x_in + square / 2, h_section_y + depth_in * (square + gap) + 0.05, label_in, ha="center", va="bottom", fontsize=fontsize)
             self.rs_patches[lane_in] = []
             self.rs_texts[lane_in] = []
@@ -187,7 +188,7 @@ class PieceVisualizerV2:
             lane_out = f"O_{direction}"
             depth_out = self.rs_out_fifo_depth
             lane_x_out = base_x + fifo_gap
-            label_out = f"{direction}_OUT"
+            label_out = f"{direction}O"
             self.ax.text(lane_x_out + square / 2, h_section_y + depth_out * (square + gap) + 0.05, label_out, ha="center", va="bottom", fontsize=fontsize)
             self.rs_patches[lane_out] = []
             self.rs_texts[lane_out] = []
@@ -205,8 +206,8 @@ class PieceVisualizerV2:
                 self.rs_texts[lane_out].append(txt)
 
         # === 3. 右边: TU/TD (横向) ===
-        v_section_x = RS_x + max(len(ch_names), 2) * (2 * fifo_gap + dir_gap) + 0.5
-        v_section_y = RS_y + 2
+        v_section_x = RS_x + max(len(ch_names), 2) * (2 * fifo_gap + dir_gap) + rs_padding + 0.3
+        v_section_y = RS_y + rs_padding + 0.8
 
         for i, direction in enumerate(["TU", "TD"]):
             base_y = v_section_y + i * (2 * fifo_gap + dir_gap)
@@ -215,7 +216,7 @@ class PieceVisualizerV2:
             lane_in = f"I_{direction}"
             depth_in = self.rs_in_fifo_depth
             lane_y_in = base_y
-            label_in = f"{direction}_IN"
+            label_in = f"{direction}I"
             self.ax.text(v_section_x - 0.05, lane_y_in + square / 2, label_in, ha="right", va="center", fontsize=fontsize)
             self.rs_patches[lane_in] = []
             self.rs_texts[lane_in] = []
@@ -236,7 +237,7 @@ class PieceVisualizerV2:
             lane_out = f"O_{direction}"
             depth_out = self.rs_out_fifo_depth
             lane_y_out = base_y + fifo_gap
-            label_out = f"{direction}_OUT"
+            label_out = f"{direction}O"
             self.ax.text(v_section_x - 0.05, lane_y_out + square / 2, label_out, ha="right", va="center", fontsize=fontsize)
             self.rs_patches[lane_out] = []
             self.rs_texts[lane_out] = []
@@ -254,29 +255,29 @@ class PieceVisualizerV2:
                 self.rs_texts[lane_out].append(txt)
 
         # === RS 外轮廓框 ===
-        rs_width = v_section_x + self.rs_in_fifo_depth * (square + gap) + 0.3
-        rs_height = ip_section_y + max(self.rs_in_ch_depth, self.rs_out_ch_depth) * (square + gap) + 0.5
-        rs_box = Rectangle((RS_x - 0.2, RS_y - 0.3), rs_width, rs_height, fill=False, edgecolor="blue", linewidth=1.5)
+        rs_width = v_section_x + self.rs_in_fifo_depth * (square + gap) + rs_padding
+        rs_height = ip_section_y + max(self.rs_in_ch_depth, self.rs_out_ch_depth) * (square + gap) + rs_padding + 0.2
+        rs_box = Rectangle((RS_x, RS_y), rs_width, rs_height, fill=False, edgecolor="black", linewidth=1.5)
         self.ax.add_patch(rs_box)
-        self.ax.text(RS_x + rs_width / 2 - 0.2, RS_y + rs_height - 0.1, f"RingStation {self.node_id}", ha="center", va="bottom", fontweight="bold", fontsize=fontsize + 1)
+        self.ax.text(RS_x + rs_width / 2, RS_y + rs_height + 0.1, f"RS {self.node_id}", ha="center", va="bottom", fontweight="bold", fontsize=fontsize + 1)
 
-        # === CrossPoint Horizontal 模块 (放在 TL/TR 下方) ===
-        cp_square = square * 1.5
-        cp_gap = gap * 2
-        CPH_x = h_section_x
-        CPH_y = h_section_y - 2.5
-        cp_h_width = 4 * (cp_square + cp_gap) + 0.4
-        cp_h_height = 2 * (cp_square + cp_gap) + 0.4
+        # === CrossPoint Horizontal 模块 (放在 RS 框下方外面) ===
+        cp_square = square * 1.2
+        cp_gap = 0.15
+        CPH_x = RS_x + 1.2
+        CPH_y = RS_y - 2.2
+        cp_h_width = 2 * (cp_square + cp_gap) + 0.6
+        cp_h_height = 2 * (cp_square + cp_gap) + 0.6
 
-        box_h = Rectangle((CPH_x, CPH_y), cp_h_width, cp_h_height, fill=False)
+        box_h = Rectangle((CPH_x, CPH_y), cp_h_width, cp_h_height, fill=False, edgecolor="black", linewidth=1.0)
         self.ax.add_patch(box_h)
-        self.ax.text(CPH_x + cp_h_width / 2, CPH_y + cp_h_height + 0.1, "CP_H", ha="center", va="bottom", fontweight="bold")
+        self.ax.text(CPH_x + cp_h_width / 2, CPH_y + cp_h_height + 0.1, "CP_H", ha="center", va="bottom", fontweight="bold", fontsize=fontsize)
 
         for i, lane in enumerate(["TR", "TL"]):
-            lane_y = CPH_y + cp_h_height - (i + 1) * (cp_square + cp_gap) - 0.1
-            lane_x = CPH_x + 0.2
+            lane_y = CPH_y + 0.2 + i * (cp_square + cp_gap)
+            lane_x = CPH_x + 0.3
 
-            self.ax.text(lane_x - 0.05, lane_y + cp_square / 2, lane, ha="right", va="center", fontsize=fontsize)
+            self.ax.text(CPH_x + 0.05, lane_y + cp_square / 2, lane, ha="left", va="center", fontsize=fontsize)
 
             self.cph_patches[lane] = []
             self.cph_texts[lane] = []
@@ -288,26 +289,26 @@ class PieceVisualizerV2:
                 self.ax.add_patch(frame)
                 inner = Rectangle((slot_x, slot_y), cp_square, cp_square, edgecolor="none", facecolor="none", linewidth=0)
                 self.ax.add_patch(inner)
-                txt = self.ax.text(slot_x + cp_square / 2, slot_y + cp_square / 2, "", ha="center", va="center", fontsize=fontsize)
+                txt = self.ax.text(slot_x + cp_square / 2, slot_y + cp_square / 2, "", ha="center", va="center", fontsize=fontsize - 1)
                 txt.set_visible(False)
                 self.cph_patches[lane].append(inner)
                 self.cph_texts[lane].append(txt)
 
-        # === CrossPoint Vertical 模块 (放在 TU/TD 右边) ===
-        CPV_x = v_section_x + self.rs_in_fifo_depth * (square + gap) + 0.5
-        CPV_y = v_section_y
+        # === CrossPoint Vertical 模块 (放在 RS 框右边外面) ===
+        CPV_x = rs_width + 0.3
+        CPV_y = v_section_y + 0.5
         cp_v_width = 2 * (cp_square + cp_gap) + 0.4
         cp_v_height = 2 * (cp_square + cp_gap) + 0.4
 
-        box_v = Rectangle((CPV_x, CPV_y), cp_v_width, cp_v_height, fill=False)
+        box_v = Rectangle((CPV_x, CPV_y), cp_v_width, cp_v_height, fill=False, edgecolor="black", linewidth=1.0)
         self.ax.add_patch(box_v)
-        self.ax.text(CPV_x + cp_v_width / 2, CPV_y + cp_v_height + 0.1, "CP_V", ha="center", va="bottom", fontweight="bold")
+        self.ax.text(CPV_x + cp_v_width / 2, CPV_y + cp_v_height + 0.1, "CP_V", ha="center", va="bottom", fontweight="bold", fontsize=fontsize)
 
         for i, lane in enumerate(["TD", "TU"]):
             lane_x = CPV_x + 0.2 + i * (cp_square + cp_gap)
-            lane_y = CPV_y + 0.2
+            lane_y = CPV_y + 0.3
 
-            self.ax.text(lane_x + cp_square / 2, CPV_y + cp_v_height + 0.02, lane, ha="center", va="bottom", fontsize=fontsize)
+            self.ax.text(lane_x + cp_square / 2, CPV_y + cp_v_height - 0.1, lane, ha="center", va="top", fontsize=fontsize)
 
             self.cpv_patches[lane] = []
             self.cpv_texts[lane] = []
@@ -319,7 +320,7 @@ class PieceVisualizerV2:
                 self.ax.add_patch(frame)
                 inner = Rectangle((slot_x, slot_y), cp_square, cp_square, edgecolor="none", facecolor="none", linewidth=0)
                 self.ax.add_patch(inner)
-                txt = self.ax.text(slot_x + cp_square / 2, slot_y + cp_square / 2, "", ha="center", va="center", fontsize=fontsize)
+                txt = self.ax.text(slot_x + cp_square / 2, slot_y + cp_square / 2, "", ha="center", va="center", fontsize=fontsize - 1)
                 txt.set_visible(False)
                 self.cpv_patches[lane].append(inner)
                 self.cpv_texts[lane].append(txt)
