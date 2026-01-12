@@ -179,11 +179,11 @@ class IPInterface:
             ip_prefix = ip_type[:4].upper()
             tx_limit = rx_limit = getattr(self.config, f"{ip_prefix}_BW_LIMIT", 128)
             self.tx_token_bucket = TokenBucket(
-                rate=tx_limit / self.config.FLIT_SIZE,
+                rate=tx_limit / self.config.CYCLES_PER_NS / self.config.FLIT_SIZE,
                 bucket_size=tx_limit,
             )
             self.rx_token_bucket = TokenBucket(
-                rate=rx_limit / self.config.FLIT_SIZE,
+                rate=rx_limit / self.config.CYCLES_PER_NS / self.config.FLIT_SIZE,
                 bucket_size=rx_limit,
             )
         else:

@@ -277,6 +277,25 @@ destination_type = flit.d2d_origin_type  # "gdma_0"
 2. **D2D_RN Resource Drops**: Drops requests when resources unavailable (AXI violation)
 3. **Missing Retry Flow**: Incomplete positive response mechanism for queued requests
 
+## v2 RingStation 可视化设计
+
+### pre缓冲区不显示
+
+RingStation 中的 `input_fifos_pre` 和 `output_fifos_pre` 是单flit缓冲区，用于仿真flit在一个cycle内走多级FIFO的管道效果。**可视化时不应该显示pre缓冲区的内容**，只显示主FIFO (`input_fifos` 和 `output_fifos`) 中的flit。
+
+### 数据流时序
+
+在一个仿真周期内的数据流顺序：
+1. `ip_inject_to_network()` - IP发送flit到 `tx_channel_buffer_pre`
+2. `move_flits_in_network()` - 网络处理，包含 `process_ring_stations()`
+   - Phase 1: `input_fifos_pre` → `input_fifos`
+   - Phase 2: 仲裁，`input_fifos` → `output_fifos_pre`
+   - Phase 3: `output_fifos_pre` → `output_fifos`
+3. `move_pre_to_queues_all()` - IP ↔ RS数据传输 (`tx_channel_buffer_pre` → `input_fifos_pre`)
+4. `debug_func()` - 可视化更新
+
+可视化时，主FIFO中应该有正在处理的flit。
+
 ## Important Notes
 
 - **Testing**: No established testing framework. `scripts/test.py` exists but no pytest/unittest setup

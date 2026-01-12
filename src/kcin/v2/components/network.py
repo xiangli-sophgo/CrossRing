@@ -467,38 +467,16 @@ class Network:
 
     def process_ring_stations(self, cycle: int):
         """
-        处理所有 RingStation 的周期逻辑
+        处理所有 RingStation 的仲裁逻辑
 
-        执行顺序：
-        1. 所有 RS 执行 move_pre_to_fifos（将 pre 缓冲移入 FIFO）
-        2. 所有 RS 执行 process_cycle（仲裁 + 数据转移）
+        只执行仲裁 + 数据转移到 output_fifos_pre。
+        pre → fifos 的移动统一在 _move_pre_to_queues() 中处理。
 
         Args:
             cycle: 当前周期
         """
-        # Phase 1: 所有 RS 的 pre 缓冲移入 FIFO
-        for node_id, rs in self.ring_stations.items():
-            rs.move_pre_to_fifos(cycle)
-
-        # 调试：打印 move_pre_to_fifos 后的状态
-        rs0 = self.ring_stations.get(0)
-        if rs0:
-            in_cnt = {k: len(v) for k, v in rs0.input_fifos.items() if len(v) > 0}
-            out_cnt = {k: len(v) for k, v in rs0.output_fifos.items() if len(v) > 0}
-            if in_cnt or out_cnt:
-                print(f"[RS] cycle={cycle}, node0 after move_pre: in={in_cnt}, out={out_cnt}")
-
-        # Phase 2: 所有 RS 执行周期处理（仲裁 + 转移）
         for node_id, rs in self.ring_stations.items():
             rs.process_cycle(cycle)
-
-        # 调试：打印 process_cycle 后的状态
-        if rs0:
-            in_cnt = {k: len(v) for k, v in rs0.input_fifos.items() if len(v) > 0}
-            out_cnt = {k: len(v) for k, v in rs0.output_fifos.items() if len(v) > 0}
-            out_pre = {k: 1 for k, v in rs0.output_fifos_pre.items() if v is not None}
-            if in_cnt or out_cnt or out_pre:
-                print(f"[RS] cycle={cycle}, node0 after process: in={in_cnt}, out={out_cnt}, out_pre={out_pre}")
 
     def rs_enqueue_from_local(self, node_id: int, flit) -> bool:
         """
@@ -655,8 +633,11 @@ class Network:
         """
         rs = self.ring_stations[current]
         if flit.source == flit.destination or len(flit.path) <= 1:
-            # 本地注入到ch_buffer (原EQ)
-            return len(rs.output_fifos["ch_buffer"]) < self.config.RS_OUT_CH_BUFFER
+            # 本地注入到对应IP类型的channel
+            dest_type = getattr(flit, 'destination_type', None)
+            if dest_type and dest_type in rs.output_fifos:
+                return len(rs.output_fifos[dest_type]) < self.config.RS_OUT_CH_BUFFER
+            return False
 
         # 纵向环移动（上下方向） - 本地注入到TU/TD
         if abs(current - next_node) == self.config.NUM_COL:
@@ -1649,8 +1630,9 @@ class Network:
             self.fifo_depth_sum["IQ"][direction][in_pos] += depth
             self.fifo_max_depth["IQ"][direction][in_pos] = max(self.fifo_max_depth["IQ"][direction][in_pos], depth)
 
-        # IQ CH_buffer统计 - RS.input_fifos[ch_buffer] (从IP接收)
-        depth = len(rs.input_fifos["ch_buffer"])
+        # IQ CH_buffer统计 - RS.input_fifos[ip_type] (从IP接收)
+        # v2: 遍历所有 IP 类型累加
+        depth = sum(len(rs.input_fifos[ch]) for ch in rs.ch_names)
         if in_pos not in self.fifo_depth_sum["IQ"]["CH_buffer"]:
             self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos] = {}
             self.fifo_max_depth["IQ"]["CH_buffer"][in_pos] = {}
@@ -1670,8 +1652,9 @@ class Network:
             self.fifo_depth_sum["RB"][direction][in_pos] += depth
             self.fifo_max_depth["RB"][direction][in_pos] = max(self.fifo_max_depth["RB"][direction][in_pos], depth)
 
-        # EQ统计 - RS.output_fifos[ch_buffer] (输出到IP)
-        depth = len(rs.output_fifos["ch_buffer"])
+        # EQ统计 - RS.output_fifos[ip_type] (输出到IP)
+        # v2: 遍历所有 IP 类型累加
+        depth = sum(len(rs.output_fifos[ch]) for ch in rs.ch_names)
         if ip_pos not in self.fifo_depth_sum["EQ"]["CH_buffer"]:
             self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos] = {}
             self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos] = {}

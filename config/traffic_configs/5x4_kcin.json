@@ -1,1 +1,21 @@
-{}
+{
+  "e82950b9-720f-4c13-aef5-c3280d1c5a41": {
+    "source_ip": [
+      "节点0-gdma_0"
+    ],
+    "target_ip": [
+      "节点11-ddr_0"
+    ],
+    "speed_gbps": 128.0,
+    "burst_length": 4,
+    "request_type": "R",
+    "end_time_ns": 6000,
+    "id": "e82950b9-720f-4c13-aef5-c3280d1c5a41",
+    "topology": "5x4",
+    "mode": "kcin",
+    "created_at": "2026-01-10T22:31:34.957042",
+    "source_die": null,
+    "target_die": null,
+    "die_pairs": null
+  }
+}

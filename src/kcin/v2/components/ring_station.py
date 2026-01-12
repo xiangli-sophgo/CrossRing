@@ -4,17 +4,18 @@ RingStation 组件 - CrossRing 2.0 核心组件
 统一 EQ（Ejection Queue）、IQ（Injection Queue）、RB（Ring Bridge）功能，
 每个节点一个实例，实现统一仲裁和单周期维度转换。
 
-输入端口（5个）：
-- ch_buffer: 本地 IP 注入
+输入端口（每个IP类型独立 + 4个环方向）：
+- ddr_0, ddr_1, gdma_0, gdma_1, ...: 本地各 IP 类型注入
 - TL, TR: 来自横向环（下环的 flit）
 - TU, TD: 来自纵向环（下环的 flit）
 
-输出端口（5个）：
-- ch_buffer: 本地 IP 弹出
+输出端口（每个IP类型独立 + 4个环方向）：
+- ddr_0, ddr_1, gdma_0, gdma_1, ...: 本地各 IP 类型弹出
 - TL, TR: 到横向环（准备上环）
 - TU, TD: 到纵向环（准备上环）
 
 特性：
+- 每个 IP 类型独立的 channel buffer（不共享）
 - 支持一个周期内完成维度转换（TL/TR ↔ TU/TD）
 - 统一的轮询仲裁
 - 保留 E-Tag 和 I-Tag 机制（通过 CrossPoint 作为内部组件）
@@ -31,9 +32,9 @@ class RingStation:
     RingStation 2.0 - 统一的节点数据流交换组件
     """
 
-    # 所有方向常量
+    # 环方向常量
     RING_DIRECTIONS = ["TL", "TR", "TU", "TD"]
-    ALL_PORTS = ["ch_buffer", "TL", "TR", "TU", "TD"]
+    # 注意: 实际端口列表是动态的 (ch_names + RING_DIRECTIONS)，需要通过实例获取
 
     def __init__(self, node_id: int, config: KCINConfigBase, network_ref=None):
         """
@@ -48,24 +49,25 @@ class RingStation:
         self.config = config
         self.network = network_ref
 
+        # 获取 IP 类型列表
+        self.ch_names = config.CH_NAME_LIST if hasattr(config, 'CH_NAME_LIST') else []
+
         # ========== 输入端 FIFO ==========
-        self.input_fifos = {
-            "ch_buffer": deque(maxlen=config.RS_IN_CH_BUFFER),
-            "TL": deque(maxlen=config.RS_IN_FIFO_DEPTH),
-            "TR": deque(maxlen=config.RS_IN_FIFO_DEPTH),
-            "TU": deque(maxlen=config.RS_IN_FIFO_DEPTH),
-            "TD": deque(maxlen=config.RS_IN_FIFO_DEPTH),
-        }
+        # 每个 IP 类型有独立的 channel buffer
+        self.input_fifos = {}
+        for ch in self.ch_names:
+            self.input_fifos[ch] = deque(maxlen=config.RS_IN_CH_BUFFER)
+        for direction in self.RING_DIRECTIONS:
+            self.input_fifos[direction] = deque(maxlen=config.RS_IN_FIFO_DEPTH)
         self.input_fifos_pre = {k: None for k in self.input_fifos.keys()}
 
         # ========== 输出端 FIFO ==========
-        self.output_fifos = {
-            "ch_buffer": deque(maxlen=config.RS_OUT_CH_BUFFER),
-            "TL": deque(maxlen=config.RS_OUT_FIFO_DEPTH),
-            "TR": deque(maxlen=config.RS_OUT_FIFO_DEPTH),
-            "TU": deque(maxlen=config.RS_OUT_FIFO_DEPTH),
-            "TD": deque(maxlen=config.RS_OUT_FIFO_DEPTH),
-        }
+        # 每个 IP 类型有独立的 channel buffer
+        self.output_fifos = {}
+        for ch in self.ch_names:
+            self.output_fifos[ch] = deque(maxlen=config.RS_OUT_CH_BUFFER)
+        for direction in self.RING_DIRECTIONS:
+            self.output_fifos[direction] = deque(maxlen=config.RS_OUT_FIFO_DEPTH)
         self.output_fifos_pre = {k: None for k in self.output_fifos.keys()}
 
         # ========== 仲裁状态 ==========
@@ -73,13 +75,17 @@ class RingStation:
         self.arb_pointers = {port: 0 for port in self.output_fifos.keys()}
 
         # 定义每个输出端口的候选输入端口
-        self.output_candidates = {
-            "ch_buffer": ["TL", "TR", "TU", "TD"],           # 本地弹出：来自四个环方向
-            "TL": ["ch_buffer", "TR", "TU", "TD"],           # 向左上环
-            "TR": ["ch_buffer", "TL", "TU", "TD"],           # 向右上环
-            "TU": ["ch_buffer", "TL", "TR", "TD"],           # 向上上环
-            "TD": ["ch_buffer", "TL", "TR", "TU"],           # 向下上环
-        }
+        self.output_candidates = {}
+        # 本地弹出（每个IP类型）：来自四个环方向 + 其他 IP 类型（同节点传输）
+        for ch in self.ch_names:
+            # 环方向 + 其他 IP 类型
+            other_ips = [other for other in self.ch_names if other != ch]
+            self.output_candidates[ch] = ["TL", "TR", "TU", "TD"] + other_ips
+        # 上环方向：来自所有IP类型 + 其他环方向
+        other_dirs = {"TL": ["TR", "TU", "TD"], "TR": ["TL", "TU", "TD"],
+                      "TU": ["TL", "TR", "TD"], "TD": ["TL", "TR", "TU"]}
+        for direction in self.RING_DIRECTIONS:
+            self.output_candidates[direction] = list(self.ch_names) + other_dirs[direction]
 
         # ========== 统计 ==========
         self.stats = {
@@ -89,31 +95,71 @@ class RingStation:
             "arbitration_conflicts": 0,
         }
 
+    def register_ip_type(self, ip_type: str):
+        """动态注册 IP 类型，创建对应的 channel buffer
+
+        Args:
+            ip_type: IP 类型名称（如 "ddr_0", "gdma_0"）
+        """
+        if ip_type in self.ch_names:
+            return  # 已注册
+
+        self.ch_names.append(ip_type)
+
+        # 添加输入端 FIFO
+        self.input_fifos[ip_type] = deque(maxlen=self.config.RS_IN_CH_BUFFER)
+        self.input_fifos_pre[ip_type] = None
+
+        # 添加输出端 FIFO
+        self.output_fifos[ip_type] = deque(maxlen=self.config.RS_OUT_CH_BUFFER)
+        self.output_fifos_pre[ip_type] = None
+
+        # 添加仲裁指针
+        self.arb_pointers[ip_type] = 0
+
+        # 更新仲裁候选
+        # 本地弹出：来自四个环方向 + 其他 IP 类型（同节点传输）
+        self.output_candidates[ip_type] = ["TL", "TR", "TU", "TD"]
+        # 添加已注册的其他 IP 类型作为候选输入（支持同节点传输）
+        for other_ip in self.ch_names:
+            if other_ip != ip_type:
+                self.output_candidates[ip_type].append(other_ip)
+                # 同时将新 IP 类型添加到其他 IP 的候选列表中
+                if ip_type not in self.output_candidates[other_ip]:
+                    self.output_candidates[other_ip].append(ip_type)
+        # 更新环方向的候选（添加新的 IP 类型）
+        for direction in self.RING_DIRECTIONS:
+            if ip_type not in self.output_candidates[direction]:
+                self.output_candidates[direction].append(ip_type)
+
     # ------------------------------------------------------------------
     # 核心处理方法
     # ------------------------------------------------------------------
 
     def move_pre_to_fifos(self, cycle: int = 0):
-        """将 pre 缓冲中的 flit 移动到 FIFO"""
-        # 输入端 pre → FIFO
+        """将 pre 缓冲中的 flit 移动到 FIFO（兼容接口）"""
+        self.move_input_pre_to_fifos(cycle)
+        self.move_output_pre_to_fifos(cycle)
+
+    def move_input_pre_to_fifos(self, cycle: int = 0):
+        """将输入端 pre 缓冲中的 flit 移动到 input_fifos"""
         for port, flit in self.input_fifos_pre.items():
             if flit is not None:
                 if len(self.input_fifos[port]) < self.input_fifos[port].maxlen:
-                    # 命名格式: RS_IN_CH, RS_IN_TL, RS_IN_TR, RS_IN_TU, RS_IN_TD
-                    port_name = "CH" if port == "ch_buffer" else port
-                    flit.set_position(f"RS_IN_{port_name}", cycle)
+                    # 命名格式: RS_IN_<port>，例如 RS_IN_ddr_0, RS_IN_TL
+                    flit.set_position(f"RS_IN_{port}", cycle)
                     self.input_fifos[port].append(flit)
-                self.input_fifos_pre[port] = None
+                    self.input_fifos_pre[port] = None  # 只有成功添加后才清空
 
-        # 输出端 pre → FIFO
+    def move_output_pre_to_fifos(self, cycle: int = 0):
+        """将输出端 pre 缓冲中的 flit 移动到 output_fifos"""
         for port, flit in self.output_fifos_pre.items():
             if flit is not None:
                 if len(self.output_fifos[port]) < self.output_fifos[port].maxlen:
-                    # 命名格式: RS_OUT_CH, RS_OUT_TL, RS_OUT_TR, RS_OUT_TU, RS_OUT_TD
-                    port_name = "CH" if port == "ch_buffer" else port
-                    flit.set_position(f"RS_OUT_{port_name}", cycle)
+                    # 命名格式: RS_OUT_<port>，例如 RS_OUT_ddr_0, RS_OUT_TL
+                    flit.set_position(f"RS_OUT_{port}", cycle)
                     self.output_fifos[port].append(flit)
-                self.output_fifos_pre[port] = None
+                    self.output_fifos_pre[port] = None  # 只有成功添加后才清空
 
     def process_cycle(self, cycle: int):
         """
@@ -157,16 +203,20 @@ class RingStation:
         决定 flit 的输出端口
 
         路由决策：
-        1. 到达目的地节点 → ch_buffer（本地弹出）
+        1. 到达目的地节点 → 对应IP类型的 channel（本地弹出）
         2. 需要横向移动 → TL 或 TR
         3. 需要纵向移动 → TU 或 TD
         """
         # 获取最终目的地
         final_dest = flit.path[-1] if flit.path else flit.destination
 
-        # Case 1: 已到达目的地
+        # Case 1: 已到达目的地 → 输出到对应IP类型的 channel
         if self.node_id == final_dest:
-            return "ch_buffer"
+            dest_type = getattr(flit, 'destination_type', None)
+            if dest_type and dest_type in self.output_fifos:
+                return dest_type
+            # 兼容：如果没有 destination_type，尝试第一个匹配的 channel
+            return self.ch_names[0] if self.ch_names else None
 
         # Case 2: 根据 path 决定下一跳
         if flit.path:
@@ -218,7 +268,7 @@ class RingStation:
         elif dest_row != curr_row:
             return "TD" if dest_row > curr_row else "TU"
         else:
-            return "ch_buffer"  # 已到达
+            return None  # 已到达，由调用方处理
 
     def _arbitrate(self, requests: Dict[str, List[Tuple[str, Flit]]], cycle: int) -> Dict[str, Optional[Tuple[str, Flit]]]:
         """
@@ -327,8 +377,7 @@ class RingStation:
                     )
 
             # 更新 flit position（input → output_pre，等待下周期移入 output FIFO）
-            port_name = "CH" if output_port == "ch_buffer" else output_port
-            flit.set_position(f"RS_OUT_{port_name}", cycle)
+            flit.set_position(f"RS_OUT_{output_port}", cycle)
 
             # 添加到输出端口 pre 缓冲
             self.output_fifos_pre[output_port] = flit
@@ -336,9 +385,11 @@ class RingStation:
             # 更新统计
             if self._is_cross_dimension(input_port, output_port):
                 self.stats["cross_dimension_transfers"] += 1
-            if output_port == "ch_buffer":
+            # 本地弹出：输出到 IP 类型（非环方向）
+            if output_port in self.ch_names:
                 self.stats["local_ejects"] += 1
-            if input_port == "ch_buffer":
+            # 本地注入：来自 IP 类型（非环方向）
+            if input_port in self.ch_names:
                 self.stats["local_injects"] += 1
 
     def _is_cross_dimension(self, input_port: str, output_port: str) -> bool:
@@ -376,20 +427,27 @@ class RingStation:
         self.input_fifos_pre[direction] = flit
         return True
 
-    def enqueue_from_local(self, flit: Flit) -> bool:
+    def enqueue_from_local(self, flit: Flit, ip_type: str = None) -> bool:
         """
         从本地 IP 注入的 flit 进入 RS 输入端
 
         Args:
             flit: 本地注入的 flit
+            ip_type: IP 类型（如 "ddr_0", "gdma_0" 等）
 
         Returns:
             bool: 是否成功入队
         """
-        if self.input_fifos_pre["ch_buffer"] is not None:
+        # 确定目标 channel
+        if ip_type is None:
+            ip_type = getattr(flit, 'source_type', None)
+        if ip_type is None or ip_type not in self.input_fifos_pre:
             return False
 
-        self.input_fifos_pre["ch_buffer"] = flit
+        if self.input_fifos_pre[ip_type] is not None:
+            return False
+
+        self.input_fifos_pre[ip_type] = flit
         return True
 
     def dequeue_to_ring(self, direction: str) -> Optional[Flit]:
@@ -409,15 +467,25 @@ class RingStation:
             return self.output_fifos[direction].popleft()
         return None
 
-    def dequeue_to_local(self) -> Optional[Flit]:
+    def dequeue_to_local(self, ip_type: str = None) -> Optional[Flit]:
         """
         从 RS 输出端取出准备弹出到本地 IP 的 flit
+
+        Args:
+            ip_type: IP 类型（如 "ddr_0", "gdma_0" 等）
 
         Returns:
             Flit or None
         """
-        if self.output_fifos["ch_buffer"]:
-            return self.output_fifos["ch_buffer"].popleft()
+        if ip_type is None:
+            # 遍历所有 IP 类型，返回第一个有数据的
+            for ch in self.ch_names:
+                if self.output_fifos[ch]:
+                    return self.output_fifos[ch].popleft()
+            return None
+
+        if ip_type in self.output_fifos and self.output_fifos[ip_type]:
+            return self.output_fifos[ip_type].popleft()
         return None
 
     def peek_output(self, port: str) -> Optional[Flit]:

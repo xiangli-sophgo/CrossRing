@@ -44,7 +44,7 @@ class DataflowMixin:
                         ip_interface.release_completed_sn_tracker(req)
 
     def _move_pre_to_queues(self, network: Network, node_id, network_type: str):
-        """v2统一架构: IP ↔ RingStation 数据流处理
+        """v2统一架构: 所有 pre → FIFO 的移动 + IP ↔ RingStation 数据流处理
 
         Args:
             network: 网络实例
@@ -53,9 +53,11 @@ class DataflowMixin:
         """
         rs = network.ring_stations[node_id]
 
+        # === Phase 1: RS 输入端 pre → input_fifos ===
+        rs.move_input_pre_to_fifos(self.cycle)
+
         # === IP发送 → RS接收 ===
-        # IP.tx_channel_buffer_pre → RS.input_fifos_pre[ch_buffer]
-        # (RingStation._move_pre_to_fifos 负责 input_fifos_pre → input_fifos)
+        # IP.tx_channel_buffer_pre → RS.input_fifos_pre[ip_type]
         for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
             if ip_pos != node_id:
                 continue
@@ -64,38 +66,36 @@ class DataflowMixin:
                 continue
 
             tx_pre = net_info.get("tx_channel_buffer_pre")
-            if tx_pre is not None and rs.can_accept_input("ch_buffer"):
+            if tx_pre is not None and rs.can_accept_input(ip_type):
                 flit = tx_pre
-                flit.set_position("RS_IN_CH", self.cycle)
-                rs.input_fifos_pre["ch_buffer"] = flit
+                flit.set_position(f"RS_IN_{ip_type}", self.cycle)
+                rs.input_fifos_pre[ip_type] = flit
                 net_info["tx_channel_buffer_pre"] = None
                 network.increment_fifo_flit_count("IQ", "CH_buffer", node_id, ip_type)
 
+        # === Phase 3: RS 输出端 pre → output_fifos ===
+        rs.move_output_pre_to_fifos(self.cycle)
+
         # === RS输出 → IP接收 ===
-        # RS.output_fifos[ch_buffer] → IP.rx_channel_buffer
-        if rs.output_fifos["ch_buffer"]:
-            # 先查看队首flit的目标IP类型
-            flit = rs.output_fifos["ch_buffer"][0]
-            target_ip_type = flit.destination_type
+        # RS.output_fifos[ip_type] → IP.rx_channel_buffer
+        for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
+            if ip_pos != node_id:
+                continue
 
-            for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
-                if ip_pos != node_id or ip_type != target_ip_type:
-                    continue
-                net_info = ip_interface.networks.get(network_type)
-                if net_info is None:
-                    continue
+            # 检查该IP类型对应的RS输出队列是否有数据
+            if ip_type not in rs.output_fifos or not rs.output_fifos[ip_type]:
+                continue
 
-                rx_buf = net_info["rx_channel_buffer"]
-                if len(rx_buf) < rx_buf.maxlen:
-                    rs.output_fifos["ch_buffer"].popleft()
-                    flit.set_position("IP_RX_CH", self.cycle)
-                    rx_buf.append(flit)
-                    network.increment_fifo_flit_count("EQ", "CH_buffer", node_id, ip_type)
-                    break  # 每周期只移动一个
+            net_info = ip_interface.networks.get(network_type)
+            if net_info is None:
+                continue
 
-        # v2统一架构: RB_IN/RB_OUT/EQ_IN 由 RingStation 内部处理
-        # CrossPoint._complete_eject → rs_enqueue_from_ring → RS.input_fifos_pre
-        # RingStation._move_pre_to_fifos 负责 input_fifos_pre → input_fifos
+            rx_buf = net_info["rx_channel_buffer"]
+            if len(rx_buf) < rx_buf.maxlen:
+                flit = rs.output_fifos[ip_type].popleft()
+                flit.set_position("IP_RX_CH", self.cycle)
+                rx_buf.append(flit)
+                network.increment_fifo_flit_count("EQ", "CH_buffer", node_id, ip_type)
 
         # 更新FIFO统计
         network.update_fifo_stats_after_move(node_id)

@@ -123,15 +123,6 @@ class StatsMixin:
             # v2 架构：同步 IP 模块的 channel buffer 到 network 对象
             self._sync_channel_buffers_for_visualization()
 
-            # 调试：打印 req_network 节点 0 的 RingStation FIFO 状态
-            rs = self.req_network.ring_stations.get(0)
-            if rs:
-                in_cnt = {k: len(v) for k, v in rs.input_fifos.items() if len(v) > 0}
-                out_cnt = {k: len(v) for k, v in rs.output_fifos.items() if len(v) > 0}
-                in_pre = {k: 1 for k, v in rs.input_fifos_pre.items() if v is not None}
-                out_pre = {k: 1 for k, v in rs.output_fifos_pre.items() if v is not None}
-                if in_cnt or out_cnt or in_pre or out_pre:
-                    print(f"[DEBUG] cycle={self.cycle}, req_net node0: in={in_cnt}, out={out_cnt}, in_pre={in_pre}, out_pre={out_pre}")
 
             try:
                 self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)

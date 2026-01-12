@@ -2,8 +2,8 @@
 PieceVisualizer v2 - 适配 RingStation 架构的节点可视化
 
 v2 架构使用 RingStation 统一 IQ/EQ/RB 功能：
-- input_fifos: ch_buffer, TL, TR, TU, TD
-- output_fifos: ch_buffer, TL, TR, TU, TD
+- input_fifos: 每个 IP 类型独立 (ddr_0, ddr_1, gdma_0, gdma_1, ...) + 环方向 (TL, TR, TU, TD)
+- output_fifos: 每个 IP 类型独立 (ddr_0, ddr_1, gdma_0, gdma_1, ...) + 环方向 (TL, TR, TU, TD)
 """
 
 import matplotlib.pyplot as plt
@@ -66,17 +66,28 @@ class PieceVisualizerV2:
         self.current_highlight_flit = None
         self.node_id = 0
 
+    def _short_name(self, name: str) -> str:
+        """将IP名称缩写: gdma_0 -> G0, ddr_0 -> D0"""
+        if "_" in name:
+            prefix, idx = name.rsplit("_", 1)
+            # 取前缀首字母大写
+            short = prefix[0].upper()
+            return f"{short}{idx}"
+        return name
+
     def _draw_modules(self, ch_names=None):
         """绘制 RingStation + CrossPoint 模块
 
-        布局：
-        - RS左侧: Input FIFOs (通道名 + TL, TR, TU, TD) 纵向排列
-        - RS右侧: Output FIFOs (通道名 + TL, TR, TU, TD) 纵向排列
-        - 每个FIFO横向展开显示槽位
+        布局（按方向分组，每个方向的IN和OUT放在一起）：
+        - 左上角: IP channel buffer (竖向)，每个IP的IN/OUT相邻
+        - 下方: TL, TR (竖向)，每个方向的IN/OUT相邻
+        - 右边: TU, TD (横向)，每个方向的IN/OUT相邻
         """
         square = self.square
         gap = self.gap
         fontsize = self.fontsize
+        fifo_gap = 0.5  # 同方向IN/OUT之间的间距
+        dir_gap = 0.8   # 不同方向之间的间距
 
         # 清空 patch 字典
         self.rs_patches.clear()
@@ -90,110 +101,182 @@ class PieceVisualizerV2:
         if ch_names is None:
             ch_names = self.config.CH_NAME_LIST if hasattr(self.config, "CH_NAME_LIST") else []
 
-        # === RingStation 模块 ===
-        # 输入侧：通道名 + 环方向
-        in_ch_lanes = [f"I_{ch}" for ch in ch_names]  # 按通道名
-        in_ring_lanes = ["I_TL", "I_TR", "I_TU", "I_TD"]
-        in_lanes = in_ch_lanes + in_ring_lanes
-        in_depths = [self.rs_in_ch_depth] * len(ch_names) + [self.rs_in_fifo_depth] * 4
-
-        # 输出侧：通道名 + 环方向
-        out_ch_lanes = [f"O_{ch}" for ch in ch_names]  # 按通道名
-        out_ring_lanes = ["O_TL", "O_TR", "O_TU", "O_TD"]
-        out_lanes = out_ch_lanes + out_ring_lanes
-        out_depths = [self.rs_out_ch_depth] * len(ch_names) + [self.rs_out_fifo_depth] * 4
-
-        # 计算模块尺寸
-        max_in_depth = max(in_depths) if in_depths else 4
-        max_out_depth = max(out_depths) if out_depths else 4
-        lane_height = square + gap
-        num_lanes = max(len(in_lanes), len(out_lanes))
-        rs_height = num_lanes * (lane_height + 0.1) + 0.4
-        rs_width = (max_in_depth + max_out_depth) * (square + gap) + 1.5
-
         RS_x, RS_y = 0, 0
 
-        # 绘制 RS 边框
-        box = Rectangle((RS_x, RS_y), rs_width, rs_height, fill=False)
-        self.ax.add_patch(box)
-        self.ax.text(RS_x + rs_width / 2, RS_y + rs_height + 0.1, "RingStation",
-                     ha="center", va="bottom", fontweight="bold")
+        # === 1. 左上角: IP channel buffer (竖向) ===
+        ip_section_x = RS_x
+        ip_section_y = RS_y + 4
 
-        # 左侧 Input FIFOs
-        for i, (lane, depth) in enumerate(zip(in_lanes, in_depths)):
-            lane_y = RS_y + rs_height - (i + 1) * (lane_height + 0.1)
-            lane_x = RS_x + 0.1
+        for i, ch in enumerate(ch_names):
+            # 每个IP方向的IN和OUT放在一起
+            base_x = ip_section_x + i * (2 * fifo_gap + dir_gap)
 
-            # 标签
-            self.ax.text(lane_x + depth * (square + gap) + 0.05, lane_y + square / 2,
-                         lane, ha="left", va="center", fontsize=fontsize)
-
-            self.rs_patches[lane] = []
-            self.rs_texts[lane] = []
-
-            for s in range(depth):
-                slot_x = lane_x + s * (square + gap)
-                slot_y = lane_y
-                frame = Rectangle((slot_x, slot_y), square, square,
-                                   edgecolor="black", facecolor="none",
-                                   linewidth=self.slot_frame_lw, linestyle="--")
+            # IN
+            lane_in = f"I_{ch}"
+            depth_in = self.rs_in_ch_depth
+            lane_x_in = base_x
+            # 使用缩写显示标签: G0_IN
+            label_in = f"{self._short_name(ch)}_IN"
+            self.ax.text(lane_x_in + square / 2, ip_section_y + depth_in * (square + gap) + 0.05, label_in, ha="center", va="bottom", fontsize=fontsize)
+            self.rs_patches[lane_in] = []
+            self.rs_texts[lane_in] = []
+            for s in range(depth_in):
+                slot_x = lane_x_in
+                # IN: 下方(中心)是第0个
+                slot_y = ip_section_y + s * (square + gap)
+                frame = Rectangle((slot_x, slot_y), square, square, edgecolor="black", facecolor="none", linewidth=self.slot_frame_lw, linestyle="--")
                 self.ax.add_patch(frame)
-                inner = Rectangle((slot_x, slot_y), square, square,
-                                   edgecolor="none", facecolor="none", linewidth=0)
+                inner = Rectangle((slot_x, slot_y), square, square, edgecolor="none", facecolor="none", linewidth=0)
                 self.ax.add_patch(inner)
-                txt = self.ax.text(slot_x + square / 2, slot_y - 0.02, "",
-                                   ha="center", va="top", fontsize=fontsize - 1)
+                txt = self.ax.text(slot_x - 0.02, slot_y + square / 2, "", ha="right", va="center", fontsize=fontsize - 1)
                 txt.set_visible(False)
-                self.rs_patches[lane].append(inner)
-                self.rs_texts[lane].append(txt)
+                self.rs_patches[lane_in].append(inner)
+                self.rs_texts[lane_in].append(txt)
 
-        # 右侧 Output FIFOs
-        for i, (lane, depth) in enumerate(zip(out_lanes, out_depths)):
-            lane_y = RS_y + rs_height - (i + 1) * (lane_height + 0.1)
-            lane_x = RS_x + rs_width - 0.1 - depth * (square + gap)
-
-            # 标签
-            self.ax.text(lane_x - 0.05, lane_y + square / 2,
-                         lane, ha="right", va="center", fontsize=fontsize)
-
-            self.rs_patches[lane] = []
-            self.rs_texts[lane] = []
-
-            for s in range(depth):
-                slot_x = lane_x + s * (square + gap)
-                slot_y = lane_y
-                frame = Rectangle((slot_x, slot_y), square, square,
-                                   edgecolor="black", facecolor="none",
-                                   linewidth=self.slot_frame_lw, linestyle="--")
+            # OUT
+            lane_out = f"O_{ch}"
+            depth_out = self.rs_out_ch_depth
+            lane_x_out = base_x + fifo_gap
+            # 使用缩写显示标签: G0_OUT
+            label_out = f"{self._short_name(ch)}_OUT"
+            self.ax.text(lane_x_out + square / 2, ip_section_y + depth_out * (square + gap) + 0.05, label_out, ha="center", va="bottom", fontsize=fontsize)
+            self.rs_patches[lane_out] = []
+            self.rs_texts[lane_out] = []
+            for s in range(depth_out):
+                slot_x = lane_x_out
+                # OUT: 上方(外面)是第0个
+                slot_y = ip_section_y + (depth_out - 1 - s) * (square + gap)
+                frame = Rectangle((slot_x, slot_y), square, square, edgecolor="black", facecolor="none", linewidth=self.slot_frame_lw, linestyle="--")
                 self.ax.add_patch(frame)
-                inner = Rectangle((slot_x, slot_y), square, square,
-                                   edgecolor="none", facecolor="none", linewidth=0)
+                inner = Rectangle((slot_x, slot_y), square, square, edgecolor="none", facecolor="none", linewidth=0)
                 self.ax.add_patch(inner)
-                txt = self.ax.text(slot_x + square / 2, slot_y - 0.02, "",
-                                   ha="center", va="top", fontsize=fontsize - 1)
+                txt = self.ax.text(slot_x - 0.02, slot_y + square / 2, "", ha="right", va="center", fontsize=fontsize - 1)
                 txt.set_visible(False)
-                self.rs_patches[lane].append(inner)
-                self.rs_texts[lane].append(txt)
+                self.rs_patches[lane_out].append(inner)
+                self.rs_texts[lane_out].append(txt)
 
-        # === CrossPoint Horizontal 模块 ===
+        # === 2. 下方: TL/TR (竖向) ===
+        h_section_x = RS_x
+        h_section_y = RS_y
+
+        for i, direction in enumerate(["TL", "TR"]):
+            base_x = h_section_x + i * (2 * fifo_gap + dir_gap)
+
+            # IN
+            lane_in = f"I_{direction}"
+            depth_in = self.rs_in_fifo_depth
+            lane_x_in = base_x
+            label_in = f"{direction}_IN"
+            self.ax.text(lane_x_in + square / 2, h_section_y + depth_in * (square + gap) + 0.05, label_in, ha="center", va="bottom", fontsize=fontsize)
+            self.rs_patches[lane_in] = []
+            self.rs_texts[lane_in] = []
+            for s in range(depth_in):
+                slot_x = lane_x_in
+                # IN: 上方(中心)是第0个
+                slot_y = h_section_y + (depth_in - 1 - s) * (square + gap)
+                frame = Rectangle((slot_x, slot_y), square, square, edgecolor="black", facecolor="none", linewidth=self.slot_frame_lw, linestyle="--")
+                self.ax.add_patch(frame)
+                inner = Rectangle((slot_x, slot_y), square, square, edgecolor="none", facecolor="none", linewidth=0)
+                self.ax.add_patch(inner)
+                txt = self.ax.text(slot_x - 0.02, slot_y + square / 2, "", ha="right", va="center", fontsize=fontsize - 1)
+                txt.set_visible(False)
+                self.rs_patches[lane_in].append(inner)
+                self.rs_texts[lane_in].append(txt)
+
+            # OUT
+            lane_out = f"O_{direction}"
+            depth_out = self.rs_out_fifo_depth
+            lane_x_out = base_x + fifo_gap
+            label_out = f"{direction}_OUT"
+            self.ax.text(lane_x_out + square / 2, h_section_y + depth_out * (square + gap) + 0.05, label_out, ha="center", va="bottom", fontsize=fontsize)
+            self.rs_patches[lane_out] = []
+            self.rs_texts[lane_out] = []
+            for s in range(depth_out):
+                slot_x = lane_x_out
+                # OUT: 下方(外面)是第0个
+                slot_y = h_section_y + s * (square + gap)
+                frame = Rectangle((slot_x, slot_y), square, square, edgecolor="black", facecolor="none", linewidth=self.slot_frame_lw, linestyle="--")
+                self.ax.add_patch(frame)
+                inner = Rectangle((slot_x, slot_y), square, square, edgecolor="none", facecolor="none", linewidth=0)
+                self.ax.add_patch(inner)
+                txt = self.ax.text(slot_x - 0.02, slot_y + square / 2, "", ha="right", va="center", fontsize=fontsize - 1)
+                txt.set_visible(False)
+                self.rs_patches[lane_out].append(inner)
+                self.rs_texts[lane_out].append(txt)
+
+        # === 3. 右边: TU/TD (横向) ===
+        v_section_x = RS_x + max(len(ch_names), 2) * (2 * fifo_gap + dir_gap) + 0.5
+        v_section_y = RS_y + 2
+
+        for i, direction in enumerate(["TU", "TD"]):
+            base_y = v_section_y + i * (2 * fifo_gap + dir_gap)
+
+            # IN
+            lane_in = f"I_{direction}"
+            depth_in = self.rs_in_fifo_depth
+            lane_y_in = base_y
+            label_in = f"{direction}_IN"
+            self.ax.text(v_section_x - 0.05, lane_y_in + square / 2, label_in, ha="right", va="center", fontsize=fontsize)
+            self.rs_patches[lane_in] = []
+            self.rs_texts[lane_in] = []
+            for s in range(depth_in):
+                # IN: 左边(中心)是第0个
+                slot_x = v_section_x + s * (square + gap)
+                slot_y = lane_y_in
+                frame = Rectangle((slot_x, slot_y), square, square, edgecolor="black", facecolor="none", linewidth=self.slot_frame_lw, linestyle="--")
+                self.ax.add_patch(frame)
+                inner = Rectangle((slot_x, slot_y), square, square, edgecolor="none", facecolor="none", linewidth=0)
+                self.ax.add_patch(inner)
+                txt = self.ax.text(slot_x + square / 2, slot_y - 0.02, "", ha="center", va="top", fontsize=fontsize - 1)
+                txt.set_visible(False)
+                self.rs_patches[lane_in].append(inner)
+                self.rs_texts[lane_in].append(txt)
+
+            # OUT
+            lane_out = f"O_{direction}"
+            depth_out = self.rs_out_fifo_depth
+            lane_y_out = base_y + fifo_gap
+            label_out = f"{direction}_OUT"
+            self.ax.text(v_section_x - 0.05, lane_y_out + square / 2, label_out, ha="right", va="center", fontsize=fontsize)
+            self.rs_patches[lane_out] = []
+            self.rs_texts[lane_out] = []
+            for s in range(depth_out):
+                # OUT: 右边(外面)是第0个
+                slot_x = v_section_x + (depth_out - 1 - s) * (square + gap)
+                slot_y = lane_y_out
+                frame = Rectangle((slot_x, slot_y), square, square, edgecolor="black", facecolor="none", linewidth=self.slot_frame_lw, linestyle="--")
+                self.ax.add_patch(frame)
+                inner = Rectangle((slot_x, slot_y), square, square, edgecolor="none", facecolor="none", linewidth=0)
+                self.ax.add_patch(inner)
+                txt = self.ax.text(slot_x + square / 2, slot_y - 0.02, "", ha="center", va="top", fontsize=fontsize - 1)
+                txt.set_visible(False)
+                self.rs_patches[lane_out].append(inner)
+                self.rs_texts[lane_out].append(txt)
+
+        # === RS 外轮廓框 ===
+        rs_width = v_section_x + self.rs_in_fifo_depth * (square + gap) + 0.3
+        rs_height = ip_section_y + max(self.rs_in_ch_depth, self.rs_out_ch_depth) * (square + gap) + 0.5
+        rs_box = Rectangle((RS_x - 0.2, RS_y - 0.3), rs_width, rs_height, fill=False, edgecolor="blue", linewidth=1.5)
+        self.ax.add_patch(rs_box)
+        self.ax.text(RS_x + rs_width / 2 - 0.2, RS_y + rs_height - 0.1, f"RingStation {self.node_id}", ha="center", va="bottom", fontweight="bold", fontsize=fontsize + 1)
+
+        # === CrossPoint Horizontal 模块 (放在 TL/TR 下方) ===
         cp_square = square * 1.5
         cp_gap = gap * 2
-        CPH_x = RS_x
-        CPH_y = RS_y - 2.5
+        CPH_x = h_section_x
+        CPH_y = h_section_y - 2.5
         cp_h_width = 4 * (cp_square + cp_gap) + 0.4
         cp_h_height = 2 * (cp_square + cp_gap) + 0.4
 
         box_h = Rectangle((CPH_x, CPH_y), cp_h_width, cp_h_height, fill=False)
         self.ax.add_patch(box_h)
-        self.ax.text(CPH_x + cp_h_width / 2, CPH_y + cp_h_height + 0.1, "CP_H",
-                     ha="center", va="bottom", fontweight="bold")
+        self.ax.text(CPH_x + cp_h_width / 2, CPH_y + cp_h_height + 0.1, "CP_H", ha="center", va="bottom", fontweight="bold")
 
         for i, lane in enumerate(["TR", "TL"]):
             lane_y = CPH_y + cp_h_height - (i + 1) * (cp_square + cp_gap) - 0.1
             lane_x = CPH_x + 0.2
 
-            self.ax.text(lane_x - 0.05, lane_y + cp_square / 2,
-                         lane, ha="right", va="center", fontsize=fontsize)
+            self.ax.text(lane_x - 0.05, lane_y + cp_square / 2, lane, ha="right", va="center", fontsize=fontsize)
 
             self.cph_patches[lane] = []
             self.cph_texts[lane] = []
@@ -201,36 +284,30 @@ class PieceVisualizerV2:
             for s in range(2):
                 slot_x = lane_x + s * (cp_square + cp_gap)
                 slot_y = lane_y
-                frame = Rectangle((slot_x, slot_y), cp_square, cp_square,
-                                   edgecolor="black", facecolor="none",
-                                   linewidth=self.slot_frame_lw, linestyle="--")
+                frame = Rectangle((slot_x, slot_y), cp_square, cp_square, edgecolor="black", facecolor="none", linewidth=self.slot_frame_lw, linestyle="--")
                 self.ax.add_patch(frame)
-                inner = Rectangle((slot_x, slot_y), cp_square, cp_square,
-                                   edgecolor="none", facecolor="none", linewidth=0)
+                inner = Rectangle((slot_x, slot_y), cp_square, cp_square, edgecolor="none", facecolor="none", linewidth=0)
                 self.ax.add_patch(inner)
-                txt = self.ax.text(slot_x + cp_square / 2, slot_y + cp_square / 2, "",
-                                   ha="center", va="center", fontsize=fontsize)
+                txt = self.ax.text(slot_x + cp_square / 2, slot_y + cp_square / 2, "", ha="center", va="center", fontsize=fontsize)
                 txt.set_visible(False)
                 self.cph_patches[lane].append(inner)
                 self.cph_texts[lane].append(txt)
 
-        # === CrossPoint Vertical 模块 ===
-        CPV_x = RS_x + rs_width + 0.5
-        CPV_y = RS_y + rs_height / 2 - 1
+        # === CrossPoint Vertical 模块 (放在 TU/TD 右边) ===
+        CPV_x = v_section_x + self.rs_in_fifo_depth * (square + gap) + 0.5
+        CPV_y = v_section_y
         cp_v_width = 2 * (cp_square + cp_gap) + 0.4
         cp_v_height = 2 * (cp_square + cp_gap) + 0.4
 
         box_v = Rectangle((CPV_x, CPV_y), cp_v_width, cp_v_height, fill=False)
         self.ax.add_patch(box_v)
-        self.ax.text(CPV_x + cp_v_width / 2, CPV_y + cp_v_height + 0.1, "CP_V",
-                     ha="center", va="bottom", fontweight="bold")
+        self.ax.text(CPV_x + cp_v_width / 2, CPV_y + cp_v_height + 0.1, "CP_V", ha="center", va="bottom", fontweight="bold")
 
         for i, lane in enumerate(["TD", "TU"]):
             lane_x = CPV_x + 0.2 + i * (cp_square + cp_gap)
             lane_y = CPV_y + 0.2
 
-            self.ax.text(lane_x + cp_square / 2, CPV_y + cp_v_height + 0.02,
-                         lane, ha="center", va="bottom", fontsize=fontsize)
+            self.ax.text(lane_x + cp_square / 2, CPV_y + cp_v_height + 0.02, lane, ha="center", va="bottom", fontsize=fontsize)
 
             self.cpv_patches[lane] = []
             self.cpv_texts[lane] = []
@@ -238,15 +315,11 @@ class PieceVisualizerV2:
             for s in range(2):
                 slot_x = lane_x
                 slot_y = lane_y + s * (cp_square + cp_gap)
-                frame = Rectangle((slot_x, slot_y), cp_square, cp_square,
-                                   edgecolor="black", facecolor="none",
-                                   linewidth=self.slot_frame_lw, linestyle="--")
+                frame = Rectangle((slot_x, slot_y), cp_square, cp_square, edgecolor="black", facecolor="none", linewidth=self.slot_frame_lw, linestyle="--")
                 self.ax.add_patch(frame)
-                inner = Rectangle((slot_x, slot_y), cp_square, cp_square,
-                                   edgecolor="none", facecolor="none", linewidth=0)
+                inner = Rectangle((slot_x, slot_y), cp_square, cp_square, edgecolor="none", facecolor="none", linewidth=0)
                 self.ax.add_patch(inner)
-                txt = self.ax.text(slot_x + cp_square / 2, slot_y + cp_square / 2, "",
-                                   ha="center", va="center", fontsize=fontsize)
+                txt = self.ax.text(slot_x + cp_square / 2, slot_y + cp_square / 2, "", ha="center", va="center", fontsize=fontsize)
                 txt.set_visible(False)
                 self.cpv_patches[lane].append(inner)
                 self.cpv_texts[lane].append(txt)
@@ -279,43 +352,18 @@ class PieceVisualizerV2:
         CP_H = network.cross_point["horizontal"]
         CP_V = network.cross_point["vertical"]
 
-        # 获取 channel buffer 数据（由 stats_mixin 同步）
-        IQ_Ch = getattr(network, "IQ_channel_buffer", {})
-        EQ_Ch = getattr(network, "EQ_channel_buffer", {})
-
-        # 调试：打印 RingStation FIFO 详情
-        net_type = getattr(network, 'network_type', 'unknown')
-        in_total = sum(len(v) for v in rs.input_fifos.values())
-        out_total = sum(len(v) for v in rs.output_fifos.values())
-        if in_total > 0 or out_total > 0:
-            print(f"\n[PieceVis] node={node_id}, net_type={net_type}")
-            print(f"  input_fifos:")
-            for k, v in rs.input_fifos.items():
-                if len(v) > 0:
-                    print(f"    {k}: {[str(f) for f in v]}")
-            print(f"  output_fifos:")
-            for k, v in rs.output_fifos.items():
-                if len(v) > 0:
-                    print(f"    {k}: {[str(f) for f in v]}")
-
         # lane名到FIFO的映射
         for lane, patches in self.rs_patches.items():
             if lane.startswith("I_"):
                 key = lane[2:]  # 去掉 I_ 前缀
-                if key in ["TL", "TR", "TU", "TD"]:
-                    # 环方向 FIFO - 从 RingStation 获取
-                    q = list(rs.input_fifos.get(key, []))
-                else:
-                    # 通道 buffer - 从 IQ_channel_buffer 获取
-                    q = list(IQ_Ch.get(key, {}).get(node_id, []))
+                # v2: ch_buffer 或环方向
+                q = list(rs.input_fifos.get(key, []))
+                # q = q[::-1]  # IN 方向颠倒显示
             elif lane.startswith("O_"):
                 key = lane[2:]  # 去掉 O_ 前缀
-                if key in ["TL", "TR", "TU", "TD"]:
-                    # 环方向 FIFO - 从 RingStation 获取
-                    q = list(rs.output_fifos.get(key, []))
-                else:
-                    # 通道 buffer - 从 EQ_channel_buffer 获取
-                    q = list(EQ_Ch.get(key, {}).get(node_id, []))
+                # v2: ch_buffer 或环方向
+                q = list(rs.output_fifos.get(key, []))
+                # q = q[::-1]  # OUT 方向颠倒显示
             else:
                 continue
             self._update_patches(patches, self.rs_texts[lane], q)

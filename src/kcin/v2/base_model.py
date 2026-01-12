@@ -657,6 +657,12 @@ class BaseModel(StatsMixin, DataflowMixin):
                 self.routes,
             )
 
+        # 在所有网络的 RingStation 中注册此 IP 类型
+        for network in [self.req_network, self.rsp_network, self.data_network]:
+            rs = network.ring_stations.get(node_id)
+            if rs:
+                rs.register_ip_type(ip_type)
+
     def _initialize_per_node_etag_stats(self):
         """Initialize per-node FIFO ETag statistics dictionaries."""
         # Get all IP positions from the request network
