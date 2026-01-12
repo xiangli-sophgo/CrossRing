@@ -37,6 +37,7 @@ class PieceVisualizerV1:
         self.slice_per_link_vertical = config.SLICE_PER_LINK_VERTICAL
         self.IQ_CH_depth = config.IQ_CH_FIFO_DEPTH
         self.EQ_CH_depth = config.EQ_CH_FIFO_DEPTH
+        self.CP_slice_count = config.CP_SLICE_COUNT
 
         # 几何参数
         self.square = 0.3
@@ -54,7 +55,9 @@ class PieceVisualizerV1:
         self.inject_module_size = (height, weight)
         self.eject_module_size = (weight, height)
         self.rb_module_size = (height, height)
-        self.cp_module_size = (2, 5)
+        # CP模块尺寸根据slice数量动态计算
+        cp_width = max(5, self.CP_slice_count * 1.5)
+        self.cp_module_size = (2, cp_width)
 
         if ax is None:
             self.fig, self.ax = plt.subplots(figsize=(10, 8))
@@ -129,7 +132,7 @@ class PieceVisualizerV1:
         cross_point_horizontal_config = dict(
             title="CP",
             lanes=["TR", "TL"],
-            depths=[2, 2],
+            depths=[self.CP_slice_count, self.CP_slice_count],
             orientations=["horizontal", "horizontal"],
             h_pos=["bottom", "bottom"],
             v_pos=["right", "right"],
@@ -140,7 +143,7 @@ class PieceVisualizerV1:
         cross_point_vertical_config = dict(
             title="CP",
             lanes=["TD", "TU"],
-            depths=[2, 2],
+            depths=[self.CP_slice_count, self.CP_slice_count],
             orientations=["vertical", "vertical"],
             h_pos=["bottom", "bottom"],
             v_pos=["left", "left"],
@@ -450,8 +453,9 @@ class PieceVisualizerV1:
         RB = network.ring_bridge
         IQ_Ch = network.IQ_channel_buffer
         EQ_Ch = network.EQ_channel_buffer
-        CP_H = network.cross_point["horizontal"]
-        CP_V = network.cross_point["vertical"]
+        # 从crosspoints获取CP数据
+        CP_H = network.crosspoints[node_id]["horizontal"].cp_slices
+        CP_V = network.crosspoints[node_id]["vertical"].cp_slices
 
         # Inject Queue
         for lane, patches in self.iq_patches.items():
@@ -498,14 +502,14 @@ class PieceVisualizerV1:
 
         # CrossPoint Horizontal
         for lane, patches in self.cph_patches.items():
-            q = CP_H.get(self.node_id, [])[lane]
+            q = CP_H.get(lane, [])
             if lane == "TL":
                 q = q[::-1]
             self._update_patches(patches, self.cph_texts[lane], q)
 
         # CrossPoint Vertical
         for lane, patches in self.cpv_patches.items():
-            q = CP_V.get(self.node_id, [])[lane]
+            q = CP_V.get(lane, [])
             if lane == "TD":
                 q = q[::-1]
             self._update_patches(patches, self.cpv_texts[lane], q)

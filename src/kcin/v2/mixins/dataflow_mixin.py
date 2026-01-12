@@ -492,20 +492,17 @@ class DataflowMixin:
         return flits
 
     def _network_cycle_process(self, network: Network, flits, flit_type: str):
-        """v2架构：网络周期处理
+        """v2架构：网络周期处理（使用RingSlice环形链表）
 
         处理顺序：
         1. IP.tx_channel_buffer → RS.input_fifos[ch_buffer]（本地注入，由_move_pre_to_queues处理）
         2. RS处理（仲裁 + 内部路由）
-        3. CP slice处理（内部移动 + 边界环回 + 输出到Link）
-        4. Link传输
-        5. CP下环处理（Link → RS，在Link传输中通过_handle_flit完成）
-        6. CP上环处理（RS → CP slice / Link）
-        7. RS.output_fifos[ch_buffer] → IP.rx_channel_buffer（本地弹出，由_move_pre_to_queues处理）
+        3. 环形链表处理（移动 + 下环 + 上环）
+        4. RS.output_fifos[ch_buffer] → IP.rx_channel_buffer（本地弹出，由_move_pre_to_queues处理）
 
         Args:
             network: 网络实例
-            flits: 当前网络中的flit列表
+            flits: 当前网络中的flit列表（新系统中flit存储在RingSlice中）
             flit_type: flit类型 ("req" / "rsp" / "data")
 
         Returns:
@@ -514,17 +511,12 @@ class DataflowMixin:
         # 1. RS处理（内部仲裁和路由）
         network.process_ring_stations(self.cycle)
 
-        # 2. Link传输（先处理已在Link上的flit）
-        flits = self._Link_process(network, flits)
+        # 2. 环形链表处理（移动 + 下环 + 上环）
+        network.process_all_rings(self.cycle)
 
-        # 3. CP slice处理（内部移动 + 边界环回 + 输出到Link）
-        # 放在Link处理之后，避免同一周期内flit被移动两次
-        network.process_cp_slices(self.cycle)
-
-        # 4. CP下环处理已在Link传输中完成（通过_handle_flit）
-
-        # 5. CP上环处理（从RS输出）
-        flits = self._CP_process(network, flits, flit_type)
+        # 3. 更新ITag和CrossPoint状态
+        network.update_excess_ITag()
+        network.update_cross_point()
 
         # IP↔RS 数据流在 _move_pre_to_queues 中统一处理
         return flits

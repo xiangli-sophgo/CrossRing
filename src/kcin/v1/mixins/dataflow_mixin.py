@@ -102,6 +102,10 @@ class DataflowMixin:
                 network.increment_fifo_flit_count("RB", direction, node_id)
                 queue_pre[node_id] = None
 
+                # 释放Entry（延迟到下一个cycle）
+                if hasattr(flit, 'used_entry_level') and flit.used_entry_level in ("T0", "T1", "T2"):
+                    network.RB_pending_entry_release[direction][node_id].append((flit.used_entry_level, self.cycle + 1))
+
         # RB_OUT_PRE → RB_OUT
         for fifo_pos in ("EQ", "TU", "TD"):
             queue_pre = network.ring_bridge_pre[fifo_pos]
@@ -128,6 +132,10 @@ class DataflowMixin:
                 queue[node_id].append(flit)
                 network.increment_fifo_flit_count("EQ", fifo_pos, node_id)
                 queue_pre[node_id] = None
+
+                # 释放Entry（延迟到下一个cycle）
+                if hasattr(flit, 'used_entry_level') and flit.used_entry_level in ("T0", "T1", "T2"):
+                    network.EQ_pending_entry_release[fifo_pos][node_id].append((flit.used_entry_level, self.cycle + 1))
 
         # EQ_arbiter_input_fifo_pre → EQ_arbiter_input_fifo
         for port_name in ["TU", "TD", "IQ", "RB"]:
@@ -588,14 +596,13 @@ class DataflowMixin:
         # 1b. IQ模块：IQ仲裁（从仲裁输入FIFO读取）
         self._IQ_process(network, flit_type)
 
-        # 2. Link模块：Link传输（先处理已在Link上的flit）
-        flits = self._Link_process(network, flits)
+        # 2. 统一两阶段处理（Link + CP）
+        # Plan阶段：计算所有flit的下一位置
+        network.plan_all_moves(self.cycle, flits)
+        # Execute阶段：执行所有移动
+        flits = network.execute_all_moves(self.cycle, flits)
 
-        # 3. CP slice处理（内部移动 + 边界环回 + 输出到Link）
-        # 放在Link处理之后，避免同一周期内flit被移动两次
-        network.process_cp_slices(self.cycle)
-
-        # 4. RB模块：Ring Bridge仲裁
+        # 3. RB模块：Ring Bridge仲裁
         self._RB_process(network)
 
         # 5a. 移动EQ输入端口到仲裁输入FIFO

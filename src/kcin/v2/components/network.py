@@ -887,16 +887,21 @@ class Network:
                 if cp_out_is_link:
                     out_slice = RingSlice(RingSlice.LINK, node, "TR")
                     out_slice.is_cp_out = True
+                    out_slice.link_index = 0
                     all_slices.append(out_slice)
                     self.cp_out_slices[(node, "TR")] = out_slice
-                    for _ in range(link_slice_count - 1):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TR"))
+                    for link_idx in range(1, link_slice_count):
+                        s = RingSlice(RingSlice.LINK, node, "TR")
+                        s.link_index = link_idx
+                        all_slices.append(s)
                 else:
                     out_slice = RingSlice(RingSlice.CP_OUT, node, "TR")
                     all_slices.append(out_slice)
                     self.cp_out_slices[(node, "TR")] = out_slice
-                    for _ in range(link_slice_count):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TR"))
+                    for link_idx in range(link_slice_count):
+                        s = RingSlice(RingSlice.LINK, node, "TR")
+                        s.link_index = link_idx
+                        all_slices.append(s)
 
         tl_start_index = len(all_slices)
 
@@ -913,16 +918,21 @@ class Network:
                 if cp_out_is_link:
                     out_slice = RingSlice(RingSlice.LINK, node, "TL")
                     out_slice.is_cp_out = True
+                    out_slice.link_index = 0
                     all_slices.append(out_slice)
                     self.cp_out_slices[(node, "TL")] = out_slice
-                    for _ in range(link_slice_count - 1):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TL"))
+                    for link_idx in range(1, link_slice_count):
+                        s = RingSlice(RingSlice.LINK, node, "TL")
+                        s.link_index = link_idx
+                        all_slices.append(s)
                 else:
                     out_slice = RingSlice(RingSlice.CP_OUT, node, "TL")
                     all_slices.append(out_slice)
                     self.cp_out_slices[(node, "TL")] = out_slice
-                    for _ in range(link_slice_count):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TL"))
+                    for link_idx in range(link_slice_count):
+                        s = RingSlice(RingSlice.LINK, node, "TL")
+                        s.link_index = link_idx
+                        all_slices.append(s)
 
         for i in range(len(all_slices)):
             all_slices[i].next = all_slices[(i + 1) % len(all_slices)]
@@ -963,16 +973,21 @@ class Network:
                 if cp_out_is_link:
                     out_slice = RingSlice(RingSlice.LINK, node, "TD")
                     out_slice.is_cp_out = True
+                    out_slice.link_index = 0
                     all_slices.append(out_slice)
                     self.cp_out_slices[(node, "TD")] = out_slice
-                    for _ in range(link_slice_count - 1):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TD"))
+                    for link_idx in range(1, link_slice_count):
+                        s = RingSlice(RingSlice.LINK, node, "TD")
+                        s.link_index = link_idx
+                        all_slices.append(s)
                 else:
                     out_slice = RingSlice(RingSlice.CP_OUT, node, "TD")
                     all_slices.append(out_slice)
                     self.cp_out_slices[(node, "TD")] = out_slice
-                    for _ in range(link_slice_count):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TD"))
+                    for link_idx in range(link_slice_count):
+                        s = RingSlice(RingSlice.LINK, node, "TD")
+                        s.link_index = link_idx
+                        all_slices.append(s)
 
         tu_start_index = len(all_slices)
 
@@ -989,16 +1004,21 @@ class Network:
                 if cp_out_is_link:
                     out_slice = RingSlice(RingSlice.LINK, node, "TU")
                     out_slice.is_cp_out = True
+                    out_slice.link_index = 0
                     all_slices.append(out_slice)
                     self.cp_out_slices[(node, "TU")] = out_slice
-                    for _ in range(link_slice_count - 1):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TU"))
+                    for link_idx in range(1, link_slice_count):
+                        s = RingSlice(RingSlice.LINK, node, "TU")
+                        s.link_index = link_idx
+                        all_slices.append(s)
                 else:
                     out_slice = RingSlice(RingSlice.CP_OUT, node, "TU")
                     all_slices.append(out_slice)
                     self.cp_out_slices[(node, "TU")] = out_slice
-                    for _ in range(link_slice_count):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TU"))
+                    for link_idx in range(link_slice_count):
+                        s = RingSlice(RingSlice.LINK, node, "TU")
+                        s.link_index = link_idx
+                        all_slices.append(s)
 
         for i in range(len(all_slices)):
             all_slices[i].next = all_slices[(i + 1) % len(all_slices)]
@@ -1046,7 +1066,6 @@ class Network:
             if next_slice.flit is None:
                 next_slice.flit = flit
                 s.flit = None
-                flit.current_slice = next_slice
                 self._update_flit_position(flit, next_slice, cycle)
 
     def process_ring_injection(self, ring_slices: list, cycle: int):
@@ -1058,7 +1077,7 @@ class Network:
                 continue
 
             flit = self._get_pending_inject_flit(s.node_id, s.direction)
-            if flit and self._can_inject(flit, s):
+            if flit and self._can_inject(flit, s, cycle):
                 self._execute_inject(flit, s, cycle)
 
     def process_all_rings(self, cycle: int):
@@ -1071,16 +1090,128 @@ class Network:
             self.process_ring_movement(ring, cycle)
             self.process_ring_injection(ring, cycle)
 
+        # 同步RingSlice数据到links字典（用于可视化）
+        self._sync_links_from_ring_slices()
+
+    def _sync_links_from_ring_slices(self):
+        """从RingSlice同步数据到links字典和cp_slices（用于可视化兼容）"""
+        # 清空所有links
+        for link_key in self.links:
+            for i in range(len(self.links[link_key])):
+                self.links[link_key][i] = None
+
+        # 清空所有crosspoints的cp_slices
+        for node_id in self.crosspoints:
+            for cp_type in ["horizontal", "vertical"]:
+                cp = self.crosspoints[node_id][cp_type]
+                for direction in cp.cp_slices:
+                    for i in range(len(cp.cp_slices[direction])):
+                        cp.cp_slices[direction][i] = None
+
+        # 从横向环同步
+        for row, ring in self.horizontal_rings.items():
+            for s in ring:
+                node_id = s.node_id
+                direction = s.direction
+                flit = s.flit
+
+                if s.slice_type == RingSlice.LINK and flit is not None:
+                    # 同步到links
+                    if direction == "TR":
+                        next_node = node_id + 1
+                    else:  # TL
+                        next_node = node_id - 1
+                    link_key = (node_id, next_node)
+                    if link_key in self.links:
+                        link_idx = s.link_index
+                        if link_idx < len(self.links[link_key]):
+                            self.links[link_key][link_idx] = flit
+
+                elif s.slice_type in [RingSlice.CP_IN, RingSlice.CP_OUT, RingSlice.CP_INTERNAL] and flit is not None:
+                    # 同步到cp_slices
+                    cp = self.crosspoints[node_id]["horizontal"]
+                    # 计算slice索引：CP_INTERNAL在前，CP_IN在中间，CP_OUT在后
+                    cp_slices = cp.cp_slices.get(direction, [])
+                    if s.slice_type == RingSlice.CP_IN:
+                        # CP_IN 在倒数第二个位置
+                        idx = len(cp_slices) - 2 if len(cp_slices) >= 2 else 0
+                    elif s.slice_type == RingSlice.CP_OUT:
+                        # CP_OUT 在最后一个位置
+                        idx = len(cp_slices) - 1 if len(cp_slices) >= 1 else 0
+                    else:
+                        # CP_INTERNAL 在开头
+                        idx = 0
+                    if 0 <= idx < len(cp_slices):
+                        cp_slices[idx] = flit
+
+        # 从纵向环同步
+        for col, ring in self.vertical_rings.items():
+            for s in ring:
+                node_id = s.node_id
+                direction = s.direction
+                flit = s.flit
+                num_col = self.config.NUM_COL
+
+                if s.slice_type == RingSlice.LINK and flit is not None:
+                    # 同步到links
+                    if direction == "TD":
+                        next_node = node_id + num_col
+                    else:  # TU
+                        next_node = node_id - num_col
+                    link_key = (node_id, next_node)
+                    if link_key in self.links:
+                        link_idx = s.link_index
+                        if link_idx < len(self.links[link_key]):
+                            self.links[link_key][link_idx] = flit
+
+                elif s.slice_type in [RingSlice.CP_IN, RingSlice.CP_OUT, RingSlice.CP_INTERNAL] and flit is not None:
+                    # 同步到cp_slices
+                    cp = self.crosspoints[node_id]["vertical"]
+                    cp_slices = cp.cp_slices.get(direction, [])
+                    if s.slice_type == RingSlice.CP_IN:
+                        idx = len(cp_slices) - 2 if len(cp_slices) >= 2 else 0
+                    elif s.slice_type == RingSlice.CP_OUT:
+                        idx = len(cp_slices) - 1 if len(cp_slices) >= 1 else 0
+                    else:
+                        idx = 0
+                    if 0 <= idx < len(cp_slices):
+                        cp_slices[idx] = flit
+
     def _should_eject(self, flit, node_id: int, direction: str) -> tuple:
         """
-        判断flit是否需要在当前节点下环
+        判断flit是否需要在当前节点下环（简化版本，不依赖flit.current_link）
 
         Returns:
             tuple: (是否下环, 下环目标, 下环方向)
         """
-        cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
+        is_horizontal = direction in ["TL", "TR"]
+        cp_type = "horizontal" if is_horizontal else "vertical"
         cp = self.crosspoints[node_id][cp_type]
-        return cp.should_eject_flit(flit, node_id)
+
+        # 获取flit的最终目标和路径中的下一跳
+        try:
+            path = flit.path
+            final_dest = path[-1]
+            current_idx = path.index(node_id)
+            next_node = path[current_idx + 1] if current_idx + 1 < len(path) else final_dest
+        except (ValueError, IndexError):
+            # 当前节点不在路径中或路径异常
+            if node_id == flit.path[-1]:
+                # 到达最终目标，需要下环
+                return True, "RB" if is_horizontal else "EQ", direction
+            return False, "", ""
+
+        # 判断是否需要下环
+        if is_horizontal:
+            # 水平CP：检查是否需要转到纵向环
+            if cp._needs_vertical_move(node_id, next_node):
+                return True, "RB", direction
+        else:
+            # 纵向CP：检查是否到达最终目标
+            if node_id == final_dest:
+                return True, "EQ", direction
+
+        return False, "", ""
 
     def _try_eject(self, flit, node_id: int, direction: str, eject_target: str, cycle: int) -> bool:
         """尝试下环到RingStation"""
@@ -1110,7 +1241,7 @@ class Network:
             return output_fifo[0]
         return None
 
-    def _can_inject(self, flit, ring_slice) -> bool:
+    def _can_inject(self, flit, ring_slice, cycle: int) -> bool:
         """检查是否可以上环"""
         if ring_slice.flit is not None:
             return False
@@ -1137,12 +1268,13 @@ class Network:
         else:
             link = (node_id, next_node)
 
-        return cp._can_inject_to_link(flit, link, direction, self.cycle)
+        return cp._can_inject_to_link(flit, link, direction, cycle)
 
     def _execute_inject(self, flit, ring_slice, cycle: int):
         """执行上环操作"""
         node_id = ring_slice.node_id
         direction = ring_slice.direction
+        is_horizontal = direction in ["TL", "TR"]
 
         # 1. 从RingStation输出FIFO弹出
         rs = self.ring_stations.get(node_id)
@@ -1153,10 +1285,28 @@ class Network:
 
         # 2. 放入RingSlice
         ring_slice.flit = flit
-        flit.current_slice = ring_slice
 
-        # 3. 处理ITag释放
-        cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
+        # 3. 统计更新
+        if is_horizontal:
+            self.inject_num += 1
+
+        # 4. 首次上环分配order_id
+        if flit.src_dest_order_id == -1:
+            flit.src_dest_order_id = Flit.get_next_order_id(
+                flit.source, flit.source_type,
+                flit.destination, flit.destination_type,
+                flit.flit_type.upper(),
+                self.config.ORDERING_GRANULARITY,
+                getattr(self.config, "DIE_ID", None)
+            )
+
+        # 5. 纵向上环更新位置
+        if not is_horizontal:
+            flit.current_position = node_id
+            flit.path_index += 1
+
+        # 6. 处理ITag释放
+        cp_type = "horizontal" if is_horizontal else "vertical"
         cp = self.crosspoints[node_id][cp_type]
 
         num_col = self.config.NUM_COL
@@ -1178,7 +1328,6 @@ class Network:
                 cp.tagged_counter[direction][node_id] -= 1
 
         # 清除I-Tag标记
-        is_horizontal = direction in ["TL", "TR"]
         if is_horizontal and hasattr(flit, 'itag_h') and flit.itag_h:
             flit.itag_h = False
         elif not is_horizontal and hasattr(flit, 'itag_v') and flit.itag_v:
@@ -1186,12 +1335,39 @@ class Network:
 
         flit.ETag_priority = "T2"
 
-        # 4. 更新位置
+        # 7. 更新位置
         self._update_flit_position(flit, ring_slice, cycle)
 
     def _update_flit_position(self, flit, ring_slice, cycle: int):
-        """更新flit位置显示"""
-        pos = ring_slice.get_position_str()
+        """更新flit位置显示（与v1格式一致）"""
+        from src.utils.ring_slice import RingSlice
+
+        node_id = ring_slice.node_id
+        direction = ring_slice.direction
+        slice_type = ring_slice.slice_type
+
+        if slice_type == RingSlice.LINK:
+            # Link格式：node_id->next_node:link_index
+            num_col = self.config.NUM_COL
+            if direction == "TR":
+                next_node = node_id + 1
+            elif direction == "TL":
+                next_node = node_id - 1
+            elif direction == "TD":
+                next_node = node_id + num_col
+            else:  # TU
+                next_node = node_id - num_col
+            link_idx = ring_slice.link_index
+            pos = f"{node_id}->{next_node}:{link_idx}"
+        elif slice_type in [RingSlice.CP_IN, RingSlice.CP_OUT, RingSlice.CP_INTERNAL]:
+            # CP格式：CP_H 或 CP_V
+            if direction in ["TL", "TR"]:
+                pos = "CP_H"
+            else:
+                pos = "CP_V"
+        else:
+            pos = ring_slice.get_position_str()
+
         flit.set_position(pos, cycle)
 
     def update_cross_point(self):

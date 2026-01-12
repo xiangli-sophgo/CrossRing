@@ -248,6 +248,9 @@ class NetworkLinkVisualizer:
                 ring_bridge=meta["ring_bridge"],
                 config=self.networks[self.selected_network_index].config,
                 cross_point=meta["cross_point"],
+                IQ_arbiter_input_fifo=meta.get("IQ_arbiter_input_fifo", {}),
+                EQ_arbiter_input_fifo=meta.get("EQ_arbiter_input_fifo", {}),
+                crosspoints=meta.get("crosspoints", {}),
             )
             self.piece_vis.draw_piece_for_node(self._selected_node, fake_net)
         else:
@@ -487,8 +490,8 @@ class NetworkLinkVisualizer:
         # Link长度
         link_length = np.hypot(link_end_x - link_start_x, link_end_y - link_start_y)
 
-        # 计算slices排列区域
-        total_length = (slice_num - 2) * slot_size + (slice_num - 3) * slot_spacing
+        # 计算slices排列区域（显示全部slice）
+        total_length = slice_num * slot_size + (slice_num - 1) * slot_spacing
         start_offset = (link_length - total_length) / 2
 
         # 节点对，用于双向link对齐
@@ -518,9 +521,9 @@ class NetworkLinkVisualizer:
             slot_positions_list = []
 
             for side_name, side_sign in [("side1", 1), ("side2", -1)]:
-                for i in range(1, slice_num - 1):  # 跳过首尾
+                for i in range(slice_num):  # 显示全部slice
                     # 沿link方向的位置
-                    along_dist = start_offset + (i - 1) * (slot_size + slot_spacing)
+                    along_dist = start_offset + i * (slot_size + slot_spacing)
                     progress = along_dist / link_length if link_length > 0 else 0
 
                     center_x = link_start_x + progress * (link_end_x - link_start_x)
@@ -613,6 +616,15 @@ class NetworkLinkVisualizer:
                     meta["eject_queues"] = copy.deepcopy(net.eject_queues)
                     meta["ring_bridge"] = copy.deepcopy(net.ring_bridge)
                     meta["IQ_arbiter_input_fifo"] = copy.deepcopy(getattr(net, "IQ_arbiter_input_fifo", {}))
+                    meta["EQ_arbiter_input_fifo"] = copy.deepcopy(getattr(net, "EQ_arbiter_input_fifo", {}))
+                    # 保存crosspoints的cp_slices
+                    crosspoints_snapshot = {}
+                    for node_id, cps in net.crosspoints.items():
+                        crosspoints_snapshot[node_id] = {
+                            "horizontal": SimpleNamespace(cp_slices=copy.deepcopy(cps["horizontal"].cp_slices)),
+                            "vertical": SimpleNamespace(cp_slices=copy.deepcopy(cps["vertical"].cp_slices)),
+                        }
+                    meta["crosspoints"] = crosspoints_snapshot
                 self.histories[i].append((cycle, snap, meta))
 
         # 渲染当前选中网络的快照
@@ -688,6 +700,8 @@ class NetworkLinkVisualizer:
                     cross_point=meta["cross_point"],
                     links_tag=meta["links_tag"],
                     IQ_arbiter_input_fifo=meta.get("IQ_arbiter_input_fifo", {}),
+                    EQ_arbiter_input_fifo=meta.get("EQ_arbiter_input_fifo", {}),
+                    crosspoints=meta.get("crosspoints", {}),
                     config=self.networks[self.selected_network_index].config,
                 )
             self.piece_vis.draw_piece_for_node(self._selected_node, fake_net)
@@ -825,12 +839,12 @@ class NetworkLinkVisualizer:
                 # 反向link需要反转slot顺序
                 target_slots = list(reversed(target_slots))
 
-            num_slices = len(flit_list) - 2
+            num_slices = len(flit_list)
             if num_slices == 0 or num_slices != len(target_slots):
                 continue
 
             flit_artists = []
-            for i, flit in enumerate(flit_list[1:-1]):
+            for i, flit in enumerate(flit_list):
                 if i >= len(target_slots):
                     break
 
@@ -843,7 +857,7 @@ class NetworkLinkVisualizer:
                 y = slot_y + slot_size / 2
 
                 # 获取tag信息
-                idx_slice = i + 1
+                idx_slice = i  # 现在显示全部slice，索引直接对应
                 tag = None
                 tag_list = tags_dict.get((src, dest), None)
                 if isinstance(tag_list, (list, tuple)) and len(tag_list) > idx_slice:

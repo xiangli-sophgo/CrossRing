@@ -1046,17 +1046,13 @@ class Network:
         cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
         cp = self.crosspoints[node_id][cp_type]
 
-        # 根据方向确定队列和容量
+        # 检查pre缓冲是否空闲
         if direction in ["TL", "TR"]:
-            queue = self.ring_bridge[direction][node_id]
-            capacity = self.config.RB_IN_FIFO_DEPTH
+            if self.ring_bridge_pre[direction][node_id] is not None:
+                return False  # pre缓冲被占用
         else:
-            queue = self.eject_queues[direction][node_id]
-            capacity = self.config.EQ_IN_FIFO_DEPTH
-
-        # 检查队列容量
-        if len(queue) >= capacity:
-            return False
+            if self.eject_queues_in_pre[direction][node_id] is not None:
+                return False  # pre缓冲被占用
 
         # 检查是否有对应等级的entry可用
         if not cp._has_available_entry_for_flit(flit, direction, node_id):
@@ -1099,14 +1095,14 @@ class Network:
         flit.current_link = None
         flit.current_seat_index = -1
 
+        # 放入pre缓冲
         if direction in ["TL", "TR"]:
+            self.ring_bridge_pre[direction][node_id] = flit
             flit.set_position(f"RB_{direction}_N{node_id}", cycle)
         else:
+            self.eject_queues_in_pre[direction][node_id] = flit
             flit.is_arrive = False
             flit.set_position(f"EQ_{direction}", cycle)
-
-        # 放入队列
-        queue.append(flit)
 
         # 占用Entry
         cp._occupy_entry(direction, node_id, entry_to_use, flit)
@@ -1261,10 +1257,14 @@ class Network:
         """
         处理所有 CP slice 的 flit 移动
 
-        包括：
-        1. CP slice 内部移动（从 slice_0 到 out_slice）
+        包括（按执行顺序）：
+        1. 非边缘 CP 输出到 Link（先处理输出）
         2. 边界环回（边缘节点的 out_slice → 另一方向的 slice_0）
-        3. 非边缘 CP 的输出（out_slice → 下游 Link[0]）
+        3. in_slice 下环判断（cp_slices[-2]位置）
+        4. CP slice 内部移动（从 slice_0 到 out_slice）
+        5. cp_slices_pre → cp_slices[0] 传输（最后执行，下一cycle再处理）
+
+        执行原则：先输出，再移动，最后输入。确保每个位置都停留一个cycle。
 
         Args:
             cycle: 当前周期
@@ -1273,16 +1273,157 @@ class Network:
             for cp_type in ["horizontal", "vertical"]:
                 cp = self.crosspoints[node_id][cp_type]
                 for direction in cp.managed_directions:
-                    # 1. 处理边界环回
+                    # 1. 先处理输出（out_slice → Link）
+                    if direction not in cp._edge_loop_map:
+                        self._transfer_cp_to_link(cp, node_id, direction, cycle)
+
+                    # 2. 处理边界环回
                     if direction in cp._edge_loop_map:
                         self._process_cp_edge_loop(cp, direction, cycle)
 
-                    # 2. CP slice 内部移动
+                    # 3. 处理 in_slice 位置的下环判断
+                    self._process_in_slice_ejection(cp, node_id, direction, cycle)
+
+                    # 4. CP slice 内部移动
                     self._move_cp_slices(cp, direction, cycle)
 
-                    # 3. 非边缘 CP 输出到 Link
-                    if direction not in cp._edge_loop_map:
-                        self._transfer_cp_to_link(cp, node_id, direction, cycle)
+                    # 5. 最后将 pre 中的 flit 移入
+                    self._transfer_pre_to_cp_slice(cp, direction, cycle)
+
+    def _transfer_pre_to_cp_slice(self, cp, direction: str, cycle: int):
+        """
+        将 cp_slices_pre 中的 flit 传输到 cp_slices[0]
+
+        Args:
+            cp: CrossPoint 实例
+            direction: 方向
+            cycle: 当前周期
+        """
+        flit = cp.cp_slices_pre[direction]
+        if flit is None:
+            return
+
+        # 检查 cp_slices[0] 是否空闲
+        if cp.cp_slices[direction][0] is not None:
+            return
+
+        # 传输
+        cp.cp_slices[direction][0] = flit
+        cp.cp_slices_pre[direction] = None
+        flit.set_position(f"CP_IN_{direction}", cycle)
+
+    def _process_in_slice_ejection(self, cp, node_id: int, direction: str, cycle: int):
+        """
+        处理 in_slice 位置的下环判断
+
+        in_slice 位置是 cp_slices[-2]，这里进行下环判断和执行
+        下环方向直接使用传入的direction（flit在CP中的移动方向）
+
+        Args:
+            cp: CrossPoint 实例
+            node_id: 节点ID
+            direction: 方向 (TL/TR/TU/TD)
+            cycle: 当前周期
+        """
+        slices = cp.cp_slices[direction]
+        in_slice_idx = len(slices) - 2  # in_slice 位置
+
+        flit = slices[in_slice_idx]
+        if flit is None:
+            return
+
+        # 判断是否需要下环（使用CP的should_eject_flit，但下环方向已知为direction）
+        should_eject, eject_target = self._check_should_eject(cp, flit, node_id, direction)
+        if not should_eject:
+            return
+
+        # 检查保序
+        if not self._can_eject_in_order(flit, flit.path[-1], direction):
+            # 保序失败，升级ETag
+            self._upgrade_ETag_on_failure(flit, node_id, direction, "order", cycle)
+            return
+
+        # 尝试下环
+        if self._try_eject(flit, node_id, direction, eject_target, cycle):
+            # 下环成功，移除flit
+            slices[in_slice_idx] = None
+        else:
+            # 下环失败（Entry不可用或队列满），升级ETag
+            self._upgrade_ETag_on_failure(flit, node_id, direction, "capacity", cycle)
+
+    def _check_should_eject(self, cp, flit, node_id: int, direction: str) -> tuple:
+        """
+        检查flit是否需要在当前节点下环（简化版本）
+
+        Args:
+            cp: CrossPoint实例
+            flit: flit对象
+            node_id: 当前节点ID
+            direction: 方向 (TL/TR/TU/TD)
+
+        Returns:
+            tuple: (是否下环, 下环目标 "RB"/"EQ")
+        """
+        is_horizontal = direction in ["TL", "TR"]
+
+        # 获取flit的最终目标和路径中的下一跳
+        try:
+            path = flit.path
+            final_dest = path[-1]
+            current_idx = path.index(node_id)
+            next_node = path[current_idx + 1] if current_idx + 1 < len(path) else final_dest
+        except (ValueError, IndexError):
+            # 当前节点不在路径中或路径异常
+            if node_id == flit.path[-1]:
+                # 到达最终目标，需要下环
+                return True, "RB" if is_horizontal else "EQ"
+            return False, ""
+
+        # 判断是否需要下环
+        if is_horizontal:
+            # 水平CP：检查是否到达最终目标，或者需要转到纵向环
+            if node_id == final_dest:
+                return True, "RB"  # 已到达目标节点，从RB下环
+            elif cp._needs_vertical_move(node_id, next_node):
+                return True, "RB"  # 需要转到纵向环
+        else:
+            # 纵向CP：检查是否到达最终目标
+            if node_id == final_dest:
+                return True, "EQ"
+
+        return False, ""
+
+    def _upgrade_ETag_on_failure(self, flit, node_id: int, direction: str, reason: str, cycle: int):
+        """
+        下环失败时升级ETag
+
+        Args:
+            flit: flit对象
+            node_id: 节点ID
+            direction: 方向
+            reason: 失败原因 ("order" 或 "capacity")
+            cycle: 当前周期
+        """
+        cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
+        cp = self.crosspoints[node_id][cp_type]
+
+        # 如果是T0，先从T0表中移除
+        if flit.ETag_priority == "T0" and direction in ["TL", "TU"]:
+            cp.T0_remove_from_table(flit, direction)
+
+        # 升级ETag
+        old_etag = flit.ETag_priority
+        if flit.ETag_priority == "T0":
+            if self.config.ETAG_T1_ENABLED:
+                flit.ETag_priority = "T1"
+            else:
+                flit.ETag_priority = "T2"
+        elif flit.ETag_priority == "T1":
+            flit.ETag_priority = "T2"
+        # T2不再升级
+
+        if old_etag != flit.ETag_priority:
+            flit.is_delay = True
 
     def _process_cp_edge_loop(self, cp, direction: str, cycle: int):
         """
@@ -1706,24 +1847,214 @@ class Network:
 
         return allowed_dirs if allowed_dirs else None
 
-    def execute_moves(self, flit: Flit, cycle):
-        # 情况1：is_arrive=True（已在IP模块）
-        # 这种情况不应该在flits列表中，如果出现说明有bug
-        if flit.is_arrive:
-            flit.arrival_network_cycle = cycle
-            return True  # 异常移除
+    # ==================== 统一两阶段处理 ====================
 
-        # 情况2：current_link=None（已下环到pre缓冲）
-        # flit已离开Link系统，应该从flits列表移除
-        if flit.current_link is None:
-            return True  # 正常移除
+    def plan_all_moves(self, cycle: int, flits: list):
+        """
+        统一Plan阶段：计算所有flit的下一位置并清空当前位置
 
-        # 情况3：在Link上传输（包括普通link和自环）
-        # 自环link使用3元组格式: (node, node, "h"/"v")
-        # 普通link使用2元组格式: (u, v)
-        self.set_link_slice(flit.current_link, flit.current_seat_index, flit, cycle)
+        遍历所有flit，计算下一位置后立即清空当前位置，这样后面的flit才能移动进来
+        """
+        for flit in flits:
+            if flit.is_arrive:
+                continue
+            if flit.current_link is not None:
+                # 在Link上
+                self._plan_link_move(flit, cycle)
+            elif getattr(flit, 'cp_node_id', None) is not None:
+                # 在CP中
+                self._plan_cp_move(flit, cycle)
 
-        return False  # 保留在flits列表
+            # 计算完下一位置后，立即清空当前位置
+            if getattr(flit, '_next_pos', None) is not None:
+                self._clear_flit_position(flit)
+
+    def execute_all_moves(self, cycle: int, flits: list):
+        """
+        统一Execute阶段：执行所有移动
+
+        根据flit._next_pos执行移动，返回更新后的flits列表
+        """
+        to_remove = []
+        for flit in flits:
+            if flit.is_arrive:
+                flit.arrival_network_cycle = cycle
+                to_remove.append(flit)
+                continue
+
+            next_pos = getattr(flit, '_next_pos', None)
+            if next_pos:
+                self._execute_move(flit, next_pos, cycle)
+                flit._next_pos = None
+
+        # 移除已到达的flit
+        for f in to_remove:
+            flits.remove(f)
+
+        return flits
+
+    def _plan_link_move(self, flit: Flit, cycle: int):
+        """计划Link上flit的移动
+
+        环形网络中flit同步移动，不检查目标位置是否空闲
+        """
+        link = self.links.get(flit.current_link)
+        if link is None:
+            return
+
+        current, next_node = flit.current_link[:2]
+
+        # 非末端：前进一格（所有flit同步移动，不检查目标位置）
+        if flit.current_seat_index < len(link) - 1:
+            next_idx = flit.current_seat_index + 1
+            flit._next_pos = ("Link", flit.current_link, next_idx)
+            return
+
+        # 末端：进入CP的slice[0]
+        cp_type, direction = self._get_cp_type_and_direction(current, next_node)
+        if cp_type is None:
+            return
+
+        flit._next_pos = ("CP", next_node, direction, 0)
+
+    def _plan_cp_move(self, flit: Flit, cycle: int):
+        """计划CP中flit的移动
+
+        环形网络中flit同步移动，不检查目标位置是否空闲
+        如果不能下环就继续沿着环移动
+        """
+        node_id = flit.cp_node_id
+        direction = flit.cp_direction
+        slice_idx = flit.cp_slice_index
+        cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
+        cp = self.crosspoints[node_id][cp_type]
+        slices = cp.cp_slices[direction]
+
+        # 在pre中：进入slice[0]
+        if slice_idx == -1:
+            flit._next_pos = ("CP", node_id, direction, 0)
+            return
+
+        # 在out_slice：输出到Link或边界环回
+        if slice_idx == len(slices) - 1:
+            if direction in cp._edge_loop_map:
+                # 边界环回
+                target_dir = cp._edge_loop_map[direction]
+                flit._next_pos = ("CP_LOOP", node_id, direction, target_dir)
+            else:
+                # 输出到Link
+                link = cp._calculate_inject_link(node_id, direction)
+                if link:
+                    flit._next_pos = ("Link", link, 0)
+            return
+
+        # 在in_slice：检查下环
+        if slice_idx == len(slices) - 2:
+            should_eject, eject_target = self._check_should_eject(cp, flit, node_id, direction)
+            if should_eject:
+                if self._can_eject_in_order(flit, flit.path[-1], direction):
+                    # 检查pre缓冲（下环出口必须有空位才能下环）
+                    if direction in ["TL", "TR"]:
+                        if self.ring_bridge_pre[direction][node_id] is None:
+                            flit._next_pos = ("RB", node_id, direction, eject_target)
+                            return
+                    else:
+                        if self.eject_queues_in_pre[direction][node_id] is None:
+                            flit._next_pos = ("EQ", node_id, direction, eject_target)
+                            return
+                else:
+                    self._upgrade_ETag_on_failure(flit, node_id, direction, "order", cycle)
+
+        # 不下环或下环失败：继续前进到out_slice
+        if slice_idx < len(slices) - 1:
+            flit._next_pos = ("CP", node_id, direction, slice_idx + 1)
+
+    def _execute_move(self, flit: Flit, next_pos: tuple, cycle: int):
+        """执行flit的移动：放入新位置（旧位置已在plan阶段清空）"""
+        pos_type = next_pos[0]
+
+        if pos_type == "Link":
+            link, seat_idx = next_pos[1], next_pos[2]
+            flit.current_link = link
+            flit.current_seat_index = seat_idx
+            flit.cp_node_id = None
+            flit.cp_direction = None
+            flit.cp_slice_index = None
+            self.set_link_slice(link, seat_idx, flit, cycle)
+            # 更新位置显示
+            flit.set_position(f"{link[0]}->{link[1]}:{seat_idx}", cycle)
+
+        elif pos_type == "CP_PRE":
+            node_id, direction = next_pos[1], next_pos[2]
+            cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
+            cp = self.crosspoints[node_id][cp_type]
+            cp.cp_slices_pre[direction] = flit
+            flit.current_link = None
+            flit.current_seat_index = -1
+            flit.cp_node_id = node_id
+            flit.cp_direction = direction
+            flit.cp_slice_index = -1
+            if not flit.is_delay:
+                flit.current_position = node_id
+            flit.set_position(f"CP_PRE_{direction}", cycle)
+
+        elif pos_type == "CP":
+            node_id, direction, slice_idx = next_pos[1], next_pos[2], next_pos[3]
+            cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
+            cp = self.crosspoints[node_id][cp_type]
+            cp.cp_slices[direction][slice_idx] = flit
+            # 设置CP位置属性（从Link进入时需要）
+            flit.current_link = None
+            flit.current_seat_index = -1
+            flit.cp_node_id = node_id
+            flit.cp_direction = direction
+            flit.cp_slice_index = slice_idx
+            if not flit.is_delay:
+                flit.current_position = node_id
+            cp_pos = "CP_H" if direction in ["TL", "TR"] else "CP_V"
+            flit.set_position(cp_pos, cycle)
+
+        elif pos_type == "CP_LOOP":
+            node_id, from_dir, to_dir = next_pos[1], next_pos[2], next_pos[3]
+            cp_type = "horizontal" if from_dir in ["TL", "TR"] else "vertical"
+            cp = self.crosspoints[node_id][cp_type]
+            cp.cp_slices[to_dir][0] = flit
+            flit.cp_direction = to_dir
+            flit.cp_slice_index = 0
+            flit.set_position("CP_LOOP", cycle)
+
+        elif pos_type == "RB":
+            node_id, direction, eject_target = next_pos[1], next_pos[2], next_pos[3]
+            self._try_eject(flit, node_id, direction, eject_target, cycle)
+            flit.cp_node_id = None
+            flit.cp_direction = None
+            flit.cp_slice_index = None
+
+        elif pos_type == "EQ":
+            node_id, direction, eject_target = next_pos[1], next_pos[2], next_pos[3]
+            self._try_eject(flit, node_id, direction, eject_target, cycle)
+            flit.cp_node_id = None
+            flit.cp_direction = None
+            flit.cp_slice_index = None
+
+    def _clear_flit_position(self, flit: Flit):
+        """清空flit的当前位置"""
+        # 在Link上
+        if flit.current_link is not None:
+            self.links[flit.current_link][flit.current_seat_index] = None
+            return
+
+        # 在CP中
+        node_id = getattr(flit, 'cp_node_id', None)
+        if node_id is not None:
+            direction = flit.cp_direction
+            slice_idx = flit.cp_slice_index
+            cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
+            cp = self.crosspoints[node_id][cp_type]
+            if slice_idx == -1:
+                cp.cp_slices_pre[direction] = None
+            else:
+                cp.cp_slices[direction][slice_idx] = None
 
     @property
     def rn_positions(self):
@@ -1940,7 +2271,9 @@ class Network:
 
     def _handle_flit(self, flit: Flit, link, current, next_node):
         """
-        处理flit在链路末端的行为（统一版本）
+        处理flit在链路上的移动计划（只计划，不执行）
+
+        Plan阶段：计算flit的下一位置，记录在flit._move_plan中
 
         Args:
             flit: 当前flit
@@ -1948,140 +2281,60 @@ class Network:
             current: 当前链路起点
             next_node: 当前链路终点
         """
-        # 1. 非链路末端：继续前进
+        # 1. 非链路末端：计划继续前进
         if flit.current_seat_index < len(link) - 1:
-            link[flit.current_seat_index] = None
-            flit.current_seat_index += 1
+            flit._move_plan = ("link_forward", flit.current_link, flit.current_seat_index + 1)
             return
 
-        # 2. 更新current_position(不使用path_index)
-        if not flit.is_delay:
-            flit.current_position = next_node
+        # 2. 到达Link末端：计划移动到目标节点的CP
+        cp_type, direction = self._get_cp_type_and_direction(current, next_node)
 
-        # 3. 判断是否需要下环（使用CrossPoint的新方法）
-        final_destination = flit.path[-1]
-
-        # 先尝试水平CrossPoint判断
-        should_eject_h = False
-        eject_target_h = ""
-        eject_direction_h = ""
-        if next_node in self.crosspoints and "horizontal" in self.crosspoints[next_node]:
-            cp_h = self.crosspoints[next_node]["horizontal"]
-            should_eject_h, eject_target_h, eject_direction_h = cp_h.should_eject_flit(flit, next_node)
-
-        # 再尝试垂直CrossPoint判断
-        should_eject_v = False
-        eject_target_v = ""
-        eject_direction_v = ""
-        if next_node in self.crosspoints and "vertical" in self.crosspoints[next_node]:
-            cp_v = self.crosspoints[next_node]["vertical"]
-            should_eject_v, eject_target_v, eject_direction_v = cp_v.should_eject_flit(flit, next_node)
-
-        # 4. 处理下环
-        if should_eject_h or should_eject_v:
-            # 确定使用哪个CrossPoint
-            if should_eject_h:
-                crosspoint = self.crosspoints[next_node]["horizontal"]
-                eject_direction = eject_direction_h
-                eject_target = eject_target_h
-            else:
-                crosspoint = self.crosspoints[next_node]["vertical"]
-                eject_direction = eject_direction_v
-                eject_target = eject_target_v
-
-            # 统计下环尝试次数
-            if eject_direction in ["TL", "TR"]:
-                flit.eject_attempts_h += 1
-            else:
-                flit.eject_attempts_v += 1
-
-            # 保序检查：统一检查方向和order_id
-            # _can_eject_in_order内部会先判断是否需要保序检查
-            if not self._can_eject_in_order(flit, final_destination, eject_direction):
-                # 保序检查失败（方向不对或order_id不对），继续绕环
-                # 仅在首次尝试下环时记录为"保序导致绕环"
-                if eject_direction in ["TL", "TR"]:
-                    if flit.eject_attempts_h <= 1:
-                        flit.ordering_blocked_eject_h += 1
-                else:
-                    if flit.eject_attempts_v <= 1:
-                        flit.ordering_blocked_eject_v += 1
-
-                # 模式1：保序失败时也升级ETag
-                if self.config.ORDERING_ETAG_UPGRADE_MODE == 1:
-                    if not flit.is_delay:
-                        flit.is_delay = True
-
-                    upgrade_to = crosspoint._determine_etag_upgrade(flit, eject_direction)
-                    if upgrade_to:
-                        flit.ETag_priority = upgrade_to
-                        if upgrade_to == "T0" and eject_direction in ["TL", "TU"]:
-                            crosspoint.T0_table_record(flit, eject_direction)
-
-                state = self._analyze_flit_state(flit, current, next_node)
-                self._continue_looping(flit, link, state["next_pos"])
-                return
-
-            # 尝试下环（只检查资源：队列容量和entry）
-            success, fail_reason = crosspoint._try_eject(flit, eject_direction, final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues)
-
-            if success:
-                # 下环成功
-                return
-
-            # 下环失败：根据失败原因决定是否继续绕环
-            # fail_reason可能是: "order" (保序), "capacity" (容量), "entry" (Entry不足)
-            # 所有情况下都继续绕环，避免卡在自环上
-            should_continue_loop = True
-
-            # E-Tag升级
-            if not flit.is_delay:
-                flit.is_delay = True
-
-            upgrade_to = crosspoint._determine_etag_upgrade(flit, eject_direction)
-            if upgrade_to:
-                flit.ETag_priority = upgrade_to
-                if upgrade_to == "T0" and eject_direction in ["TL", "TU"]:
-                    crosspoint.T0_table_record(flit, eject_direction)
-
-            # 继续绕环
-            if should_continue_loop:
-                state = self._analyze_flit_state(flit, current, next_node)
-                self._continue_looping(flit, link, state["next_pos"])
+        if cp_type is None:
+            flit._move_plan = None
             return
 
-        # 5. 不需要下环：继续移动
-        # 先分析flit状态，判断是否需要通过自环绕过边界
-        state = self._analyze_flit_state(flit, current, next_node)
+        cp = self.crosspoints[next_node][cp_type]
 
-        # 如果需要进入自环（next_pos == next_node），则进入自环绕过边界
-        if state["next_pos"] == next_node:
-            # 到达边界，需要进入自环
-            self._continue_looping(flit, link, state["next_pos"])
+        # 检查CP的pre缓冲是否空闲
+        if cp.cp_slices_pre[direction] is not None:
+            # CP入口被占用，计划停留在Link末端
+            flit._move_plan = ("link_stay", flit.current_link, flit.current_seat_index)
             return
 
-        # 否则，尝试按path正常移动
-        try:
-            current_path_index = flit.path.index(next_node)
-            if current_path_index + 1 < len(flit.path):
-                next_hop = flit.path[current_path_index + 1]
-                # 检查path的下一跳是否与分析得到的next_pos一致
-                if next_hop == state["next_pos"]:
-                    # 一致，正常移动
-                    link[flit.current_seat_index] = None
-                    flit.current_link = (next_node, next_hop)
-                    flit.current_seat_index = 0
-                    return
-                else:
-                    # 不一致，说明需要绕环（path可能穿过边界）
-                    self._continue_looping(flit, link, state["next_pos"])
-                    return
-        except ValueError:
-            # next_node不在path中,继续绕环
-            pass
+        # 计划移动到CP
+        flit._move_plan = ("to_cp_pre", next_node, cp_type, direction)
 
-        # 6. 继续绕环
-        self._continue_looping(flit, link, state["next_pos"])
+    def _get_cp_type_and_direction(self, current: int, next_node: int) -> tuple:
+        """
+        根据Link的起点和终点确定CP类型和方向
+
+        Args:
+            current: Link起点节点ID
+            next_node: Link终点节点ID
+
+        Returns:
+            tuple: (cp_type, direction) 或 (None, None)
+        """
+        num_col = self.config.NUM_COL
+
+        current_row = current // num_col
+        current_col = current % num_col
+        next_row = next_node // num_col
+        next_col = next_node % num_col
+
+        # 横向移动
+        if current_row == next_row and current_col != next_col:
+            cp_type = "horizontal"
+            direction = "TR" if next_col > current_col else "TL"
+            return cp_type, direction
+
+        # 纵向移动
+        if current_col == next_col and current_row != next_row:
+            cp_type = "vertical"
+            direction = "TD" if next_row > current_row else "TU"
+            return cp_type, direction
+
+        return None, None
 
     # ==================== 原有的辅助函数 ====================
 

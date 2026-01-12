@@ -70,6 +70,9 @@ class CrossPoint:
         # pre缓冲（用于时序管理，接收上游Link的flit）
         self.cp_slices_pre = {dir: None for dir in self.managed_directions}
 
+        # next_state缓冲（用于两阶段模式，存储下一状态）
+        self.cp_slices_next = {dir: [None] * slice_count for dir in self.managed_directions}
+
         # 边缘检测
         self._edge_status = self._detect_edge_status()
         self._edge_loop_map = self._build_edge_loop_map()
@@ -935,9 +938,14 @@ class CrossPoint:
 
         # 1. 注入到CP的out_slice
         cp = self.network.crosspoints[current_pos][dim]
-        cp.cp_slices[direction][-1] = flit
+        out_slice_idx = len(cp.cp_slices[direction]) - 1
+        cp.cp_slices[direction][out_slice_idx] = flit
         flit.current_link = None  # 在CP内部，不在Link上
         flit.current_seat_index = -1
+        # 设置CP位置属性（用于统一两阶段处理）
+        flit.cp_node_id = current_pos
+        flit.cp_direction = direction
+        flit.cp_slice_index = out_slice_idx
         cp_pos = "CP_H" if is_horizontal else "CP_V"
         flit.set_position(cp_pos, cycle)
 
@@ -1001,6 +1009,12 @@ class CrossPoint:
 
         # 注入到CP slice的第一个位置
         self.cp_slices[direction][0] = flit
+        flit.current_link = None
+        flit.current_seat_index = -1
+        # 设置CP位置属性（用于统一两阶段处理）
+        flit.cp_node_id = self.node_id
+        flit.cp_direction = direction
+        flit.cp_slice_index = 0
         flit.set_position("CP_EDGE", cycle)
 
         # 重置E-Tag显示优先级为T2

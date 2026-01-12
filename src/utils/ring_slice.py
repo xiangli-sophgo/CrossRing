@@ -30,6 +30,7 @@ class RingSlice:
         self.direction = direction
         self.slot_id = None  # 全局slot ID（用于ITag）
         self.is_cp_out = False  # 是否为上环注入点（用于模式2：Link[0]共享CP_OUT）
+        self.link_index = 0  # Link内的位置索引（用于显示）
 
     def is_inject_point(self) -> bool:
         """判断是否为上环注入点"""

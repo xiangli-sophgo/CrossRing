@@ -31,6 +31,7 @@ class PieceVisualizerV2:
         self.rs_in_fifo_depth = config.RS_IN_FIFO_DEPTH
         self.rs_out_ch_depth = config.RS_OUT_CH_BUFFER
         self.rs_out_fifo_depth = config.RS_OUT_FIFO_DEPTH
+        self.CP_slice_count = config.CP_SLICE_COUNT
 
         # 几何参数
         self.square = 0.3
@@ -282,7 +283,7 @@ class PieceVisualizerV2:
             self.cph_patches[lane] = []
             self.cph_texts[lane] = []
 
-            for s in range(2):
+            for s in range(self.CP_slice_count):
                 slot_x = lane_x + s * (cp_square + cp_gap)
                 slot_y = lane_y
                 frame = Rectangle((slot_x, slot_y), cp_square, cp_square, edgecolor="black", facecolor="none", linewidth=self.slot_frame_lw, linestyle="--")
@@ -313,7 +314,7 @@ class PieceVisualizerV2:
             self.cpv_patches[lane] = []
             self.cpv_texts[lane] = []
 
-            for s in range(2):
+            for s in range(self.CP_slice_count):
                 slot_x = lane_x
                 slot_y = lane_y + s * (cp_square + cp_gap)
                 frame = Rectangle((slot_x, slot_y), cp_square, cp_square, edgecolor="black", facecolor="none", linewidth=self.slot_frame_lw, linestyle="--")
@@ -350,8 +351,9 @@ class PieceVisualizerV2:
         if rs is None:
             return
 
-        CP_H = network.cross_point["horizontal"]
-        CP_V = network.cross_point["vertical"]
+        # 获取 CrossPoint 数据
+        CP_H = network.crosspoints[node_id]["horizontal"].cp_slices
+        CP_V = network.crosspoints[node_id]["vertical"].cp_slices
 
         # lane名到FIFO的映射
         for lane, patches in self.rs_patches.items():
@@ -371,14 +373,14 @@ class PieceVisualizerV2:
 
         # 更新 CrossPoint Horizontal
         for lane, patches in self.cph_patches.items():
-            q = CP_H.get(node_id, {}).get(lane, [])
+            q = CP_H.get(lane, [])
             if lane == "TL":
                 q = q[::-1]
             self._update_patches(patches, self.cph_texts[lane], q)
 
         # 更新 CrossPoint Vertical
         for lane, patches in self.cpv_patches.items():
-            q = CP_V.get(node_id, {}).get(lane, [])
+            q = CP_V.get(lane, [])
             if lane == "TD":
                 q = q[::-1]
             self._update_patches(patches, self.cpv_texts[lane], q)

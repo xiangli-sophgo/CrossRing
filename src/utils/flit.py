@@ -146,6 +146,11 @@ class Flit:
         # D2D NoC端口时间戳
         "d2d_noc_inject_cycle",  # D2D节点注入NoC的时间
         "d2d_noc_eject_cycle",  # D2D节点从NoC弹出的时间
+        # CP位置属性（用于统一两阶段处理）
+        "cp_node_id",  # CP所在节点ID
+        "cp_direction",  # CP方向 (TL/TR/TU/TD)
+        "cp_slice_index",  # CP slice索引 (-1表示在pre中)
+        "_next_pos",  # 计划的下一位置
         # 位置时间戳字典（自动记录）
         "position_timestamps",  # {position: cycle}
         "position_timestamps_backup",  # retry请求的第一次失败时间戳备份
@@ -242,6 +247,11 @@ class Flit:
         self.d2d_sn_node = None
         self.d2d_rn_node = None
         self.inject_time = None
+        # CP位置属性初始化
+        self.cp_node_id = None
+        self.cp_direction = None
+        self.cp_slice_index = None
+        self._next_pos = None
         self.init_param()
 
     def init_param(self):
