@@ -12,18 +12,19 @@ class IntegratedVisualizer:
     """集成多个Plotly图表到单一HTML文件"""
 
     def __init__(self):
-        self.charts = []  # [(title, fig, custom_js), ...]
+        self.charts = []  # [(title, fig, custom_html, custom_js), ...]
 
-    def add_chart(self, title: str, fig: Optional[go.Figure], custom_js: Optional[str] = None):
+    def add_chart(self, title: str, fig: Optional[go.Figure], custom_html: Optional[str] = None, custom_js: Optional[str] = None):
         """
         添加图表到集成可视化
 
         Args:
             title: 图表章节标题
             fig: Plotly Figure对象,或None表示纯HTML内容
+            custom_html: 可选的自定义HTML（如按钮控件，插入在图表前）
             custom_js: 可选的自定义JavaScript代码(fig=None时为HTML内容)
         """
-        self.charts.append((title, fig, custom_js))
+        self.charts.append((title, fig, custom_html, custom_js))
 
     def generate_html(self, save_path: str = None, show_fig: bool = False, return_content: bool = False):
         """
@@ -76,12 +77,27 @@ class IntegratedVisualizer:
         ]
 
         # 添加图表容器
-        for idx, (title, fig, custom_js) in enumerate(self.charts):
+        for idx, chart_item in enumerate(self.charts):
+            # 兼容旧版3元组和新版4元组
+            if len(chart_item) == 4:
+                title, fig, custom_html, custom_js = chart_item
+            else:
+                title, fig, custom_js = chart_item
+                custom_html = None
+
             section_id = f"section-{idx}"
             chart_id = f"chart-{idx}"
 
             html_parts.append(f'    <div class="section" id="{section_id}">')
             html_parts.append(f'        <div class="section-title">{title}</div>')
+
+            # 插入自定义HTML（如按钮）
+            if custom_html:
+                html_parts.append(f'        <div class="controls-container">')
+                for line in custom_html.split("\n"):
+                    if line.strip():
+                        html_parts.append(f"            {line}")
+                html_parts.append(f"        </div>")
 
             # 如果fig为None，说明是纯HTML内容（如带宽分析报告）
             if fig is None:
@@ -103,14 +119,26 @@ class IntegratedVisualizer:
 
         # 等待Plotly加载完成后初始化图表
         html_parts.append("    // 等待Plotly加载完成")
-        html_parts.append('    window.addEventListener("load", function() {')
+        html_parts.append("    function initializeCharts() {")
+        html_parts.append("        if (typeof Plotly === 'undefined') {")
+        html_parts.append("            setTimeout(initializeCharts, 100);")
+        html_parts.append("            return;")
+        html_parts.append("        }")
 
-        # 初始化每个图表
-        for idx, (title, fig, custom_js) in enumerate(self.charts):
+        # 初始化每个图表（需要跟踪实际图表索引，跳过纯HTML内容）
+        for idx, chart_item in enumerate(self.charts):
+            # 兼容旧版3元组和新版4元组
+            if len(chart_item) == 4:
+                title, fig, custom_html, custom_js = chart_item
+            else:
+                title, fig, custom_js = chart_item
+                custom_html = None
+
             # 跳过纯HTML内容（fig为None）
             if fig is None:
                 continue
 
+            # 使用原始的section索引来匹配HTML中创建的容器ID
             chart_id = f"chart-{idx}"
             # 获取图表的JSON配置
             fig_json = fig.to_json()
@@ -130,13 +158,19 @@ class IntegratedVisualizer:
                 modified_js = self._adapt_custom_js(custom_js, idx)
                 html_parts.append(f"        // 自定义交互逻辑: {title}")
                 html_parts.append(f"        (function() {{")
-                # 再次缩进（因为在window.addEventListener内部）
-                indented_js = "\n".join(["    " + line if line.strip() else line for line in modified_js.split("\n")])
+                # 缩进（函数内部）
+                indented_js = "\n".join(["            " + line if line.strip() else line for line in modified_js.split("\n")])
                 html_parts.append(indented_js)
                 html_parts.append(f"        }})();")
                 html_parts.append("")
 
-        html_parts.append("    });  // end window.addEventListener")
+        html_parts.append("    }  // end initializeCharts function")
+        html_parts.append("    // 使用两种方式确保脚本执行")
+        html_parts.append("    if (document.readyState === 'loading') {")
+        html_parts.append("        document.addEventListener('DOMContentLoaded', initializeCharts);")
+        html_parts.append("    } else {")
+        html_parts.append("        initializeCharts();")
+        html_parts.append("    }")
         html_parts.append("</script>")
         html_parts.append("</body>")
         html_parts.append("</html>")
@@ -175,7 +209,9 @@ class IntegratedVisualizer:
         }
         .chart-container {
             width: 100%;
-            height: auto;
+            height: 700px;
+            min-height: 500px;
+            background: white;
         }
         /* FIFO热力图按钮样式 */
         .updatemenu-button.active {
@@ -324,8 +360,14 @@ def create_integrated_report(charts_config: List[Tuple[str, go.Figure, Optional[
     """
     visualizer = IntegratedVisualizer()
 
-    for title, fig, custom_js in charts_config:
-        visualizer.add_chart(title, fig, custom_js)
+    for chart_item in charts_config:
+        # 兼容旧版3元组和新版4元组
+        if len(chart_item) == 4:
+            title, fig, custom_html, custom_js = chart_item
+            visualizer.add_chart(title, fig, custom_html, custom_js)
+        else:
+            title, fig, custom_js = chart_item
+            visualizer.add_chart(title, fig, None, custom_js)
 
     if not visualizer.charts:
         return "" if return_content else None
