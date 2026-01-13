@@ -319,9 +319,9 @@ class D2D_Model:
 
         # 设置仿真参数 - 将ns转换为cycles
         if max_time is not None:
-            self.end_time = int(max_time * network_frequency)
+            self.end_time = round(max_time * network_frequency)
         if print_interval is not None:
-            self.print_interval = int(print_interval * network_frequency)
+            self.print_interval = round(print_interval * network_frequency)
 
         # 初始化仿真
         self.initial()

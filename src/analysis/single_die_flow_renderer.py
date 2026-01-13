@@ -79,7 +79,8 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
 
     def draw_flow_graph(
         self,
-        network,
+        networks: Dict = None,
+        network=None,  # 向后兼容参数
         ip_bandwidth_data: Dict = None,
         config=None,
         mode: str = "utilization",
@@ -87,15 +88,16 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
         save_path: str = None,
         show_fig: bool = False,
         return_fig: bool = False,
-        req_network=None,
-        rsp_network=None,
+        req_network=None,  # 向后兼容参数
+        rsp_network=None,  # 向后兼容参数
         static_bandwidth=None,
     ):
         """
         绘制单Die网络流量图(交互式版本)
 
         Args:
-            network: Network对象（data_network，用于向后兼容）
+            networks: 多通道networks字典 {"req": [...], "rsp": [...], "data": [...]}
+            network: Network对象（data_network，用于向后兼容，在networks为None时使用）
             ip_bandwidth_data: IP带宽数据字典
             config: 配置对象
             mode: 可视化模式
@@ -103,12 +105,12 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
             save_path: 保存路径（如果为None则返回fig对象）
             show_fig: 是否在浏览器中显示图像
             return_fig: 是否返回Figure对象而不是保存文件
-            req_network: 请求网络对象（可选，用于通道分离显示）
-            rsp_network: 响应网络对象（可选，用于通道分离显示）
+            req_network: 请求网络对象（可选，用于向后兼容）
+            rsp_network: 响应网络对象（可选，用于向后兼容）
             static_bandwidth: 静态带宽数据字典
 
         Returns:
-            str or Figure: 如果return_fig=True，返回Figure对象；否则返回保存路径或fig对象
+            str or Figure or (Figure, buttons_html, buttons_js): Figure对象或包含按钮信息的元组
         """
         import time
 

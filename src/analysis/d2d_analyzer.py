@@ -376,8 +376,8 @@ class D2DAnalyzer:
                     from src.analysis.analyzers import RequestInfo
                     req_info = RequestInfo(
                         packet_id=packet_id,
-                        start_time=int(lifecycle.created_cycle / self.network_frequency),
-                        end_time=int(lifecycle.completed_cycle / self.network_frequency),
+                        start_time=round(lifecycle.created_cycle / self.network_frequency),
+                        end_time=round(lifecycle.completed_cycle / self.network_frequency),
                         req_type=lifecycle.op_type,
                         burst_length=lifecycle.burst_size,
                         total_bytes=lifecycle.burst_size * 128,

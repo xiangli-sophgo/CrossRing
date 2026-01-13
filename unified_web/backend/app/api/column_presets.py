@@ -15,7 +15,7 @@ logger = get_logger("column_presets")
 router = APIRouter(prefix="/api/column-presets", tags=["列配置"])
 
 # 配置文件目录
-CONFIG_DIR = Path(__file__).parent.parent.parent.parent.parent.parent / "config" / "column_presets"
+CONFIG_DIR = Path(__file__).parent.parent.parent.parent.parent / "config" / "column_presets"
 
 
 class ColumnPreset(BaseModel):

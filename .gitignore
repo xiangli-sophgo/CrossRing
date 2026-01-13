@@ -16,7 +16,7 @@ __pycache__
 .idea
 
 .trunk
-
+.env
 .vscode
 
 *.log

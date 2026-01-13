@@ -257,7 +257,7 @@ class SingleDieAnalyzer:
         self.flow_visualizer = SingleDieFlowRenderer()  # 用于静态PNG流图
         self.interactive_flow_visualizer = SingleDieFlowRenderer()
         self.exporter = CSVExporter(verbose=self.verbose)
-        self.parquet_exporter = ParquetExporter(network_frequency=config.CYCLES_PER_NS if config else 2)
+        self.parquet_exporter = ParquetExporter(network_frequency=config.CYCLES_PER_NS if config else 2.0)
         self.report_generator = ReportGenerator()
 
     def collect_ip_statistics(self):

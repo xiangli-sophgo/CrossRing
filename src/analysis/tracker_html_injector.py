@@ -193,7 +193,16 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             // 获取plotly元素
             const plotlyDiv = flowGraphDiv.querySelector('.plotly-graph-div') || flowGraphDiv;
 
-            plotlyDiv.on('plotly_click', function(data) {{
+            // 检查Plotly是否可用，使用try-catch保护
+            try {
+                if (typeof Plotly === 'undefined' || !Plotly.d3) {
+                    console.log('[Tracker] Plotly.d3未加载，延迟初始化');
+                    setTimeout(initializeTrackerListener, 100);
+                    return;
+                }
+
+                // 使用Plotly.d3.select的正确方式绑定事件
+                Plotly.d3.select(plotlyDiv).on('plotly_click', function(data) {{
                 console.log('[Tracker] 流量图点击事件触发!');
                 console.log('[Tracker] 点击数据:', data);
 
@@ -713,7 +722,16 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             // 获取plotly元素
             const plotlyDiv = flowGraphDiv.querySelector('.plotly-graph-div') || flowGraphDiv;
 
-            plotlyDiv.on('plotly_click', function(data) {{
+            // 检查Plotly是否可用，使用try-catch保护
+            try {
+                if (typeof Plotly === 'undefined' || !Plotly.d3) {
+                    console.log('[Tracker] Plotly.d3未加载，延迟初始化');
+                    setTimeout(initializeTrackerListener, 100);
+                    return;
+                }
+
+                // 使用Plotly.d3.select的正确方式绑定事件
+                Plotly.d3.select(plotlyDiv).on('plotly_click', function(data) {{
                 console.log('[Tracker] 流量图点击事件触发!');
                 console.log('[Tracker] 点击数据:', data);
 

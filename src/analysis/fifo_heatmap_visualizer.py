@@ -288,10 +288,26 @@ class FIFOHeatmapVisualizer:
         # 创建图形
         fig = self._create_plotly_figure(dies, die_layout, die_rotations, fifo_options, return_fig_and_js)
 
+        # 生成多通道按钮（如果是多通道情况）
+        buttons_html = None
+        buttons_js_extra = None
+
+        # 检查是否是多通道
+        num_channels = self._count_channels(dies)
+        if num_channels > 1:
+            buttons_html, buttons_js_extra = self._generate_fifo_multichannel_buttons(dies, num_channels)
+
         # 如果只返回Figure和JavaScript
         if return_fig_and_js:
             js_code = self._generate_custom_javascript(fifo_options, len(dies))
-            return fig, js_code
+            # 如果有多通道按钮，添加到JavaScript
+            if buttons_js_extra:
+                js_code += "\n" + buttons_js_extra
+            # 返回(fig, buttons_html, buttons_js)元组
+            if buttons_html:
+                return fig, buttons_html, js_code
+            else:
+                return fig, None, js_code
 
         # 保存或显示
         if save_path:

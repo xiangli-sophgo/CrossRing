@@ -46,6 +46,10 @@ class WaveformResponse(BaseModel):
     time_range: Dict[str, float]  # {start_ns, end_ns}
     signals: List[WaveformSignal]
     stages: List[str]  # 所有阶段名称列表
+    # 分页信息（用于支持后续加载）
+    total_packets: int = 0  # 符合条件的总packets数
+    offset: int = 0  # 当前请求的偏移量
+    returned_packets: int = 0  # 本次返回的packets数
 
 
 class PacketInfo(BaseModel):
@@ -190,12 +194,17 @@ def _generate_topology_data(topo_type: str) -> TopologyData:
     return TopologyData(type=topo_type, rows=rows, cols=cols, total_nodes=total_nodes, nodes=nodes, edges=edges, metadata=metadata)
 
 
-def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def _load_parquet_from_db(
+    result_id: int,
+    result_type: str,
+    packet_ids: Optional[List[int]] = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """从数据库加载Parquet文件内容
 
     Args:
         result_id: 结果ID
         result_type: 结果类型 ("kcin" 或 "dcin")
+        packet_ids: 可选，只加载指定的packet_ids
 
     Returns:
         (requests_df, flits_df) 元组
@@ -204,13 +213,20 @@ def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFram
         HTTPException: 如果文件不存在
     """
     import json
+    import time
 
     db = DatabaseManager()
 
     # 优先尝试加载新格式 waveform.parquet
     waveform_file = db.get_result_file_by_name(result_id, result_type, "waveform.parquet")
     if waveform_file and waveform_file.file_content:
+        t_read_start = time.time()
         waveform_df = pd.read_parquet(io.BytesIO(waveform_file.file_content))
+        t_read_end = time.time()
+
+        # 提前过滤（减少需要处理的数据）
+        if packet_ids is not None:
+            waveform_df = waveform_df[waveform_df["packet_id"].isin(packet_ids)]
 
         # 构造 requests_df（排除 flits 列）
         requests_cols = [c for c in waveform_df.columns if c != "flits"]
@@ -218,15 +234,15 @@ def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFram
 
         # 展开 flits 列构造 flits_df
         flits_rows = []
-        for _, row in waveform_df.iterrows():
-            packet_id = row["packet_id"]
+        for row in waveform_df.itertuples(index=False):
+            packet_id = row.packet_id
             # 请求级别的 source/dest（用于向后兼容）
-            req_source = row.get("source_node")
-            req_dest = row.get("dest_node")
-            req_source_type = row.get("source_type", "")
-            req_dest_type = row.get("dest_type", "")
+            req_source = getattr(row, "source_node", None)
+            req_dest = getattr(row, "dest_node", None)
+            req_source_type = getattr(row, "source_type", "")
+            req_dest_type = getattr(row, "dest_type", "")
 
-            flits_json = row.get("flits", "[]")
+            flits_json = getattr(row, "flits", "[]")
             try:
                 flits_list = json.loads(flits_json) if isinstance(flits_json, str) else flits_json
                 for flit_info in flits_list:
@@ -237,6 +253,17 @@ def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFram
                     flit_source_type = flit_info.get("source_type", req_source_type)
                     flit_dest_type = flit_info.get("dest_type", req_dest_type)
 
+                    # 获取position_timestamps
+                    pos_timestamps = flit_info.get("position_timestamps", {})
+
+                    # 优化：提前计算start_time，避免后续排序时重复解析JSON
+                    start_time = float("inf")
+                    if pos_timestamps:
+                        if "L2H" in pos_timestamps:
+                            start_time = pos_timestamps["L2H"]
+                        else:
+                            start_time = min(pos_timestamps.values()) if pos_timestamps else float("inf")
+
                     flits_rows.append(
                         {
                             "packet_id": packet_id,
@@ -246,7 +273,8 @@ def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFram
                             "dest_node": flit_dest,
                             "source_type": flit_source_type,
                             "dest_type": flit_dest_type,
-                            "position_timestamps": json.dumps(flit_info.get("position_timestamps", {})),
+                            "position_timestamps": json.dumps(pos_timestamps),
+                            "start_time": start_time,
                             "rsp_type": flit_info.get("rsp_type", ""),
                             "req_attr": flit_info.get("req_attr", ""),
                         }
@@ -257,7 +285,7 @@ def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFram
         flits_df = (
             pd.DataFrame(flits_rows)
             if flits_rows
-            else pd.DataFrame(columns=["packet_id", "flit_id", "flit_type", "source_node", "dest_node", "source_type", "dest_type", "position_timestamps", "rsp_type", "req_attr"])
+            else pd.DataFrame(columns=["packet_id", "flit_id", "flit_type", "source_node", "dest_node", "source_type", "dest_type", "position_timestamps", "start_time", "rsp_type", "req_attr"])
         )
 
         return requests_df, flits_df
@@ -314,10 +342,10 @@ def _build_waveform_signal(packet_id: int, flit_row, flit_type: str, flit_id: Op
             logger.debug(f"Packet {packet_id} flit {flit_type} timestamps: {list(pos_timestamps.keys())}")
         except Exception as e:
             logger.error(f"Failed to parse position_timestamps: {e}")
-            pass
+            pos_timestamps = {}
 
     # 将所有位置按时间排序
-    sorted_positions = sorted(pos_timestamps.items(), key=lambda x: x[1])
+    sorted_positions = sorted(pos_timestamps.items(), key=lambda x: x[1]) if pos_timestamps else []
 
     if not sorted_positions:
         # 没有时间戳数据
@@ -374,26 +402,6 @@ def _build_waveform_signal(packet_id: int, flit_row, flit_type: str, flit_id: Op
     return WaveformSignal(name=name, packet_id=packet_id, flit_type=flit_type, flit_id=flit_id, events=events)
 
 
-def _get_flit_start_time(flit_row) -> float:
-    """从 position_timestamps 中提取 flit 的开始时间（优先使用L2H时间戳）"""
-    import json
-
-    pos_timestamps = {}
-    if "position_timestamps" in flit_row and flit_row["position_timestamps"]:
-        try:
-            pos_timestamps = json.loads(flit_row["position_timestamps"])
-        except:
-            pass
-
-    if pos_timestamps:
-        # 优先使用L2H时间戳（进入网络的时间）
-        if "L2H" in pos_timestamps:
-            return pos_timestamps["L2H"]
-        # 否则使用最小时间戳
-        return min(pos_timestamps.values())
-    return float("inf")
-
-
 # ==================== API端点 ====================
 
 
@@ -404,26 +412,17 @@ async def get_waveform_data(
     packet_ids: Optional[str] = Query(None, description="逗号分隔的packet ID列表"),
     time_start: Optional[float] = Query(None, description="时间范围起点(ns)"),
     time_end: Optional[float] = Query(None, description="时间范围终点(ns)"),
-    max_packets: int = Query(20, ge=1, le=100, description="最大请求数"),
 ) -> WaveformResponse:
     """
     获取波形数据
 
     - packet_ids: 指定的请求ID列表（逗号分隔）
     - time_start/time_end: 时间范围过滤
-    - max_packets: 不指定packet_ids时，返回的最大请求数
     """
+    import time
+
     # 获取实验类型
     result_type = _get_result_type(experiment_id)
-
-    # 从数据库加载parquet数据
-    try:
-        requests_df, flits_df = _load_parquet_from_db(result_id, result_type)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"加载parquet数据失败: {e}")
-        raise HTTPException(status_code=500, detail=f"加载波形数据失败: {str(e)}")
 
     # 解析packet_ids参数
     selected_packet_ids = None
@@ -433,14 +432,19 @@ async def get_waveform_data(
         except ValueError:
             raise HTTPException(status_code=400, detail="packet_ids格式错误，应为逗号分隔的整数")
 
-    # 过滤requests
-    filtered_requests = requests_df
+    # 从数据库加载parquet数据
+    t1 = time.time()
+    try:
+        requests_df, flits_df = _load_parquet_from_db(result_id, result_type)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"加载波形数据失败: {str(e)}")
+    t2 = time.time()
 
-    if selected_packet_ids:
-        filtered_requests = filtered_requests[filtered_requests["packet_id"].isin(selected_packet_ids)]
-    else:
-        # 按开始时间排序，取前max_packets个
-        filtered_requests = filtered_requests.sort_values("start_time_ns").head(max_packets)
+    # 过滤requests
+    t3 = time.time()
+    filtered_requests = requests_df
 
     # 时间范围过滤
     if time_start is not None:
@@ -452,15 +456,17 @@ async def get_waveform_data(
     final_packet_ids = filtered_requests["packet_id"].tolist()
 
     # 过滤flits
+    t4 = time.time()
     filtered_flits = flits_df[flits_df["packet_id"].isin(final_packet_ids)].copy()
 
-    # 计算每个 flit 的开始时间并排序
-    filtered_flits["_start_time"] = filtered_flits.apply(_get_flit_start_time, axis=1)
-    filtered_flits = filtered_flits.sort_values(["packet_id", "_start_time"])
-    filtered_flits = filtered_flits.drop(columns=["_start_time"])
+    # 优化：直接使用预计算的start_time，无需再调用apply
+    filtered_flits = filtered_flits.sort_values(["packet_id", "start_time"])
+    t5 = time.time()
 
     # 构建波形信号
+    t6 = time.time()
     signals = []
+    signal_count = 0
     for _, flit_row in filtered_flits.iterrows():
         packet_id = int(flit_row["packet_id"])
         flit_type = flit_row["flit_type"]
@@ -469,8 +475,11 @@ async def get_waveform_data(
         signal = _build_waveform_signal(packet_id, flit_row, flit_type, flit_id)
         if signal.events:  # 只添加有事件的信号
             signals.append(signal)
+            signal_count += 1
+    t7 = time.time()
 
     # 计算时间范围
+    t8 = time.time()
     all_times = []
     for signal in signals:
         for event in signal.events:
@@ -485,7 +494,16 @@ async def get_waveform_data(
     # 位置列表（按flit传输顺序）
     stages = ["IP_TX", "L2H", "IQ", "Link", "RB", "EQ", "H2L", "IP_RX"]
 
-    return WaveformResponse(time_range=time_range, signals=signals, stages=stages)
+    t9 = time.time()
+
+    return WaveformResponse(
+        time_range=time_range,
+        signals=signals,
+        stages=stages,
+        total_packets=len(filtered_requests),
+        offset=0,
+        returned_packets=len(filtered_requests)
+    )
 
 
 @router.get("/experiments/{experiment_id}/results/{result_id}/packets")
@@ -515,7 +533,6 @@ async def list_packets(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"加载parquet数据失败: {e}")
         raise HTTPException(status_code=500, detail=f"加载波形数据失败: {str(e)}")
 
     # 类型过滤
@@ -595,7 +612,11 @@ async def check_waveform_data(
         }
 
     try:
-        requests_df, flits_df = _load_parquet_from_db(result_id, result_type)
+        # check 端点需要统计所有数据，所以加载所有（不分页）
+        requests_df, flits_df = _load_parquet_from_db(
+            result_id,
+            result_type,
+        )
 
         return {
             "available": True,

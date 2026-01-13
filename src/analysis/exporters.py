@@ -1650,7 +1650,7 @@ class JSONExporter:
 class ParquetExporter:
     """Parquet格式导出器 - 用于波形数据存储"""
 
-    def __init__(self, network_frequency: int = 2):
+    def __init__(self, network_frequency: float = 2.0):
         """
         初始化Parquet导出器
 

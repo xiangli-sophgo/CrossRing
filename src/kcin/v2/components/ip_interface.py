@@ -82,11 +82,6 @@ class IPInterface:
         self.rsp_networks = rsp_networks if isinstance(rsp_networks, list) else [rsp_networks]
         self.data_networks = data_networks if isinstance(data_networks, list) else [data_networks]
 
-        # 兼容性：保留单网络引用
-        self.req_network = self.req_networks[0]
-        self.rsp_network = self.rsp_networks[0]
-        self.data_network = self.data_networks[0]
-
         # 通道选择器（多通道时使用）
         self.channel_selector = channel_selector
 
@@ -123,8 +118,8 @@ class IPInterface:
 
         self.networks = {
             "req": {
-                "network": req_network,
-                "send_flits": req_network.send_flits,
+                "network": self.req_networks[0],
+                "send_flits": self.req_networks[0].send_flits,
                 "inject_fifo": deque(),  # 1GHz域 - IP核产生的请求
                 "l2h_fifo_pre": None,  # 1GHz → 2GHz 预缓冲
                 "h2l_fifo_h_pre": None,  # 2GHz → H2L_H 预缓冲
@@ -137,8 +132,8 @@ class IPInterface:
                 "rx_channel_buffer": deque(maxlen=config.RS_OUT_CH_BUFFER),  # RS.output_fifos[ch_buffer] → IP接收
             },
             "rsp": {
-                "network": rsp_network,
-                "send_flits": rsp_network.send_flits,
+                "network": self.rsp_networks[0],
+                "send_flits": self.rsp_networks[0].send_flits,
                 "inject_fifo": deque(),
                 "l2h_fifo_pre": None,
                 "h2l_fifo_h_pre": None,
@@ -151,8 +146,8 @@ class IPInterface:
                 "rx_channel_buffer": deque(maxlen=config.RS_OUT_CH_BUFFER),
             },
             "data": {
-                "network": data_network,
-                "send_flits": data_network.send_flits,
+                "network": self.data_networks[0],
+                "send_flits": self.data_networks[0].send_flits,
                 "inject_fifo": deque(),
                 "l2h_fifo_pre": None,
                 "h2l_fifo_h_pre": None,
@@ -383,7 +378,7 @@ class IPInterface:
             is_cross_die = hasattr(flit, "d2d_target_die") and hasattr(flit, "d2d_origin_die") and flit.d2d_target_die != flit.d2d_origin_die
 
             # 记录请求统计
-            d2d_model = getattr(self.req_network, "d2d_model", None)
+            d2d_model = getattr(self.req_networks[0], "d2d_model", None)
             if d2d_model:
                 die_id = getattr(self.config, "DIE_ID", 0)
                 d2d_model.record_request_issued(flit.packet_id, die_id, flit.req_type, is_cross_die)
@@ -788,25 +783,25 @@ class IPInterface:
                         self.request_tracker.mark_request_completed(rsp.packet_id, self.current_cycle)
 
                     # 同时更新arrive_flits中对应packet的所有flit的时间戳
-                    if req.packet_id in self.req_network.arrive_flits:
-                        for flit in self.req_network.arrive_flits[req.packet_id]:
+                    if req.packet_id in self.req_networks[0].arrive_flits:
+                        for flit in self.req_networks[0].arrive_flits[req.packet_id]:
                             flit.Comp_received_cycle = self.current_cycle
                             flit.data_received_complete_cycle = self.current_cycle
 
                     # 同时更新数据网络中对应packet的所有flit的时间戳（用于结果统计）
-                    if req.packet_id in self.data_network.arrive_flits:
-                        for flit in self.data_network.arrive_flits[req.packet_id]:
+                    if req.packet_id in self.data_networks[0].arrive_flits:
+                        for flit in self.data_networks[0].arrive_flits[req.packet_id]:
                             flit.Comp_received_cycle = self.current_cycle
                             flit.data_received_complete_cycle = self.current_cycle
 
                 # 对于跨Die写请求，需要特殊处理tracker释放
                 if req and self._is_cross_die_write_request(req):
                     # 计算跨Die写请求的延迟（在释放tracker之前）
-                    if req.packet_id in self.data_network.send_flits:
-                        first_flit = self.data_network.send_flits[req.packet_id][0]
+                    if req.packet_id in self.data_networks[0].send_flits:
+                        first_flit = self.data_networks[0].send_flits[req.packet_id][0]
                         complete_cycle = self.current_cycle
 
-                        for f in self.data_network.send_flits[req.packet_id]:
+                        for f in self.data_networks[0].send_flits[req.packet_id]:
                             f.sync_latency_record(req)
                             # 计算延迟
                             f.cmd_latency = f.cmd_received_by_cake0_cycle - f.cmd_entry_noc_from_cake0_cycle
@@ -825,7 +820,7 @@ class IPInterface:
                     if hasattr(req, "d2d_origin_die") and hasattr(req, "d2d_target_die") and hasattr(req, "d2d_origin_type") and req.d2d_origin_type == self.ip_type:
                         die_id = getattr(self.config, "DIE_ID", None)
                         if die_id is not None and req.d2d_origin_die == die_id:
-                            d2d_model = getattr(self.req_network, "d2d_model", None)
+                            d2d_model = getattr(self.req_networks[0], "d2d_model", None)
                             if d2d_model:
                                 d2d_model.d2d_requests_completed[die_id] += 1
                                 # 记录Comp响应的接收（只在真正的源IP记录）
@@ -918,7 +913,7 @@ class IPInterface:
         if flit.req_type == "read":
             # 检查是否为跨Die返回的数据，更新D2D统计
             die_id = getattr(self.config, "DIE_ID", None)
-            d2d_model = getattr(self.req_network, "d2d_model", None)
+            d2d_model = getattr(self.req_networks[0], "d2d_model", None)
 
             if hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die"):
                 if flit.d2d_origin_die != flit.d2d_target_die:
@@ -954,7 +949,7 @@ class IPInterface:
                     die_id = getattr(self.config, "DIE_ID", None)
                     if die_id is not None and flit.d2d_origin_die == die_id:
                         if len(self.rn_rdb[flit.packet_id]) == flit.burst_length:
-                            d2d_model = getattr(self.req_network, "d2d_model", None)
+                            d2d_model = getattr(self.req_networks[0], "d2d_model", None)
                             if d2d_model:
                                 d2d_model.d2d_requests_completed[die_id] += 1
             # 检查是否收集完整个burst
@@ -975,12 +970,12 @@ class IPInterface:
                     self.rn_tracker_pointer["read"] -= 1
                     self.rn_rdb_count["count"] += req.burst_length
                     # 为所有flit设置完成时间戳和计算延迟
-                    first_flit = self.data_network.send_flits[flit.packet_id][0]
+                    first_flit = self.data_networks[0].send_flits[flit.packet_id][0]
                     # 记录最后到达时间
                     complete_cycle = self.current_cycle
 
                     # 同时更新tracker中的data_flits和network中的send_flits
-                    for f in self.data_network.send_flits[flit.packet_id]:
+                    for f in self.data_networks[0].send_flits[flit.packet_id]:
                         f.leave_db_cycle = self.current_cycle
                         f.sync_latency_record(req)
                         # 为所有flit设置receive时间戳，确保后续处理能获得正确值
@@ -1014,7 +1009,7 @@ class IPInterface:
         elif flit.req_type == "write":
             # D2D写数据统计（包括跨Die和Die内）
             die_id = getattr(self.config, "DIE_ID", None)
-            d2d_model = getattr(self.req_network, "d2d_model", None)
+            d2d_model = getattr(self.req_networks[0], "d2d_model", None)
 
             if hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die"):
                 if die_id is not None and d2d_model:
@@ -1065,11 +1060,11 @@ class IPInterface:
                     # 释放时间字典已在__init__中初始化
 
                     # 更新flit时间戳
-                    first_flit = next((flit for flit in self.data_network.send_flits[flit.packet_id] if flit.flit_id == 0), self.data_network.send_flits[flit.packet_id][0])
+                    first_flit = next((flit for flit in self.data_networks[0].send_flits[flit.packet_id] if flit.flit_id == 0), self.data_networks[0].send_flits[flit.packet_id][0])
                     # 记录最后到达时间
                     complete_cycle = self.current_cycle
 
-                    for f in self.data_network.send_flits[flit.packet_id]:
+                    for f in self.data_networks[0].send_flits[flit.packet_id]:
                         f.leave_db_cycle = release_time
                         f.sync_latency_record(req)
                         # 为所有flit设置receive时间戳，确保后续处理能获得正确值

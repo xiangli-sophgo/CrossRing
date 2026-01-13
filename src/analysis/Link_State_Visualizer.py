@@ -93,41 +93,72 @@ class NetworkLinkVisualizer:
         # Show tags only mode (force all flit faces to light grey)
         self.show_tags_only = False
         # ===============  History Buffer  ====================
-        # 支持多网络显示
-        self.networks = None
-        self.selected_network_index = 2
-        # 为每个网络维护独立历史缓冲
-        self.histories = [deque(maxlen=20) for _ in range(3)]
-        self.buttons = []
-        # 添加网络选择按钮
-        btn_positions = [
-            (0.01, 0.03, 0.07, 0.04),
-            (0.10, 0.03, 0.07, 0.04),
-            (0.19, 0.03, 0.07, 0.04),
-        ]
-        for idx, label in enumerate(["REQ", "RSP", "DATA"]):
-            ax_btn = self.fig.add_axes(btn_positions[idx])
-            btn = Button(ax_btn, label)
-            btn.on_clicked(lambda event, i=idx: self._on_select_network(i))
-            self.buttons.append(btn)
+        # 支持多网络和多通道显示
+        self.networks = None  # 将存储 {"req": [...], "rsp": [...], "data": [...]}
+        self.network_types = ["req", "rsp", "data"]
+        self.selected_network_type = "data"  # 默认DATA网络
+        self.selected_channel_index = 0      # 默认Ch0
 
-        # -------- Clear-Highlight button --------
-        ax_clear = self.fig.add_axes([0.28, 0.03, 0.07, 0.04])
-        self.clear_btn = Button(ax_clear, "Clear HL")
-        self.clear_btn.on_clicked(self._on_clear_highlight)
+        # 嵌套历史缓冲：{network_type: [ch0_history, ch1_history, ...]}
+        self.histories = {
+            "req": [],   # 稍后根据实际通道数初始化
+            "rsp": [],
+            "data": []
+        }
 
-        # -------- Show Tags Only button --------
-        ax_tags = self.fig.add_axes([0.37, 0.03, 0.07, 0.04])
-        self.tags_btn = Button(ax_tags, "Show Tags")
-        self.tags_btn.on_clicked(self._on_toggle_tags)
+        # ==================== 按钮布局参数（单行底部放置） ====================
+        btn_width = 0.05      # 减小宽度
+        btn_height = 0.028    # 减小高度
+        btn_spacing = 0.008   # 减小间距
+        btn_row_y = 0.01      # 统一在底部
+        group_spacing = 0.05  # 分组之间的间隔
+
+        # ==================== 第一组：网络类型按钮 ====================
+        self.network_type_buttons = []
+        network_labels = ["REQ", "RSP", "DATA"]
+        group1_x_start = 0.02
+
+        for idx, label in enumerate(network_labels):
+            ax_btn = self.fig.add_axes([
+                group1_x_start + idx * (btn_width + btn_spacing),
+                btn_row_y,
+                btn_width,
+                btn_height
+            ])
+            btn = Button(ax_btn, label, color='#e0e0e0', hovercolor='#d0d0d0')  # 灰色初始色
+            btn.label.set_fontsize(8)
+            btn.on_clicked(lambda event, i=idx: self._on_select_network_type(i))
+            ax_btn.set_facecolor('#e0e0e0')
+            self.network_type_buttons.append((btn, ax_btn))
+
+        # ==================== 第二组：通道选择按钮（动态） ====================
+        self.channel_buttons = []  # 将在 _update_channel_buttons() 中创建
+        self.channel_buttons_axes = []  # 存储axes以便后续清理
+        self.group2_x_start = group1_x_start + 3 * (btn_width + btn_spacing) + group_spacing  # 动态计算起始位置
+
+        # ==================== 第三组：功能按钮 ====================
+        # Clear HL 按钮
+        group3_x_start = 0.50
+        self.clear_hl_btn_ax = self.fig.add_axes([group3_x_start, btn_row_y, 0.06, btn_height])
+        self.clear_hl_btn = Button(self.clear_hl_btn_ax, "Clear HL", color='#e0e0e0', hovercolor='#d0d0d0')
+        self.clear_hl_btn.label.set_fontsize(8)
+        self.clear_hl_btn_ax.set_facecolor('#e0e0e0')
+        self.clear_hl_btn.on_clicked(self._on_clear_highlight)
+
+        # Show Tags 切换按钮
+        self.show_tags_btn_ax = self.fig.add_axes([group3_x_start + 0.065, btn_row_y, 0.06, btn_height])
+        self.show_tags_btn = Button(self.show_tags_btn_ax, "Show Tags", color='#e0e0e0', hovercolor='#d0d0d0')
+        self.show_tags_btn.label.set_fontsize(8)
+        self.show_tags_btn_ax.set_facecolor('#e0e0e0')
+        self.show_tags_btn.on_clicked(self._on_toggle_tags)
 
         # -------- Hover tooltip (显示 packet_id) --------
         # (removed hover annotation and motion_notify_event)
         self._play_idx = None  # 暂停时正在浏览的 history 索引
         self._draw_static_elements()
 
-        # 初始化按钮状态
-        self._update_button_states()
+        # 初始化通道按钮（首次调用update时真正初始化）
+        self._channel_buttons_initialized = False
 
         # 初始化时显示中心节点
         rows, cols = self.network.config.NUM_ROW, self.network.config.NUM_COL
@@ -238,15 +269,21 @@ class NetworkLinkVisualizer:
         # 清空并绘制右侧 Piece 视图
         self.piece_ax.clear()
         self.piece_ax.axis("off")
-        if self.paused and self._play_idx is not None and len(self.histories[self.selected_network_index]) > self._play_idx:
-            _, _, meta = self.histories[self.selected_network_index][self._play_idx]
+        if self.networks is None or self.selected_network_type not in self.networks:
+            return
+
+        current_history = self.histories[self.selected_network_type][self.selected_channel_index]
+        current_network = self.networks[self.selected_network_type][self.selected_channel_index]
+
+        if self.paused and self._play_idx is not None and len(current_history) > self._play_idx:
+            _, _, meta = current_history[self._play_idx]
             fake_net = SimpleNamespace(
                 IQ_channel_buffer=meta["IQ_channel_buffer"],
                 EQ_channel_buffer=meta["EQ_channel_buffer"],
                 inject_queues=meta["inject_queues"],
                 eject_queues=meta["eject_queues"],
                 ring_bridge=meta["ring_bridge"],
-                config=self.networks[self.selected_network_index].config,
+                config=current_network.config,
                 cross_point=meta["cross_point"],
                 IQ_arbiter_input_fifo=meta.get("IQ_arbiter_input_fifo", {}),
                 EQ_arbiter_input_fifo=meta.get("EQ_arbiter_input_fifo", {}),
@@ -254,8 +291,7 @@ class NetworkLinkVisualizer:
             )
             self.piece_vis.draw_piece_for_node(self._selected_node, fake_net)
         else:
-            live_net = self.networks[self.selected_network_index] if self.networks is not None else self.network
-            self.piece_vis.draw_piece_for_node(self._selected_node, live_net)
+            self.piece_vis.draw_piece_for_node(self._selected_node, current_network)
 
         self.fig.canvas.draw_idle()
 
@@ -302,9 +338,9 @@ class NetworkLinkVisualizer:
                 # 同步右侧 Piece 高亮
                 self.piece_vis.sync_highlight(self.use_highlight, self.tracked_pid)
                 # 同步右侧 Piece 高亮并重绘 Piece 视图
-                if self._selected_node is not None:
-                    live_net = self.networks[self.selected_network_index] if self.networks is not None else self.network
-                    self.piece_vis.draw_piece_for_node(self._selected_node, live_net)
+                if self._selected_node is not None and self.networks is not None:
+                    current_network = self.networks[self.selected_network_type][self.selected_channel_index]
+                    self.piece_vis.draw_piece_for_node(self._selected_node, current_network)
                 # 更新链路和 piece 的可见性
                 self._update_tracked_labels()
                 # Show info_text with tag if present
@@ -554,26 +590,50 @@ class NetworkLinkVisualizer:
             "is_self_loop": False,
         }
 
-    def update(self, networks=None, cycle=None, skip_pause=False):
+    def update(self, networks_dict_or_list=None, cycle=None, skip_pause=False):
         """
         更新每条链路队列中 flit 的显示
-        - 空位: 无填充的方形
-        - flit: 有颜色的方形，颜色由 packet_id 决定
-        - 支持所有方向(右、左、上、下)的链路
-        - ID标签位置根据链路方向调整:
-        - 向右的链路: 纵向标签在下方（数字垂直排列）
-        - 向左的链路: 纵向标签在上方（数字垂直排列）
-        - 向上的链路: 横向标签在右侧
-        - 向下的链路: 横向标签在左侧
+
+        Args:
+            networks_dict_or_list: 字典格式 {"req": [ch0, ch1, ...], ...} 或列表格式 [req, rsp, data]（兼容旧版）
+            cycle: 当前仿真周期
+            skip_pause: 是否跳过暂停
         """
         # 检查窗口是否仍然存在
         if not plt.fignum_exists(self.fig.number):
             self.should_stop = True
             return False
 
-        # 接收并保存多网络列表
-        if networks is not None:
-            self.networks = networks
+        # 接收并转换网络数据结构（兼容旧版列表格式）
+        if networks_dict_or_list is not None:
+            if isinstance(networks_dict_or_list, list):
+                # 旧版列表格式：自动转换为字典
+                self.networks = {
+                    "req": [networks_dict_or_list[0]],
+                    "rsp": [networks_dict_or_list[1]],
+                    "data": [networks_dict_or_list[2]]
+                }
+            else:
+                # 新版字典格式
+                self.networks = networks_dict_or_list
+
+            # 首次调用时初始化历史缓冲和通道按钮
+            if not self._channel_buttons_initialized and self.networks is not None:
+                for net_type, net_list in self.networks.items():
+                    self.histories[net_type] = [
+                        deque(maxlen=20) for _ in range(len(net_list))
+                    ]
+
+                # 初始化通道按钮
+                self._update_channel_buttons()
+
+                # 高亮默认网络类型按钮（蓝色高亮）
+                default_idx = self.network_types.index(self.selected_network_type)
+                btn, ax = self.network_type_buttons[default_idx]
+                btn.color = '#4da6d6'  # 蓝色高亮
+                ax.set_facecolor('#4da6d6')
+
+                self._channel_buttons_initialized = True
 
         # 检查停止标志
         if self.should_stop:
@@ -585,69 +645,74 @@ class NetworkLinkVisualizer:
             return self.ax.patches
         self.cycle = cycle
 
-        # 记录所有网络的历史快照
+        # 记录所有网络的历史快照（双层结构）
         if cycle is not None and self.networks is not None:
-            for i, net in enumerate(self.networks):
-                # 构建快照（存储 Flit 对象或 None）
-                # 纯offset模式：从Ring.slices获取flit
-                snap = self._build_snapshot_from_rings(net)
-                meta = {
-                    "network_name": net.name,
-                    "cross_point": copy.deepcopy(net.cross_point),
-                    # 新架构：ITag存储在Ring.itag中，不再使用links_tag
-                }
-                # v2 架构：保存 ring_stations
-                if hasattr(net, "ring_stations"):
-                    # 只保存每个 RingStation 的 FIFO 状态
-                    rs_snapshot = {}
-                    for node_id, rs in net.ring_stations.items():
-                        rs_snapshot[node_id] = SimpleNamespace(
-                            input_fifos={k: list(v) for k, v in rs.input_fifos.items()},
-                            output_fifos={k: list(v) for k, v in rs.output_fifos.items()},
-                        )
-                    meta["ring_stations"] = rs_snapshot
-                else:
-                    # v1 架构：保存 IQ/EQ/RB
-                    meta["IQ_channel_buffer"] = copy.deepcopy(net.IQ_channel_buffer)
-                    meta["EQ_channel_buffer"] = copy.deepcopy(net.EQ_channel_buffer)
-                    meta["inject_queues"] = copy.deepcopy(net.inject_queues)
-                    meta["eject_queues"] = copy.deepcopy(net.eject_queues)
-                    meta["ring_bridge"] = copy.deepcopy(net.ring_bridge)
-                    meta["IQ_arbiter_input_fifo"] = copy.deepcopy(getattr(net, "IQ_arbiter_input_fifo", {}))
-                    meta["EQ_arbiter_input_fifo"] = copy.deepcopy(getattr(net, "EQ_arbiter_input_fifo", {}))
-                    # 保存crosspoints的cp_slices
-                    crosspoints_snapshot = {}
-                    for node_id, cps in net.crosspoints.items():
-                        crosspoints_snapshot[node_id] = {
-                            "horizontal": SimpleNamespace(cp_slices=copy.deepcopy(cps["horizontal"].cp_slices)),
-                            "vertical": SimpleNamespace(cp_slices=copy.deepcopy(cps["vertical"].cp_slices)),
-                        }
-                    meta["crosspoints"] = crosspoints_snapshot
-                    # 新架构：保存Ring的itag信息（用于ITag显示）
-                    # 直接引用live Ring对象（ITag回放时使用实时网络）
-                    meta["horizontal_rings"] = net.horizontal_rings
-                    meta["vertical_rings"] = net.vertical_rings
-                self.histories[i].append((cycle, snap, meta))
+            for net_type, network_list in self.networks.items():
+                for ch_idx, net in enumerate(network_list):
+                    # 构建快照
+                    snap = self._build_snapshot_from_rings(net)
+                    meta = {
+                        "network_name": net.name,
+                        "cross_point": copy.deepcopy(net.cross_point),
+                    }
+                    # v2 架构：保存 ring_stations
+                    if hasattr(net, "ring_stations"):
+                        rs_snapshot = {}
+                        for node_id, rs in net.ring_stations.items():
+                            rs_snapshot[node_id] = SimpleNamespace(
+                                input_fifos={k: list(v) for k, v in rs.input_fifos.items()},
+                                output_fifos={k: list(v) for k, v in rs.output_fifos.items()},
+                            )
+                        meta["ring_stations"] = rs_snapshot
+                    else:
+                        # v1 架构：保存 IQ/EQ/RB
+                        meta["IQ_channel_buffer"] = copy.deepcopy(net.IQ_channel_buffer)
+                        meta["EQ_channel_buffer"] = copy.deepcopy(net.EQ_channel_buffer)
+                        meta["inject_queues"] = copy.deepcopy(net.inject_queues)
+                        meta["eject_queues"] = copy.deepcopy(net.eject_queues)
+                        meta["ring_bridge"] = copy.deepcopy(net.ring_bridge)
+                        meta["IQ_arbiter_input_fifo"] = copy.deepcopy(getattr(net, "IQ_arbiter_input_fifo", {}))
+                        meta["EQ_arbiter_input_fifo"] = copy.deepcopy(getattr(net, "EQ_arbiter_input_fifo", {}))
+                        crosspoints_snapshot = {}
+                        for node_id, cps in net.crosspoints.items():
+                            crosspoints_snapshot[node_id] = {
+                                "horizontal": SimpleNamespace(cp_slices=copy.deepcopy(cps["horizontal"].cp_slices)),
+                                "vertical": SimpleNamespace(cp_slices=copy.deepcopy(cps["vertical"].cp_slices)),
+                            }
+                        meta["crosspoints"] = crosspoints_snapshot
+                        meta["horizontal_rings"] = net.horizontal_rings
+                        meta["vertical_rings"] = net.vertical_rings
 
-        # 渲染当前选中网络的快照
+                    # 存入对应通道的历史缓冲
+                    self.histories[net_type][ch_idx].append((cycle, snap, meta))
+
+        # 渲染当前选中网络和通道的快照
         if self.networks is not None:
-            current_net = self.networks[self.selected_network_index]
-            # 纯offset模式：从Ring.slices获取flit
-            render_snap = self._build_snapshot_from_rings(current_net)
+            current_network = self.networks[self.selected_network_type][self.selected_channel_index]
+            render_snap = self._build_snapshot_from_rings(current_network)
             self._render_snapshot(render_snap)
+
+            # 更新标题显示
+            num_channels = len(self.networks[self.selected_network_type])
+            if num_channels == 1:
+                title = f"{self.selected_network_type.upper()} Network @ Cycle {cycle}"
+            else:
+                title = f"{self.selected_network_type.upper()} Channel {self.selected_channel_index} @ Cycle {cycle}"
+            self.ax.set_title(title, fontsize=10, pad=10)
+
             # 若已有选中节点，实时更新右侧 Piece 视图
             if self._selected_node is not None:
                 self._refresh_piece_view()
-            self.ax.set_title(current_net.name)
         else:
-            # 纯offset模式：从Ring.slices获取flit
+            # 回退到单网络模式
             self._render_snapshot(self._build_snapshot_from_rings(self.network))
-            # 若已有选中节点，实时更新右侧 Piece 视图
             if self._selected_node is not None:
                 self._refresh_piece_view()
             self.ax.set_title(self.network.name)
+
         if cycle and self.cycle % 10 == 0:
             self._update_status_display()
+
         # 检查停止标志，避免不必要的pause
         if not skip_pause and not self.should_stop:
             plt.pause(self.pause_interval)
@@ -678,19 +743,22 @@ class NetworkLinkVisualizer:
         self.piece_ax.clear()
         self.piece_ax.axis("off")
 
-        # 当前网络对应的历史缓冲
-        current_history = self.histories[self.selected_network_index]
+        # 当前网络和通道对应的历史缓冲
+        if self.networks is None or self.selected_network_type not in self.networks:
+            return
+        current_history = self.histories[self.selected_network_type][self.selected_channel_index]
+        current_network = self.networks[self.selected_network_type][self.selected_channel_index]
 
         # 回溯模式：用保存的快照队列
         if self.paused and self._play_idx is not None and len(current_history) > self._play_idx:
             _, _, meta = current_history[self._play_idx]
             # v2 架构检查
-            if hasattr(self.networks[self.selected_network_index], "ring_stations"):
+            if hasattr(current_network, "ring_stations"):
                 # v2: 需要包含 ring_stations
                 fake_net = SimpleNamespace(
                     ring_stations=meta.get("ring_stations", {}),
                     cross_point=meta["cross_point"],
-                    config=self.networks[self.selected_network_index].config,
+                    config=current_network.config,
                 )
             else:
                 fake_net = SimpleNamespace(
@@ -706,12 +774,11 @@ class NetworkLinkVisualizer:
                     IQ_arbiter_input_fifo=meta.get("IQ_arbiter_input_fifo", {}),
                     EQ_arbiter_input_fifo=meta.get("EQ_arbiter_input_fifo", {}),
                     crosspoints=meta.get("crosspoints", {}),
-                    config=self.networks[self.selected_network_index].config,
+                    config=current_network.config,
                 )
             self.piece_vis.draw_piece_for_node(self._selected_node, fake_net)
         else:  # 实时
-            live_net = self.networks[self.selected_network_index]
-            self.piece_vis.draw_piece_for_node(self._selected_node, live_net)
+            self.piece_vis.draw_piece_for_node(self._selected_node, current_network)
 
         self.fig.canvas.draw_idle()
 
@@ -723,22 +790,25 @@ class NetworkLinkVisualizer:
     def _on_key(self, event):
         key = event.key
 
-        # 数字键1-3选择对应网络 (REQ=1, RSP=2, DATA=3)
+        # 数字键1-3选择对应网络类型 (REQ=1, RSP=2, DATA=3)
         if key in ["1", "2", "3"]:
-            network_idx = int(key) - 1
-            if 0 <= network_idx < len(self.histories):
-                self.selected_network_index = network_idx
-                # 更新按钮状态
-                self._update_button_states()
-                # 刷新显示（cycle=None避免重复保存快照）
-                if self.networks is not None:
-                    self.update(self.networks, cycle=None, skip_pause=True)
-                else:
-                    self.update(None, cycle=None, skip_pause=True)
-                return
+            type_idx = int(key) - 1
+            self._on_select_network_type(type_idx)
+            return
 
-        # 使用当前选中网络的历史
-        current_history = self.histories[self.selected_network_index]
+        # Ctrl+数字键选择通道
+        if key.startswith("ctrl+") and len(key) > 5 and key[5:].isdigit():
+            ch_idx = int(key[5:])
+            if self.networks is not None:
+                num_channels = len(self.networks[self.selected_network_type])
+                if 0 <= ch_idx < num_channels:
+                    self._on_select_channel(ch_idx)
+            return
+
+        # 使用当前选中网络和通道的历史
+        if self.networks is None or self.selected_network_type not in self.networks:
+            return
+        current_history = self.histories[self.selected_network_type][self.selected_channel_index]
 
         if key == "up":
             if not self.paused:  # 暂停时不调速
@@ -897,7 +967,10 @@ class NetworkLinkVisualizer:
 
     def _render_snapshot(self, snapshot):
         # 新架构：从Ring.itag获取tag信息
-        current_net = self.networks[self.selected_network_index] if self.networks else self.network
+        if self.networks and self.selected_network_type in self.networks:
+            current_net = self.networks[self.selected_network_type][self.selected_channel_index]
+        else:
+            current_net = self.network
         # keep snapshot for later info refresh
         self.last_snapshot = snapshot
         # 重置 flit→文本映射
@@ -1090,34 +1163,91 @@ class NetworkLinkVisualizer:
         # 普通模式：直接取调色板色
         return self._palette_color(flit.packet_id)
 
-    def _update_button_states(self):
-        """更新按钮的视觉状态（高亮选中的按钮）"""
-        # 更新网络类型按钮（REQ/RSP/DATA）
-        for idx, btn in enumerate(self.buttons):
-            if idx == self.selected_network_index:
-                btn.color = "lightblue"  # 选中
-                btn.hovercolor = "cornflowerblue"
+    def _on_select_network_type(self, type_idx):
+        """切换网络类型 (REQ/RSP/DATA)"""
+        self.selected_network_type = self.network_types[type_idx]
+        # 重置通道索引为0
+        self.selected_channel_index = 0
+
+        # 更新按钮高亮（蓝色高亮方案）
+        for i, (btn, ax) in enumerate(self.network_type_buttons):
+            if i == type_idx:
+                btn.color = '#4da6d6'         # 蓝色高亮
+                ax.set_facecolor('#4da6d6')
             else:
-                btn.color = "0.85"  # 未选中（浅灰色）
-                btn.hovercolor = "0.95"
-            btn.ax.set_facecolor(btn.color)
+                btn.color = '#e0e0e0'         # 灰色未选中
+                ax.set_facecolor('#e0e0e0')
 
-        self.fig.canvas.draw_idle()
+        # 动态更新通道按钮
+        self._update_channel_buttons()
 
-    def _on_select_network(self, idx):
-        """切换显示网络索引 idx（0/1/2）"""
-        self.selected_network_index = idx
-        # 更新按钮状态
-        self._update_button_states()
-        # 刷新显示（调用 update 渲染当前网络）
+        # 重新渲染
         if self.networks is not None:
-            self.update(
-                self.networks,
-                cycle=None,
-                # expected_packet_id=self.highlight_pid,
-                # use_highlight=self.use_highlight,
-                skip_pause=True,
-            )
+            self.update(self.networks, cycle=None, skip_pause=True)
+
+    def _on_select_channel(self, ch_idx):
+        """切换通道 (Ch0/Ch1/...)"""
+        self.selected_channel_index = ch_idx
+
+        # 更新按钮高亮（蓝色高亮方案）
+        for i, (btn, ax) in enumerate(self.channel_buttons):
+            if i == ch_idx:
+                btn.color = '#4da6d6'       # 蓝色高亮
+                ax.set_facecolor('#4da6d6')
+            else:
+                btn.color = '#e0e0e0'       # 灰色未选中
+                ax.set_facecolor('#e0e0e0')
+
+        # 重新渲染
+        if self.networks is not None:
+            self.update(self.networks, cycle=None, skip_pause=True)
+
+    def _update_channel_buttons(self):
+        """根据当前网络类型动态创建/更新通道按钮"""
+        # 清理旧按钮
+        for ax in self.channel_buttons_axes:
+            self.fig.delaxes(ax)
+        self.channel_buttons = []
+        self.channel_buttons_axes = []
+
+        if self.networks is None:
+            return
+
+        # 获取当前网络的通道数
+        current_networks = self.networks.get(self.selected_network_type, [])
+        num_channels = len(current_networks)
+
+        # 单通道时不显示通道选择器
+        if num_channels <= 1:
+            return
+
+        # 创建通道按钮（使用统一的美化参数）
+        btn_width = 0.05
+        btn_height = 0.028
+        btn_spacing = 0.008
+        btn_row_y = 0.01  # 统一在底部（同一行）
+
+        for ch_idx in range(num_channels):
+            ax_btn = self.fig.add_axes([
+                self.group2_x_start + ch_idx * (btn_width + btn_spacing),
+                btn_row_y,
+                btn_width,
+                btn_height
+            ])
+            btn = Button(ax_btn, f"Ch{ch_idx}", color='#e0e0e0', hovercolor='#d0d0d0')  # 灰色初始色
+            btn.label.set_fontsize(8)
+            btn.on_clicked(lambda event, i=ch_idx: self._on_select_channel(i))
+            ax_btn.set_facecolor('#e0e0e0')
+
+            # 高亮当前选中通道
+            if ch_idx == self.selected_channel_index:
+                btn.color = '#4da6d6'           # 蓝色高亮
+                ax_btn.set_facecolor('#4da6d6')
+
+            self.channel_buttons.append((btn, ax_btn))
+            self.channel_buttons_axes.append(ax_btn)
+
+        plt.draw()
 
     # ------------------------------------------------------------------
     # (removed hover annotation and motion event handler)
@@ -1140,26 +1270,11 @@ class NetworkLinkVisualizer:
         self.show_tags_only = not self.show_tags_only
         # 更新按钮标签文本以反映当前状态
         if self.show_tags_only:
-            self.tags_btn.label.set_text("Show Flits")
+            self.show_tags_btn.label.set_text("Show Flits")
         else:
-            self.tags_btn.label.set_text("Show Tags")
+            self.show_tags_btn.label.set_text("Show Tags")
         # 刷新当前网络视图（cycle=None避免重复保存快照）
         if self.networks is not None:
             self.update(self.networks, cycle=None, skip_pause=True)
         else:
             self.update(None, cycle=None, skip_pause=True)
-
-    def _on_select_network(self, idx):
-        """切换显示网络索引 idx（0/1/2）"""
-        self.selected_network_index = idx
-        # 更新按钮状态
-        self._update_button_states()
-        # 刷新显示（调用 update 渲染当前网络）
-        if self.networks is not None:
-            self.update(
-                self.networks,
-                cycle=None,
-                # expected_packet_id=self.highlight_pid,
-                # use_highlight=self.use_highlight,
-                skip_pause=True,
-            )

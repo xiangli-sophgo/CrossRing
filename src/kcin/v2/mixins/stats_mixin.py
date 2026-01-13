@@ -39,7 +39,7 @@ class StatsMixin:
         try:
             if hasattr(self, "result_processor") and hasattr(self.result_processor, "requests"):
                 for req_info in self.result_processor.requests:
-                    end_time_ns = req_info.end_time // self.config.CYCLES_PER_NS
+                    end_time_ns = round(req_info.end_time / self.config.CYCLES_PER_NS)
                     all_end_times.append(end_time_ns)
                     if req_info.req_type == "read":
                         read_end_times.append(end_time_ns)
@@ -50,7 +50,7 @@ class StatsMixin:
                 print(f"Warning: Could not get finish time stats from result_processor: {e}")
 
         # 更新统计数据，使用当前cycle作为备选
-        current_time_ns = self.cycle // self.config.CYCLES_PER_NS
+        current_time_ns = round(self.cycle / self.config.CYCLES_PER_NS)
 
         if read_end_times:
             self.R_finish_time_stat = max(read_end_times)
@@ -125,7 +125,11 @@ class StatsMixin:
 
 
             try:
-                self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)
+                self.link_state_vis.update({
+                    "req": self.req_networks,
+                    "rsp": self.rsp_networks,
+                    "data": self.data_networks
+                }, self.cycle)
             except Exception as e:
                 # 窗口已关闭，设置停止标志
                 self.link_state_vis.should_stop = True
@@ -134,35 +138,35 @@ class StatsMixin:
         """将 IP 模块的 channel buffer 数据同步到 network 对象，供可视化使用"""
         from collections import defaultdict
 
-        for network in [self.req_network, self.rsp_network, self.data_network]:
-            # 初始化 channel buffer 结构（如果不存在）
-            if not hasattr(network, "IQ_channel_buffer"):
-                network.IQ_channel_buffer = defaultdict(dict)
-            if not hasattr(network, "EQ_channel_buffer"):
-                network.EQ_channel_buffer = defaultdict(dict)
+        # 遍历所有网络类型和通道
+        networks_dict = {
+            "req": self.req_networks,
+            "rsp": self.rsp_networks,
+            "data": self.data_networks
+        }
 
-            # 确定网络类型
-            if network == self.req_network:
-                net_type = "req"
-            elif network == self.rsp_network:
-                net_type = "rsp"
-            else:
-                net_type = "data"
+        for net_type, network_list in networks_dict.items():
+            for network in network_list:
+                # 初始化 channel buffer 结构（如果不存在）
+                if not hasattr(network, "IQ_channel_buffer"):
+                    network.IQ_channel_buffer = defaultdict(dict)
+                if not hasattr(network, "EQ_channel_buffer"):
+                    network.EQ_channel_buffer = defaultdict(dict)
 
-            # 从 IP 模块同步数据
-            for (ip_type, node_id), ip_interface in self.ip_modules.items():
-                net_info = ip_interface.networks.get(net_type)
-                if net_info is None:
-                    continue
+                # 从 IP 模块同步数据
+                for (ip_type, node_id), ip_interface in self.ip_modules.items():
+                    net_info = ip_interface.networks.get(net_type)
+                    if net_info is None:
+                        continue
 
-                # IQ: IP发送方向 (tx_channel_buffer_pre)
-                # 使用列表包装单个 flit，以便可视化器可以迭代
-                tx_pre = net_info.get("tx_channel_buffer_pre")
-                network.IQ_channel_buffer[ip_type][node_id] = [tx_pre] if tx_pre is not None else []
+                    # IQ: IP发送方向 (tx_channel_buffer_pre)
+                    # 使用列表包装单个 flit，以便可视化器可以迭代
+                    tx_pre = net_info.get("tx_channel_buffer_pre")
+                    network.IQ_channel_buffer[ip_type][node_id] = [tx_pre] if tx_pre is not None else []
 
-                # EQ: IP接收方向 (rx_channel_buffer)
-                rx_buf = net_info.get("rx_channel_buffer")
-                network.EQ_channel_buffer[ip_type][node_id] = list(rx_buf) if rx_buf else []
+                    # EQ: IP接收方向 (rx_channel_buffer)
+                    rx_buf = net_info.get("rx_channel_buffer")
+                    network.EQ_channel_buffer[ip_type][node_id] = list(rx_buf) if rx_buf else []
 
     def error_log(self, flit, target_id, flit_id):
         if flit and flit.packet_id == target_id and flit.flit_id == flit_id:

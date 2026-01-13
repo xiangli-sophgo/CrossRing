@@ -39,7 +39,7 @@ class StatsMixin:
         try:
             if hasattr(self, "result_processor") and hasattr(self.result_processor, "requests"):
                 for req_info in self.result_processor.requests:
-                    end_time_ns = req_info.end_time // self.config.CYCLES_PER_NS
+                    end_time_ns = round(req_info.end_time / self.config.CYCLES_PER_NS)
                     all_end_times.append(end_time_ns)
                     if req_info.req_type == "read":
                         read_end_times.append(end_time_ns)
@@ -50,7 +50,7 @@ class StatsMixin:
                 print(f"Warning: Could not get finish time stats from result_processor: {e}")
 
         # 更新统计数据，使用当前cycle作为备选
-        current_time_ns = self.cycle // self.config.CYCLES_PER_NS
+        current_time_ns = round(self.cycle / self.config.CYCLES_PER_NS)
 
         if read_end_times:
             self.R_finish_time_stat = max(read_end_times)
@@ -121,7 +121,11 @@ class StatsMixin:
                 return
 
             try:
-                self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)
+                self.link_state_vis.update({
+                    "req": self.req_networks,
+                    "rsp": self.rsp_networks,
+                    "data": self.data_networks
+                }, self.cycle)
             except Exception as e:
                 # 窗口已关闭，设置停止标志
                 self.link_state_vis.should_stop = True
