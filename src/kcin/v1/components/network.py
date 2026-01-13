@@ -12,69 +12,9 @@ from src.kcin.base.config import KCINConfigBase
 from src.utils.flit import Flit, TokenBucket
 from src.utils.statistical_fifo import StatisticalFIFO
 from src.utils.ring_slice import RingSlice
+from src.utils.ring import Ring
 import logging
 import inspect
-
-
-class LinkSlot:
-    """
-    链路Slot对象 - 封装slot_id和tag信息
-
-    Slot是链路上的基本传输单元，每个seat持有一个Slot对象。
-    Slot携带slot_id（全局唯一标识）和ITag信息。
-    """
-
-    def __init__(self, slot_id: int):
-        """
-        初始化LinkSlot
-
-        Args:
-            slot_id: 全局唯一的slot标识符
-        """
-        self.slot_id = slot_id
-
-        # ITag信息 (注入预约机制)
-        self.itag_reserved = False
-        self.itag_reserver_id = None
-        self.itag_direction = None
-
-    def reserve_itag(self, reserver_id: int, direction: str) -> bool:
-        """
-        预约ITag
-
-        Args:
-            reserver_id: 预约者节点ID
-            direction: 预约方向
-
-        Returns:
-            是否成功预约
-        """
-        if self.itag_reserved:
-            return False
-
-        self.itag_reserved = True
-        self.itag_reserver_id = reserver_id
-        self.itag_direction = direction
-        return True
-
-    def clear_itag(self) -> None:
-        """清除ITag预约"""
-        self.itag_reserved = False
-        self.itag_reserver_id = None
-        self.itag_direction = None
-
-    def check_itag_match(self, reserver_id: int, direction: str) -> bool:
-        """
-        检查ITag是否匹配
-
-        Args:
-            reserver_id: 预约者节点ID
-            direction: 预约方向
-
-        Returns:
-            是否匹配
-        """
-        return self.itag_reserved and self.itag_reserver_id == reserver_id and self.itag_direction == direction
 
 
 class Network:
@@ -113,7 +53,6 @@ class Network:
         # EQ仲裁输入FIFO (深度2 + pre缓冲，4个输入端口，每个端口一个FIFO)
         self.EQ_arbiter_input_fifo = {"TU": {}, "TD": {}, "IQ": {}, "RB": {}}
         self.EQ_arbiter_input_fifo_pre = {"TU": {}, "TD": {}, "IQ": {}, "RB": {}}
-        self.links = {}
         self.cross_point = {"horizontal": defaultdict(lambda: defaultdict(list)), "vertical": defaultdict(lambda: defaultdict(list))}
         # Crosspoint conflict status: maintains pipeline queue [current_cycle, previous_cycle]
         self.crosspoint_conflict = {"horizontal": defaultdict(lambda: defaultdict(lambda: [False, False])), "vertical": defaultdict(lambda: defaultdict(lambda: [False, False]))}
@@ -121,14 +60,13 @@ class Network:
         self.links_flow_stat = {}
         # 每个周期的瞬时状态统计
         self.links_state_snapshots = []
-        # ITag setup
-        self.links_tag = {}
+        # ITag现在由Ring对象管理（Ring.itag）
 
         # 环形链表结构（新架构）
-        self.horizontal_rings = {}  # {row: [RingSlice列表]}
-        self.vertical_rings = {}    # {col: [RingSlice列表]}
-        self.cp_in_slices = {}      # {(node_id, direction): RingSlice}
-        self.cp_out_slices = {}     # {(node_id, direction): RingSlice}
+        self.horizontal_rings = {}  # {row: Ring对象}
+        self.vertical_rings = {}  # {col: Ring对象}
+        self.cp_in_slices = {}  # {(node_id, direction): RingSlice}
+        self.cp_out_slices = {}  # {(node_id, direction): RingSlice}
 
         # 每个FIFO Entry的等待计数器
         self.fifo_counters = {"TL": {}, "TR": {}}
@@ -224,13 +162,12 @@ class Network:
             },
         }
 
-        # Slot ID全局计数器（用于为每个seat分配唯一ID）
-        self.global_slot_id_counter = 0
+        # 新架构：slot_id由Ring动态计算，不再使用全局计数器
 
         # ETag setup (这些数据结构由Network管理，CrossPoint共享引用)
         # T0轮询机制：环slot列表、T0_table和仲裁指针
         self.horizontal_ring_slots = {}  # {node_id: [slot_id, ...]} 横向环的slot列表
-        self.vertical_ring_slots = {}    # {node_id: [slot_id, ...]} 纵向环的slot列表
+        self.vertical_ring_slots = {}  # {node_id: [slot_id, ...]} 纵向环的slot列表
         self.T0_table_h = {}  # {node_id: set(slot_id, ...)} 横向环T0 flit记录表
         self.T0_table_v = {}  # {node_id: set(slot_id, ...)} 纵向环T0 flit记录表
         self.T0_arb_pointer_h = {}  # {node_id: index} 横向环仲裁指针
@@ -263,26 +200,19 @@ class Network:
             # Inject/Eject queues - 使用 StatisticalFIFO (名称包含网络名以区分三网络)
             row, col = node_pos // config.NUM_COL, node_pos % config.NUM_COL
             nt = self.name.split()[0].lower()[:3]  # "Request Network" -> "req"
-            self.inject_queues["TL"][node_pos] = StatisticalFIFO(
-                f"IQ({row},{col})_TL_{nt}", config.IQ_OUT_FIFO_DEPTH_HORIZONTAL, node_pos, "IQ", "TL")
-            self.inject_queues["TR"][node_pos] = StatisticalFIFO(
-                f"IQ({row},{col})_TR_{nt}", config.IQ_OUT_FIFO_DEPTH_HORIZONTAL, node_pos, "IQ", "TR")
-            self.inject_queues["TU"][node_pos] = StatisticalFIFO(
-                f"IQ({row},{col})_TU_{nt}", config.IQ_OUT_FIFO_DEPTH_VERTICAL, node_pos, "IQ", "TU")
-            self.inject_queues["TD"][node_pos] = StatisticalFIFO(
-                f"IQ({row},{col})_TD_{nt}", config.IQ_OUT_FIFO_DEPTH_VERTICAL, node_pos, "IQ", "TD")
-            self.inject_queues["EQ"][node_pos] = StatisticalFIFO(
-                f"IQ({row},{col})_EQ_{nt}", config.IQ_OUT_FIFO_DEPTH_EQ, node_pos, "IQ", "EQ")
+            self.inject_queues["TL"][node_pos] = StatisticalFIFO(f"IQ({row},{col})_TL_{nt}", config.IQ_OUT_FIFO_DEPTH_HORIZONTAL, node_pos, "IQ", "TL")
+            self.inject_queues["TR"][node_pos] = StatisticalFIFO(f"IQ({row},{col})_TR_{nt}", config.IQ_OUT_FIFO_DEPTH_HORIZONTAL, node_pos, "IQ", "TR")
+            self.inject_queues["TU"][node_pos] = StatisticalFIFO(f"IQ({row},{col})_TU_{nt}", config.IQ_OUT_FIFO_DEPTH_VERTICAL, node_pos, "IQ", "TU")
+            self.inject_queues["TD"][node_pos] = StatisticalFIFO(f"IQ({row},{col})_TD_{nt}", config.IQ_OUT_FIFO_DEPTH_VERTICAL, node_pos, "IQ", "TD")
+            self.inject_queues["EQ"][node_pos] = StatisticalFIFO(f"IQ({row},{col})_EQ_{nt}", config.IQ_OUT_FIFO_DEPTH_EQ, node_pos, "IQ", "EQ")
             self.inject_queues_pre["TL"][node_pos] = None
             self.inject_queues_pre["TR"][node_pos] = None
             self.inject_queues_pre["TU"][node_pos] = None
             self.inject_queues_pre["TD"][node_pos] = None
             self.inject_queues_pre["EQ"][node_pos] = None
 
-            self.eject_queues["TU"][node_pos] = StatisticalFIFO(
-                f"EQ({row},{col})_TU_{nt}", config.EQ_IN_FIFO_DEPTH, node_pos, "EQ", "TU")
-            self.eject_queues["TD"][node_pos] = StatisticalFIFO(
-                f"EQ({row},{col})_TD_{nt}", config.EQ_IN_FIFO_DEPTH, node_pos, "EQ", "TD")
+            self.eject_queues["TU"][node_pos] = StatisticalFIFO(f"EQ({row},{col})_TU_{nt}", config.EQ_IN_FIFO_DEPTH, node_pos, "EQ", "TU")
+            self.eject_queues["TD"][node_pos] = StatisticalFIFO(f"EQ({row},{col})_TD_{nt}", config.EQ_IN_FIFO_DEPTH, node_pos, "EQ", "TD")
             self.eject_queues_in_pre["TU"][node_pos] = None
             self.eject_queues_in_pre["TD"][node_pos] = None
 
@@ -305,7 +235,6 @@ class Network:
             self.avg_inject_time[node_pos] = 0
             self.avg_eject_time[node_pos] = 1
 
-        # 新架构: 基于C2C的link初始化逻辑
         # 1. 创建普通链路（根据邻接矩阵）
         for i in range(config.NUM_NODE):
             for j in range(config.NUM_NODE):
@@ -318,7 +247,6 @@ class Network:
                         # 横向链路
                         slice_count = config.SLICE_PER_LINK_HORIZONTAL
 
-                    self.links[(i, j)] = [None] * slice_count
                     self.links_flow_stat[(i, j)] = {
                         "ITag_count": 0,
                         "empty_count": 0,
@@ -328,38 +256,16 @@ class Network:
                         "reverse_inject_h": 0,  # 横向反方向上环flit数
                         "reverse_inject_v": 0,  # 纵向反方向上环flit数
                     }
-                    self.links_tag[(i, j)] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(slice_count)]
-                    self.global_slot_id_counter += slice_count
-
-        # 注意：self-link已移除，边缘节点的方向转换由CP内部环回处理
-
-        # CP slice tag初始化
-        # 结构：cp_slices_tag[node_id][direction] = [LinkSlot, ...]
-        self.cp_slices_tag = {}
-        cp_slice_count = config.CP_SLICE_COUNT
-        for node_id in range(config.NUM_NODE):
-            self.cp_slices_tag[node_id] = {}
-            for direction in ["TL", "TR", "TU", "TD"]:
-                self.cp_slices_tag[node_id][direction] = [
-                    LinkSlot(slot_id=self.global_slot_id_counter + idx)
-                    for idx in range(cp_slice_count)
-                ]
-                self.global_slot_id_counter += cp_slice_count
 
         nt = self.name.split()[0].lower()[:3]  # "Request Network" -> "req"
         for pos in range(config.NUM_NODE):
             # 新架构: Ring Bridge在同一节点，键直接使用节点号 - 使用 StatisticalFIFO
             row, col = pos // config.NUM_COL, pos % config.NUM_COL
-            self.ring_bridge["TL"][pos] = StatisticalFIFO(
-                f"RB({row},{col})_TL_{nt}", config.RB_IN_FIFO_DEPTH, pos, "RB", "TL")
-            self.ring_bridge["TR"][pos] = StatisticalFIFO(
-                f"RB({row},{col})_TR_{nt}", config.RB_IN_FIFO_DEPTH, pos, "RB", "TR")
-            self.ring_bridge["TU"][pos] = StatisticalFIFO(
-                f"RB({row},{col})_TU_{nt}", config.RB_OUT_FIFO_DEPTH, pos, "RB", "TU")
-            self.ring_bridge["TD"][pos] = StatisticalFIFO(
-                f"RB({row},{col})_TD_{nt}", config.RB_OUT_FIFO_DEPTH, pos, "RB", "TD")
-            self.ring_bridge["EQ"][pos] = StatisticalFIFO(
-                f"RB({row},{col})_EQ_{nt}", config.RB_OUT_FIFO_DEPTH, pos, "RB", "EQ")
+            self.ring_bridge["TL"][pos] = StatisticalFIFO(f"RB({row},{col})_TL_{nt}", config.RB_IN_FIFO_DEPTH, pos, "RB", "TL")
+            self.ring_bridge["TR"][pos] = StatisticalFIFO(f"RB({row},{col})_TR_{nt}", config.RB_IN_FIFO_DEPTH, pos, "RB", "TR")
+            self.ring_bridge["TU"][pos] = StatisticalFIFO(f"RB({row},{col})_TU_{nt}", config.RB_OUT_FIFO_DEPTH, pos, "RB", "TU")
+            self.ring_bridge["TD"][pos] = StatisticalFIFO(f"RB({row},{col})_TD_{nt}", config.RB_OUT_FIFO_DEPTH, pos, "RB", "TD")
+            self.ring_bridge["EQ"][pos] = StatisticalFIFO(f"RB({row},{col})_EQ_{nt}", config.RB_OUT_FIFO_DEPTH, pos, "RB", "EQ")
 
             self.ring_bridge_pre["TL"][pos] = None
             self.ring_bridge_pre["TR"][pos] = None
@@ -382,10 +288,8 @@ class Network:
         for ip_type in self.IQ_channel_buffer.keys():
             for ip_index in range(config.NUM_NODE):
                 row, col = ip_index // config.NUM_COL, ip_index % config.NUM_COL
-                self.IQ_channel_buffer[ip_type][ip_index] = StatisticalFIFO(
-                    f"IQ({row},{col})_CH_{ip_type}_{nt}", config.IQ_CH_FIFO_DEPTH, ip_index, "IQ", "CH", ip_type)
-                self.EQ_channel_buffer[ip_type][ip_index] = StatisticalFIFO(
-                    f"EQ({row},{col})_CH_{ip_type}_{nt}", config.EQ_CH_FIFO_DEPTH, ip_index, "EQ", "CH", ip_type)
+                self.IQ_channel_buffer[ip_type][ip_index] = StatisticalFIFO(f"IQ({row},{col})_CH_{ip_type}_{nt}", config.IQ_CH_FIFO_DEPTH, ip_index, "IQ", "CH", ip_type)
+                self.EQ_channel_buffer[ip_type][ip_index] = StatisticalFIFO(f"EQ({row},{col})_CH_{ip_type}_{nt}", config.EQ_CH_FIFO_DEPTH, ip_index, "EQ", "CH", ip_type)
         for ip_type in self.last_select.keys():
             for ip_index in range(config.NUM_NODE):
                 self.last_select[ip_type][ip_index] = "write"
@@ -480,11 +384,11 @@ class Network:
 
             self.crosspoints[ip_pos] = {"horizontal": cp_h, "vertical": cp_v}
 
-        # 构建环slot列表和初始化T0仲裁数据结构
-        self._build_ring_slots()
-
-        # 构建环形链表（新架构）
+        # 构建环形链表（新架构）- 必须先于_build_ring_slots调用
         self._build_ring_linked_lists()
+
+        # 构建环slot列表和初始化T0仲裁数据结构（从Ring获取slot_ids）
+        self._build_ring_slots()
 
     def initialize_buffers(self):
         """
@@ -502,12 +406,8 @@ class Network:
             self.EQ_channel_buffer[ip_type] = {}
             for node_pos in range(self.config.NUM_NODE):
                 row, col = node_pos // self.config.NUM_COL, node_pos % self.config.NUM_COL
-                self.IQ_channel_buffer[ip_type][node_pos] = StatisticalFIFO(
-                    f"IQ({row},{col})_CH_{ip_type}_{nt}", self.config.IQ_CH_FIFO_DEPTH,
-                    node_pos, "IQ", "CH", ip_type)
-                self.EQ_channel_buffer[ip_type][node_pos] = StatisticalFIFO(
-                    f"EQ({row},{col})_CH_{ip_type}_{nt}", self.config.EQ_CH_FIFO_DEPTH,
-                    node_pos, "EQ", "CH", ip_type)
+                self.IQ_channel_buffer[ip_type][node_pos] = StatisticalFIFO(f"IQ({row},{col})_CH_{ip_type}_{nt}", self.config.IQ_CH_FIFO_DEPTH, node_pos, "IQ", "CH", ip_type)
+                self.EQ_channel_buffer[ip_type][node_pos] = StatisticalFIFO(f"EQ({row},{col})_CH_{ip_type}_{nt}", self.config.EQ_CH_FIFO_DEPTH, node_pos, "EQ", "CH", ip_type)
             # pre buffer需要用普通dict,因为None是有效值
             self.IQ_channel_buffer_pre[ip_type] = {}
             self.EQ_channel_buffer_pre[ip_type] = {}
@@ -516,7 +416,7 @@ class Network:
 
             # 为普通IP类型创建统计结构(排除d2d)
             if not ip_type.startswith("d2d"):
-                base_type = ip_type.split('_')[0]
+                base_type = ip_type.split("_")[0]
                 if base_type not in ["d2d"]:
                     # 使用ip_type作为key而不是base_type
                     self.circuits_flit_h[ip_type] = defaultdict(lambda: deque(maxlen=self.config.IQ_CH_FIFO_DEPTH))
@@ -633,81 +533,33 @@ class Network:
     # ------------------------------------------------------------------
 
     def _build_ring_slots(self):
-        """构建每个节点所在环的slot列表，并初始化T0仲裁数据结构"""
+        """
+        构建每个节点所在环的slot列表，并初始化T0仲裁数据结构
+
+        从已构建的Ring对象获取slot_ids列表（使用Ring.get_all_slot_ids()）
+        """
         num_col = self.config.NUM_COL
         num_row = self.config.NUM_ROW
 
-        # 横向环
+        # 横向环：从Ring对象获取slot_ids
         for row in range(num_row):
             row_nodes = [row * num_col + col for col in range(num_col)]
-            slot_ids = self._collect_horizontal_ring_slots(row_nodes)
+            ring = self.horizontal_rings[row]
+            slot_ids = ring.get_all_slot_ids()
             for node in row_nodes:
                 self.horizontal_ring_slots[node] = slot_ids
                 self.T0_table_h[node] = set()
                 self.T0_arb_pointer_h[node] = 0
 
-        # 纵向环
+        # 纵向环：从Ring对象获取slot_ids
         for col in range(num_col):
             col_nodes = [row * num_col + col for row in range(num_row)]
-            slot_ids = self._collect_vertical_ring_slots(col_nodes)
+            ring = self.vertical_rings[col]
+            slot_ids = ring.get_all_slot_ids()
             for node in col_nodes:
                 self.vertical_ring_slots[node] = slot_ids
                 self.T0_table_v[node] = set()
                 self.T0_arb_pointer_v[node] = 0
-
-    def _collect_horizontal_ring_slots(self, row_nodes):
-        """
-        收集横向环的slot_id列表（按流动顺序）
-
-        横向环结构（以节点0,1,2,3为例）：
-        TL方向: 3 -> 2 -> 1 -> 0 （边缘由CP内部环回）
-        TR方向: 0 -> 1 -> 2 -> 3 （边缘由CP内部环回）
-
-        链路顺序: (3,2) -> (2,1) -> (1,0) -> (0,1) -> (1,2) -> (2,3)
-        注：self-link已移除，边缘节点的方向转换由CP内部环回处理
-        """
-        slot_ids = []
-
-        # TL方向: 右->左
-        for i in range(len(row_nodes) - 1, 0, -1):
-            link = (row_nodes[i], row_nodes[i - 1])
-            if link in self.links_tag:
-                slot_ids.extend(slot.slot_id for slot in self.links_tag[link])
-
-        # TR方向: 左->右
-        for i in range(len(row_nodes) - 1):
-            link = (row_nodes[i], row_nodes[i + 1])
-            if link in self.links_tag:
-                slot_ids.extend(slot.slot_id for slot in self.links_tag[link])
-
-        return slot_ids
-
-    def _collect_vertical_ring_slots(self, col_nodes):
-        """
-        收集纵向环的slot_id列表（按流动顺序）
-
-        纵向环结构（以节点0,4,8,12为例）：
-        TU方向: 12 -> 8 -> 4 -> 0 （边缘由CP内部环回）
-        TD方向: 0 -> 4 -> 8 -> 12 （边缘由CP内部环回）
-
-        链路顺序: (12,8) -> (8,4) -> (4,0) -> (0,4) -> (4,8) -> (8,12)
-        注：self-link已移除，边缘节点的方向转换由CP内部环回处理
-        """
-        slot_ids = []
-
-        # TU方向: 下->上
-        for i in range(len(col_nodes) - 1, 0, -1):
-            link = (col_nodes[i], col_nodes[i - 1])
-            if link in self.links_tag:
-                slot_ids.extend(slot.slot_id for slot in self.links_tag[link])
-
-        # TD方向: 上->下
-        for i in range(len(col_nodes) - 1):
-            link = (col_nodes[i], col_nodes[i + 1])
-            if link in self.links_tag:
-                slot_ids.extend(slot.slot_id for slot in self.links_tag[link])
-
-        return slot_ids
 
     # ------------------------------------------------------------------
     # 环形链表构建（新架构）
@@ -718,212 +570,13 @@ class Network:
         num_col = self.config.NUM_COL
         num_row = self.config.NUM_ROW
 
-        # 构建横向环
+        # 构建横向环（使用Ring静态方法）
         for row in range(num_row):
-            self.horizontal_rings[row] = self._build_horizontal_ring(row)
+            self.horizontal_rings[row] = Ring.build_horizontal_ring(self.config, row, self.cp_in_slices, self.cp_out_slices)
 
-        # 构建纵向环
+        # 构建纵向环（使用Ring静态方法）
         for col in range(num_col):
-            self.vertical_rings[col] = self._build_vertical_ring(col)
-
-    def _build_horizontal_ring(self, row: int) -> list:
-        """
-        构建一行的横向环形链表
-
-        Args:
-            row: 行号
-
-        Returns:
-            环上所有RingSlice的列表
-        """
-        num_col = self.config.NUM_COL
-        nodes = [row * num_col + col for col in range(num_col)]
-        all_slices = []
-
-        # 判断模式：CP_SLICE_COUNT=1时，CP_OUT共享Link[0]
-        cp_slice_count = self.config.CP_SLICE_COUNT
-        cp_out_is_link = (cp_slice_count == 1)
-        cp_internal_count = max(0, cp_slice_count - 2)
-        link_slice_count = self.config.SLICE_PER_LINK_HORIZONTAL
-
-        # === TR方向：从左到右 ===
-        for i, node in enumerate(nodes):
-            # CP内部slice
-            for _ in range(cp_internal_count):
-                all_slices.append(RingSlice(RingSlice.CP_INTERNAL, node, "TR"))
-
-            # CP_IN
-            in_slice = RingSlice(RingSlice.CP_IN, node, "TR")
-            all_slices.append(in_slice)
-            self.cp_in_slices[(node, "TR")] = in_slice
-
-            # 非边缘节点
-            if i < len(nodes) - 1:
-                if cp_out_is_link:
-                    # 模式2：Link[0]同时作为CP_OUT
-                    out_slice = RingSlice(RingSlice.LINK, node, "TR")
-                    out_slice.is_cp_out = True
-                    all_slices.append(out_slice)
-                    self.cp_out_slices[(node, "TR")] = out_slice
-                    # 剩余Link slices
-                    for _ in range(link_slice_count - 1):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TR"))
-                else:
-                    # 模式1：独立CP_OUT
-                    out_slice = RingSlice(RingSlice.CP_OUT, node, "TR")
-                    all_slices.append(out_slice)
-                    self.cp_out_slices[(node, "TR")] = out_slice
-                    # Link slices
-                    for _ in range(link_slice_count):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TR"))
-
-        # 记录TL方向起始位置
-        tl_start_index = len(all_slices)
-
-        # === TL方向：从右到左 ===
-        for i, node in enumerate(reversed(nodes)):
-            # CP内部slice
-            for _ in range(cp_internal_count):
-                all_slices.append(RingSlice(RingSlice.CP_INTERNAL, node, "TL"))
-
-            # CP_IN
-            in_slice = RingSlice(RingSlice.CP_IN, node, "TL")
-            all_slices.append(in_slice)
-            self.cp_in_slices[(node, "TL")] = in_slice
-
-            # 非边缘节点
-            if i < len(nodes) - 1:
-                if cp_out_is_link:
-                    # 模式2：Link[0]同时作为CP_OUT
-                    out_slice = RingSlice(RingSlice.LINK, node, "TL")
-                    out_slice.is_cp_out = True
-                    all_slices.append(out_slice)
-                    self.cp_out_slices[(node, "TL")] = out_slice
-                    for _ in range(link_slice_count - 1):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TL"))
-                else:
-                    # 模式1：独立CP_OUT
-                    out_slice = RingSlice(RingSlice.CP_OUT, node, "TL")
-                    all_slices.append(out_slice)
-                    self.cp_out_slices[(node, "TL")] = out_slice
-                    for _ in range(link_slice_count):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TL"))
-
-        # 连接成环形链表
-        for i in range(len(all_slices)):
-            all_slices[i].next = all_slices[(i + 1) % len(all_slices)]
-
-        # 设置边缘节点的CP_OUT（指向另一方向的第一个slice）
-        right_edge_node = nodes[-1]
-        left_edge_node = nodes[0]
-        # TR方向右边缘的CP_OUT = TL方向第一个slice
-        self.cp_out_slices[(right_edge_node, "TR")] = all_slices[tl_start_index]
-        # TL方向左边缘的CP_OUT = TR方向第一个slice
-        self.cp_out_slices[(left_edge_node, "TL")] = all_slices[0]
-
-        # 分配slot_id
-        for i, s in enumerate(all_slices):
-            s.slot_id = self.global_slot_id_counter
-            self.global_slot_id_counter += 1
-
-        return all_slices
-
-    def _build_vertical_ring(self, col: int) -> list:
-        """
-        构建一列的纵向环形链表
-
-        Args:
-            col: 列号
-
-        Returns:
-            环上所有RingSlice的列表
-        """
-        num_col = self.config.NUM_COL
-        num_row = self.config.NUM_ROW
-        nodes = [row * num_col + col for row in range(num_row)]
-        all_slices = []
-
-        # 判断模式：CP_SLICE_COUNT=1时，CP_OUT共享Link[0]
-        cp_slice_count = self.config.CP_SLICE_COUNT
-        cp_out_is_link = (cp_slice_count == 1)
-        cp_internal_count = max(0, cp_slice_count - 2)
-        link_slice_count = self.config.SLICE_PER_LINK_VERTICAL
-
-        # === TD方向：从上到下 ===
-        for i, node in enumerate(nodes):
-            # CP内部slice
-            for _ in range(cp_internal_count):
-                all_slices.append(RingSlice(RingSlice.CP_INTERNAL, node, "TD"))
-
-            # CP_IN
-            in_slice = RingSlice(RingSlice.CP_IN, node, "TD")
-            all_slices.append(in_slice)
-            self.cp_in_slices[(node, "TD")] = in_slice
-
-            # 非边缘节点
-            if i < len(nodes) - 1:
-                if cp_out_is_link:
-                    out_slice = RingSlice(RingSlice.LINK, node, "TD")
-                    out_slice.is_cp_out = True
-                    all_slices.append(out_slice)
-                    self.cp_out_slices[(node, "TD")] = out_slice
-                    for _ in range(link_slice_count - 1):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TD"))
-                else:
-                    out_slice = RingSlice(RingSlice.CP_OUT, node, "TD")
-                    all_slices.append(out_slice)
-                    self.cp_out_slices[(node, "TD")] = out_slice
-                    for _ in range(link_slice_count):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TD"))
-
-        # 记录TU方向起始位置
-        tu_start_index = len(all_slices)
-
-        # === TU方向：从下到上 ===
-        for i, node in enumerate(reversed(nodes)):
-            # CP内部slice
-            for _ in range(cp_internal_count):
-                all_slices.append(RingSlice(RingSlice.CP_INTERNAL, node, "TU"))
-
-            # CP_IN
-            in_slice = RingSlice(RingSlice.CP_IN, node, "TU")
-            all_slices.append(in_slice)
-            self.cp_in_slices[(node, "TU")] = in_slice
-
-            # 非边缘节点
-            if i < len(nodes) - 1:
-                if cp_out_is_link:
-                    out_slice = RingSlice(RingSlice.LINK, node, "TU")
-                    out_slice.is_cp_out = True
-                    all_slices.append(out_slice)
-                    self.cp_out_slices[(node, "TU")] = out_slice
-                    for _ in range(link_slice_count - 1):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TU"))
-                else:
-                    out_slice = RingSlice(RingSlice.CP_OUT, node, "TU")
-                    all_slices.append(out_slice)
-                    self.cp_out_slices[(node, "TU")] = out_slice
-                    for _ in range(link_slice_count):
-                        all_slices.append(RingSlice(RingSlice.LINK, node, "TU"))
-
-        # 连接成环形链表
-        for i in range(len(all_slices)):
-            all_slices[i].next = all_slices[(i + 1) % len(all_slices)]
-
-        # 设置边缘节点的CP_OUT
-        bottom_edge_node = nodes[-1]
-        top_edge_node = nodes[0]
-        # TD方向下边缘的CP_OUT = TU方向第一个slice
-        self.cp_out_slices[(bottom_edge_node, "TD")] = all_slices[tu_start_index]
-        # TU方向上边缘的CP_OUT = TD方向第一个slice
-        self.cp_out_slices[(top_edge_node, "TU")] = all_slices[0]
-
-        # 分配slot_id
-        for i, s in enumerate(all_slices):
-            s.slot_id = self.global_slot_id_counter
-            self.global_slot_id_counter += 1
-
-        return all_slices
+            self.vertical_rings[col] = Ring.build_vertical_ring(self.config, col, self.cp_in_slices, self.cp_out_slices)
 
     def update_excess_ITag(self):
         """在主循环中调用，处理多余ITag释放"""
@@ -939,6 +592,8 @@ class Network:
     def process_ring_movement(self, ring_slices: list, cycle: int):
         """
         统一处理一个环上所有flit的移动
+
+        纯offset模式：flit存储在RingSlice.flit中，通过环形链表移动
 
         Args:
             ring_slices: 环上所有RingSlice的列表
@@ -958,10 +613,26 @@ class Network:
             if s.slice_type == RingSlice.CP_IN:
                 should_eject, eject_target, eject_dir = self._should_eject(flit, s.node_id, s.direction)
                 if should_eject:
-                    if self._try_eject(flit, s.node_id, eject_dir, eject_target, cycle):
-                        s.flit = None  # 下环成功
-                        continue
-                # 下环失败或不需要下环，继续移动
+                    # 统计下环尝试次数
+                    if s.direction in ["TL", "TR"]:
+                        flit.eject_attempts_h += 1
+                    else:
+                        flit.eject_attempts_v += 1
+
+                    if self._can_eject_in_order(flit, flit.path[-1], s.direction):
+                        if self._try_eject(flit, s.node_id, eject_dir, eject_target, cycle):
+                            s.flit = None  # 下环成功
+                            continue
+                        else:
+                            # 下环失败（pre缓冲被占用），升级ETag
+                            cp_type = "horizontal" if s.direction in ["TL", "TR"] else "vertical"
+                            cp = self.crosspoints[s.node_id][cp_type]
+                            cp.upgrade_etag_on_failure(flit, s.direction)
+                    else:
+                        # 保序失败，升级ETag
+                        cp_type = "horizontal" if s.direction in ["TL", "TR"] else "vertical"
+                        cp = self.crosspoints[s.node_id][cp_type]
+                        cp.upgrade_etag_on_failure(flit, s.direction)
 
             # === 移动到下一个slice ===
             if next_slice.flit is None:
@@ -1000,13 +671,13 @@ class Network:
         """
         # 处理所有横向环
         for row, ring in self.horizontal_rings.items():
-            self.process_ring_movement(ring, cycle)
-            self.process_ring_injection(ring, cycle)
+            self.process_ring_movement(ring.slices, cycle)
+            self.process_ring_injection(ring.slices, cycle)
 
         # 处理所有纵向环
         for col, ring in self.vertical_rings.items():
-            self.process_ring_movement(ring, cycle)
-            self.process_ring_injection(ring, cycle)
+            self.process_ring_movement(ring.slices, cycle)
+            self.process_ring_injection(ring.slices, cycle)
 
     def _should_eject(self, flit, node_id: int, direction: str) -> tuple:
         """
@@ -1204,35 +875,28 @@ class Network:
         ring_slice.flit = flit
         flit.current_slice = ring_slice
 
+        # 新架构：记录flit所在的slot_id
+        flit.slot_id = ring_slice.slot_id
+
         # 3. 获取对应的CrossPoint执行ITag释放等操作
         cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
         cp = self.crosspoints[node_id][cp_type]
+        is_horizontal = direction in ["TL", "TR"]
 
-        # 构造虚拟link用于ITag释放
-        num_col = self.config.NUM_COL
-        if direction == "TR":
-            next_node = node_id + 1 if (node_id + 1) % num_col != 0 else node_id
-        elif direction == "TL":
-            next_node = node_id - 1 if node_id % num_col != 0 else node_id
-        elif direction == "TD":
-            next_node = node_id + num_col if node_id + num_col < self.config.NUM_NODE else node_id
-        else:  # TU
-            next_node = node_id - num_col if node_id >= num_col else node_id
-
-        if next_node != node_id:
-            link = (node_id, next_node)
-            # 处理ITag释放
-            slot = self.links_tag.get(link, [None])[0]
-            if slot and slot.itag_reserved and slot.check_itag_match(node_id, direction):
-                slot.clear_itag()
+        # 新架构：使用Ring.itag处理ITag释放
+        ring = ring_slice.ring
+        slot_id = ring_slice.slot_id
+        if ring and slot_id is not None:
+            if ring.check_itag(slot_id, node_id, direction):
+                # 使用了预约，释放
+                ring.release_itag(slot_id)
                 cp.remain_tag[direction][node_id] += 1
                 cp.tagged_counter[direction][node_id] -= 1
 
         # 清除flit上的I-Tag标记
-        is_horizontal = direction in ["TL", "TR"]
-        if is_horizontal and hasattr(flit, 'itag_h') and flit.itag_h:
+        if is_horizontal and hasattr(flit, "itag_h") and flit.itag_h:
             flit.itag_h = False
-        elif not is_horizontal and hasattr(flit, 'itag_v') and flit.itag_v:
+        elif not is_horizontal and hasattr(flit, "itag_v") and flit.itag_v:
             flit.itag_v = False
 
         # 重置E-Tag优先级为T2
@@ -1250,8 +914,32 @@ class Network:
             ring_slice: 当前RingSlice
             cycle: 当前周期
         """
-        pos = ring_slice.get_position_str()
-        flit.set_position(pos, cycle)
+        from src.utils.ring_slice import RingSlice
+
+        node_id = ring_slice.node_id
+        flit.current_position = node_id
+
+        if ring_slice.slice_type == RingSlice.LINK:
+            # Link上flit：设置为"Link"并记录link信息
+            direction = ring_slice.direction
+            num_col = self.config.NUM_COL
+
+            if direction == "TR":
+                next_node = node_id + 1
+            elif direction == "TL":
+                next_node = node_id - 1
+            elif direction == "TD":
+                next_node = node_id + num_col
+            else:  # TU
+                next_node = node_id - num_col
+
+            flit.set_position("Link", cycle)
+            flit.current_link = (node_id, next_node)
+            flit.current_seat_index = ring_slice.link_index
+        else:
+            # 非Link位置：使用原有格式
+            pos = ring_slice.get_position_str()
+            flit.set_position(pos, cycle)
 
     def process_cp_slices(self, cycle: int):
         """
@@ -1332,24 +1020,21 @@ class Network:
         if flit is None:
             return
 
-        # 判断是否需要下环（使用CP的should_eject_flit，但下环方向已知为direction）
+        # 判断是否需要下环
         should_eject, eject_target = self._check_should_eject(cp, flit, node_id, direction)
         if not should_eject:
             return
 
         # 检查保序
         if not self._can_eject_in_order(flit, flit.path[-1], direction):
-            # 保序失败，升级ETag
-            self._upgrade_ETag_on_failure(flit, node_id, direction, "order", cycle)
+            cp.upgrade_etag_on_failure(flit, direction)
             return
 
         # 尝试下环
         if self._try_eject(flit, node_id, direction, eject_target, cycle):
-            # 下环成功，移除flit
             slices[in_slice_idx] = None
         else:
-            # 下环失败（Entry不可用或队列满），升级ETag
-            self._upgrade_ETag_on_failure(flit, node_id, direction, "capacity", cycle)
+            cp.upgrade_etag_on_failure(flit, direction)
 
     def _check_should_eject(self, cp, flit, node_id: int, direction: str) -> tuple:
         """
@@ -1392,38 +1077,6 @@ class Network:
                 return True, "EQ"
 
         return False, ""
-
-    def _upgrade_ETag_on_failure(self, flit, node_id: int, direction: str, reason: str, cycle: int):
-        """
-        下环失败时升级ETag
-
-        Args:
-            flit: flit对象
-            node_id: 节点ID
-            direction: 方向
-            reason: 失败原因 ("order" 或 "capacity")
-            cycle: 当前周期
-        """
-        cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
-        cp = self.crosspoints[node_id][cp_type]
-
-        # 如果是T0，先从T0表中移除
-        if flit.ETag_priority == "T0" and direction in ["TL", "TU"]:
-            cp.T0_remove_from_table(flit, direction)
-
-        # 升级ETag
-        old_etag = flit.ETag_priority
-        if flit.ETag_priority == "T0":
-            if self.config.ETAG_T1_ENABLED:
-                flit.ETag_priority = "T1"
-            else:
-                flit.ETag_priority = "T2"
-        elif flit.ETag_priority == "T1":
-            flit.ETag_priority = "T2"
-        # T2不再升级
-
-        if old_etag != flit.ETag_priority:
-            flit.is_delay = True
 
     def _process_cp_edge_loop(self, cp, direction: str, cycle: int):
         """
@@ -1849,212 +1502,9 @@ class Network:
 
     # ==================== 统一两阶段处理 ====================
 
-    def plan_all_moves(self, cycle: int, flits: list):
-        """
-        统一Plan阶段：计算所有flit的下一位置并清空当前位置
-
-        遍历所有flit，计算下一位置后立即清空当前位置，这样后面的flit才能移动进来
-        """
-        for flit in flits:
-            if flit.is_arrive:
-                continue
-            if flit.current_link is not None:
-                # 在Link上
-                self._plan_link_move(flit, cycle)
-            elif getattr(flit, 'cp_node_id', None) is not None:
-                # 在CP中
-                self._plan_cp_move(flit, cycle)
-
-            # 计算完下一位置后，立即清空当前位置
-            if getattr(flit, '_next_pos', None) is not None:
-                self._clear_flit_position(flit)
-
-    def execute_all_moves(self, cycle: int, flits: list):
-        """
-        统一Execute阶段：执行所有移动
-
-        根据flit._next_pos执行移动，返回更新后的flits列表
-        """
-        to_remove = []
-        for flit in flits:
-            if flit.is_arrive:
-                flit.arrival_network_cycle = cycle
-                to_remove.append(flit)
-                continue
-
-            next_pos = getattr(flit, '_next_pos', None)
-            if next_pos:
-                self._execute_move(flit, next_pos, cycle)
-                flit._next_pos = None
-
-        # 移除已到达的flit
-        for f in to_remove:
-            flits.remove(f)
-
-        return flits
-
-    def _plan_link_move(self, flit: Flit, cycle: int):
-        """计划Link上flit的移动
-
-        环形网络中flit同步移动，不检查目标位置是否空闲
-        """
-        link = self.links.get(flit.current_link)
-        if link is None:
-            return
-
-        current, next_node = flit.current_link[:2]
-
-        # 非末端：前进一格（所有flit同步移动，不检查目标位置）
-        if flit.current_seat_index < len(link) - 1:
-            next_idx = flit.current_seat_index + 1
-            flit._next_pos = ("Link", flit.current_link, next_idx)
-            return
-
-        # 末端：进入CP的slice[0]
-        cp_type, direction = self._get_cp_type_and_direction(current, next_node)
-        if cp_type is None:
-            return
-
-        flit._next_pos = ("CP", next_node, direction, 0)
-
-    def _plan_cp_move(self, flit: Flit, cycle: int):
-        """计划CP中flit的移动
-
-        环形网络中flit同步移动，不检查目标位置是否空闲
-        如果不能下环就继续沿着环移动
-        """
-        node_id = flit.cp_node_id
-        direction = flit.cp_direction
-        slice_idx = flit.cp_slice_index
-        cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
-        cp = self.crosspoints[node_id][cp_type]
-        slices = cp.cp_slices[direction]
-
-        # 在pre中：进入slice[0]
-        if slice_idx == -1:
-            flit._next_pos = ("CP", node_id, direction, 0)
-            return
-
-        # 在out_slice：输出到Link或边界环回
-        if slice_idx == len(slices) - 1:
-            if direction in cp._edge_loop_map:
-                # 边界环回
-                target_dir = cp._edge_loop_map[direction]
-                flit._next_pos = ("CP_LOOP", node_id, direction, target_dir)
-            else:
-                # 输出到Link
-                link = cp._calculate_inject_link(node_id, direction)
-                if link:
-                    flit._next_pos = ("Link", link, 0)
-            return
-
-        # 在in_slice：检查下环
-        if slice_idx == len(slices) - 2:
-            should_eject, eject_target = self._check_should_eject(cp, flit, node_id, direction)
-            if should_eject:
-                if self._can_eject_in_order(flit, flit.path[-1], direction):
-                    # 检查pre缓冲（下环出口必须有空位才能下环）
-                    if direction in ["TL", "TR"]:
-                        if self.ring_bridge_pre[direction][node_id] is None:
-                            flit._next_pos = ("RB", node_id, direction, eject_target)
-                            return
-                    else:
-                        if self.eject_queues_in_pre[direction][node_id] is None:
-                            flit._next_pos = ("EQ", node_id, direction, eject_target)
-                            return
-                else:
-                    self._upgrade_ETag_on_failure(flit, node_id, direction, "order", cycle)
-
-        # 不下环或下环失败：继续前进到out_slice
-        if slice_idx < len(slices) - 1:
-            flit._next_pos = ("CP", node_id, direction, slice_idx + 1)
-
-    def _execute_move(self, flit: Flit, next_pos: tuple, cycle: int):
-        """执行flit的移动：放入新位置（旧位置已在plan阶段清空）"""
-        pos_type = next_pos[0]
-
-        if pos_type == "Link":
-            link, seat_idx = next_pos[1], next_pos[2]
-            flit.current_link = link
-            flit.current_seat_index = seat_idx
-            flit.cp_node_id = None
-            flit.cp_direction = None
-            flit.cp_slice_index = None
-            self.set_link_slice(link, seat_idx, flit, cycle)
-            # 更新位置显示
-            flit.set_position(f"{link[0]}->{link[1]}:{seat_idx}", cycle)
-
-        elif pos_type == "CP_PRE":
-            node_id, direction = next_pos[1], next_pos[2]
-            cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
-            cp = self.crosspoints[node_id][cp_type]
-            cp.cp_slices_pre[direction] = flit
-            flit.current_link = None
-            flit.current_seat_index = -1
-            flit.cp_node_id = node_id
-            flit.cp_direction = direction
-            flit.cp_slice_index = -1
-            if not flit.is_delay:
-                flit.current_position = node_id
-            flit.set_position(f"CP_PRE_{direction}", cycle)
-
-        elif pos_type == "CP":
-            node_id, direction, slice_idx = next_pos[1], next_pos[2], next_pos[3]
-            cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
-            cp = self.crosspoints[node_id][cp_type]
-            cp.cp_slices[direction][slice_idx] = flit
-            # 设置CP位置属性（从Link进入时需要）
-            flit.current_link = None
-            flit.current_seat_index = -1
-            flit.cp_node_id = node_id
-            flit.cp_direction = direction
-            flit.cp_slice_index = slice_idx
-            if not flit.is_delay:
-                flit.current_position = node_id
-            cp_pos = "CP_H" if direction in ["TL", "TR"] else "CP_V"
-            flit.set_position(cp_pos, cycle)
-
-        elif pos_type == "CP_LOOP":
-            node_id, from_dir, to_dir = next_pos[1], next_pos[2], next_pos[3]
-            cp_type = "horizontal" if from_dir in ["TL", "TR"] else "vertical"
-            cp = self.crosspoints[node_id][cp_type]
-            cp.cp_slices[to_dir][0] = flit
-            flit.cp_direction = to_dir
-            flit.cp_slice_index = 0
-            flit.set_position("CP_LOOP", cycle)
-
-        elif pos_type == "RB":
-            node_id, direction, eject_target = next_pos[1], next_pos[2], next_pos[3]
-            self._try_eject(flit, node_id, direction, eject_target, cycle)
-            flit.cp_node_id = None
-            flit.cp_direction = None
-            flit.cp_slice_index = None
-
-        elif pos_type == "EQ":
-            node_id, direction, eject_target = next_pos[1], next_pos[2], next_pos[3]
-            self._try_eject(flit, node_id, direction, eject_target, cycle)
-            flit.cp_node_id = None
-            flit.cp_direction = None
-            flit.cp_slice_index = None
-
-    def _clear_flit_position(self, flit: Flit):
-        """清空flit的当前位置"""
-        # 在Link上
-        if flit.current_link is not None:
-            self.links[flit.current_link][flit.current_seat_index] = None
-            return
-
-        # 在CP中
-        node_id = getattr(flit, 'cp_node_id', None)
-        if node_id is not None:
-            direction = flit.cp_direction
-            slice_idx = flit.cp_slice_index
-            cp_type = "horizontal" if direction in ["TL", "TR"] else "vertical"
-            cp = self.crosspoints[node_id][cp_type]
-            if slice_idx == -1:
-                cp.cp_slices_pre[direction] = None
-            else:
-                cp.cp_slices[direction][slice_idx] = None
+    # ------------------------------------------------------------------
+    # 旧方法已删除（纯offset模式使用process_ring_movement替代）
+    # ------------------------------------------------------------------
 
     @property
     def rn_positions(self):
@@ -2354,18 +1804,13 @@ class Network:
 
         # 根据新flit状态增加对应计数（每次设置slice时统计一次）
 
-        # 首先检查ITag，无论是否有flit都要检查
-        if link in self.links_tag and slice_index < len(self.links_tag[link]):
-            tag_info = self.links_tag[link][slice_index]
-            if tag_info is not None:
-                # 有ITag标记
-                self.links_flow_stat[link]["ITag_count"] += 1
+        # ITag统计：新架构使用Ring.itag，暂时跳过旧的links_tag统计
+        # TODO: 使用Ring.itag重新实现ITag统计
 
-        # 然后处理flit统计
+        # 处理flit统计
         if new_flit is None:
-            # slice为空，且没有ITag标记，才是真正的空闲
-            if link not in self.links_tag or slice_index >= len(self.links_tag[link]) or self.links_tag[link][slice_index] is None:
-                self.links_flow_stat[link]["empty_count"] += 1
+            # slice为空，记录为空闲
+            self.links_flow_stat[link]["empty_count"] += 1
         else:
             # slice被flit占用，按下环尝试次数分组统计
             self._update_eject_attempts_stats(link, new_flit)
@@ -2450,37 +1895,45 @@ class Network:
 
     def collect_cycle_end_link_statistics(self, cycle):
         """
-        在每个周期结束时统计所有链路第一个slice位置的使用情况
+        在每个周期结束时统计所有链路第一个LINK slice的使用情况
 
         Args:
             cycle: 当前周期
         """
         for link in self.links_flow_stat:
-            if link not in self.links:
+            src = link[0]
+            dest = link[1] if len(link) > 1 else link[0]
+
+            # 根据link确定direction和Ring
+            if src == dest:
+                continue
+            num_col = self.config.NUM_COL
+            is_horizontal = abs(src - dest) == 1 or (src // num_col == dest // num_col)
+            if is_horizontal:
+                direction = "TR" if dest > src else "TL"
+                row = src // num_col
+                ring = self.horizontal_rings.get(row)
+            else:
+                direction = "TD" if dest > src else "TU"
+                col = src % num_col
+                ring = self.vertical_rings.get(col)
+
+            if ring is None:
                 continue
 
-            # 只统计第一个slice位置(索引0)的使用情况
-            slice_index = 0
-            if slice_index >= len(self.links[link]):
-                continue
-
-            flit = self.links[link][slice_index]
-            # 首先检查ITag，无论是否有flit都要检查
-            if link in self.links_tag and slice_index < len(self.links_tag[link]):
-                slot = self.links_tag[link][slice_index]
-                if slot.itag_reserved:
-                    # 有ITag标记
-                    self.links_flow_stat[link]["ITag_count"] += 1
+            # 找到link的第一个LINK slice (link_index=0) 并获取flit
+            flit = None
+            for s in ring.slices:
+                if s.slice_type == RingSlice.LINK and s.node_id == src and s.direction == direction:
+                    if hasattr(s, "link_index") and s.link_index == 0:
+                        flit = s.flit
+                        break
 
             if flit is None:
-                # slice为空，且没有ITag标记，才是真正的空闲
-                if link not in self.links_tag or slice_index >= len(self.links_tag[link]) or not self.links_tag[link][slice_index].itag_reserved:
-                    self.links_flow_stat[link]["empty_count"] += 1
+                self.links_flow_stat[link]["empty_count"] += 1
             else:
-                # slice被flit占用，按下环尝试次数分组统计
                 self._update_eject_attempts_stats(link, flit)
 
-            # 更新总周期计数
             self.links_flow_stat[link]["total_cycles"] += 1
 
     def update_fifo_stats_after_move(self, in_pos):

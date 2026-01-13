@@ -56,6 +56,11 @@ class IPInterface:
       - l2h_fifo: 1→2GHz 上转换 FIFO（深度可调）
       - 和 network.IQ_channel_buffer 对接（2GHz）
       - network.EQ_channel_buffer → h2l_fifo → eject_fifo → IP（1GHz）
+
+    支持多通道架构：
+      - 接收网络列表 (req_networks, rsp_networks, data_networks)
+      - 发送时使用channel_selector选择目标通道
+      - 接收时使用仲裁合并多个通道
     """
 
     def __init__(
@@ -63,20 +68,32 @@ class IPInterface:
         ip_type: str,
         ip_pos: int,
         config: KCINConfigBase,
-        req_network,
-        rsp_network,
-        data_network,
+        req_networks,
+        rsp_networks,
+        data_networks,
         routes: dict,
+        channel_selector=None,
         ip_id: int = None,
     ):
         self.current_cycle = 0
         self.ip_type = ip_type
         self.ip_pos = ip_pos
-        self.ip_id = ip_id if ip_id is not None else 0  # IP在其类型中的唯一ID
+        self.ip_id = ip_id if ip_id is not None else ip_pos  # 默认使用ip_pos作为ip_id
         self.config = config
-        self.req_network = req_network
-        self.rsp_network = rsp_network
-        self.data_network = data_network
+
+        # 存储网络列表
+        self.req_networks = req_networks if isinstance(req_networks, list) else [req_networks]
+        self.rsp_networks = rsp_networks if isinstance(rsp_networks, list) else [rsp_networks]
+        self.data_networks = data_networks if isinstance(data_networks, list) else [data_networks]
+
+        # 兼容性：保留单网络引用（指向第一个网络）
+        self.req_network = self.req_networks[0]
+        self.rsp_network = self.rsp_networks[0]
+        self.data_network = self.data_networks[0]
+
+        # 通道选择器
+        self.channel_selector = channel_selector
+
         self.routes = routes
         self.read_retry_num_stat = 0
         self.write_retry_num_stat = 0
@@ -103,10 +120,12 @@ class IPInterface:
         self.sn_processing_latency = getattr(config, "SN_PROCESSING_LATENCY", 0)
         self.rn_processing_latency = getattr(config, "RN_PROCESSING_LATENCY", 0)
 
+        # networks字典使用第一个网络（兼容性）
+        # 多通道时，通道选择在l2h_to_IQ_channel_buffer中进行
         self.networks = {
             "req": {
-                "network": req_network,
-                "send_flits": req_network.send_flits,
+                "network": self.req_network,
+                "send_flits": self.req_network.send_flits,
                 "inject_fifo": deque(),  # 1GHz域 - IP核产生的请求
                 "l2h_fifo_pre": None,  # 1GHz → 2GHz 预缓冲
                 "h2l_fifo_h_pre": None,  # 2GHz → H2L_H 预缓冲
@@ -116,8 +135,8 @@ class IPInterface:
                 "h2l_fifo_l": deque(maxlen=h2l_l_depth),  # 1GHz域 低频FIFO
             },
             "rsp": {
-                "network": rsp_network,
-                "send_flits": rsp_network.send_flits,
+                "network": self.rsp_network,
+                "send_flits": self.rsp_network.send_flits,
                 "inject_fifo": deque(),
                 "l2h_fifo_pre": None,
                 "h2l_fifo_h_pre": None,
@@ -127,8 +146,8 @@ class IPInterface:
                 "h2l_fifo_l": deque(maxlen=h2l_l_depth),
             },
             "data": {
-                "network": data_network,
-                "send_flits": data_network.send_flits,
+                "network": self.data_network,
+                "send_flits": self.data_network.send_flits,
                 "inject_fifo": deque(),
                 "l2h_fifo_pre": None,
                 "h2l_fifo_h_pre": None,
@@ -138,6 +157,11 @@ class IPInterface:
                 "h2l_fifo_l": deque(maxlen=h2l_l_depth),
             },
         }
+
+        # 多通道仲裁器（用于接收端合并多个通道）
+        from src.utils.arbitration import create_arbiter_from_config
+
+        self.multi_channel_arbiter = create_arbiter_from_config(getattr(config, "arbitration", {}).get("multi_channel", {"type": "round_robin"}))
 
         # Response优先级队列（用于rsp网络，按优先级分别存储）
         self.rsp_inject_queues = {rsp_type: deque() for rsp_type in RSP_PRIORITY_ORDER}
@@ -296,6 +320,37 @@ class IPInterface:
             "write_retry": None,
         }
 
+    # ==================== 多通道辅助方法 ====================
+    def _get_networks_by_type(self, network_type):
+        """根据网络类型返回网络列表"""
+        if network_type == "req":
+            return self.req_networks
+        elif network_type == "rsp":
+            return self.rsp_networks
+        return self.data_networks
+
+    def _select_channel(self, flit, network_type):
+        """选择通道并返回目标网络
+
+        Returns:
+            (target_network, channel_id)
+        """
+        networks = self._get_networks_by_type(network_type)
+
+        # 单通道时直接返回
+        if len(networks) == 1:
+            return networks[0], 0
+
+        # 多通道时使用通道选择器
+        if self.channel_selector is None:
+            return networks[0], 0
+
+        if flit.base_channel_id is None:
+            flit.base_channel_id = self.channel_selector.select_channel(flit, self.ip_id)
+
+        actual_ch = flit.base_channel_id % len(networks)
+        return networks[actual_ch], actual_ch
+
     def enqueue(self, flit: Flit, network_type: str, retry=False):
         """IP 核把flit丢进对应网络的 inject_fifo"""
         if network_type == "rsp":
@@ -407,23 +462,27 @@ class IPInterface:
                 self._release_sn_read_tracker(flit.packet_id)
 
     def l2h_to_IQ_channel_buffer(self, network_type):
-        """2GHz: l2h_fifo → network.IQ_channel_buffer"""
+        """2GHz: l2h_fifo → network.IQ_channel_buffer（支持多通道选择）"""
         net_info = self.networks[network_type]
-        network = net_info["network"]
 
         if not net_info["l2h_fifo"]:
             return
 
+        flit = net_info["l2h_fifo"][0]
+
+        # 选择目标网络通道
+        target_network, ch_id = self._select_channel(flit, network_type)
+
         # 检查目标缓冲区是否已满（只能在 *pre* 缓冲区为空且正式 FIFO 未满时移动）
-        fifo = network.IQ_channel_buffer[self.ip_type][self.ip_pos]
-        fifo_pre = network.IQ_channel_buffer_pre[self.ip_type][self.ip_pos]
+        fifo = target_network.IQ_channel_buffer[self.ip_type][self.ip_pos]
+        fifo_pre = target_network.IQ_channel_buffer_pre[self.ip_type][self.ip_pos]
         if len(fifo) >= getattr(self.config, "IQ_CH_FIFO_DEPTH", 8) or fifo_pre is not None:
             return  # 没空间，或 pre 槽已占用
 
-        # 从 l2h_fifo 弹出一个 flit，先放到 *pre* 槽
+        # 从 l2h_fifo 弹出一个 flit，先放到目标网络的 *pre* 槽
         flit: Flit = net_info["l2h_fifo"].popleft()
         flit.set_position("IQ_CH", self.current_cycle)
-        network.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = flit
+        target_network.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = flit
 
         # 更新cycle统计
         if network_type == "req" and flit.req_attr == "new":
@@ -520,30 +579,66 @@ class IPInterface:
             return False
 
     def EQ_channel_buffer_to_h2l_pre(self, network_type):
-        """2GHz: network.EQ_channel_buffer → h2l_fifo_h_pre"""
+        """2GHz: network.EQ_channel_buffer → h2l_fifo_h_pre（支持多通道合并）"""
         net_info = self.networks[network_type]
-        network = net_info["network"]
 
         if net_info["h2l_fifo_h_pre"] is not None:
             return  # 预缓冲已占用
 
+        # 检查h2l_fifo_h是否有空间
+        if len(net_info["h2l_fifo_h"]) >= net_info["h2l_fifo_h"].maxlen:
+            return
+
         try:
-            # 新架构：直接使用 ip_pos
             pos_index = self.ip_pos
 
-            eq_buf = network.EQ_channel_buffer[self.ip_type][pos_index]
-            if not eq_buf:
+            # 获取所有通道的候选flit
+            networks = self._get_networks_by_type(network_type)
+            candidates = []
+
+            for ch_id, network in enumerate(networks):
+                eq_buf = network.EQ_channel_buffer.get(self.ip_type, {}).get(pos_index)
+                if eq_buf and len(eq_buf) > 0:
+                    candidates.append((ch_id, network, eq_buf))
+
+            # 无候选flit
+            if len(candidates) == 0:
                 return
 
-            # 检查h2l_fifo_h是否有空间
-            if len(net_info["h2l_fifo_h"]) >= net_info["h2l_fifo_h"].maxlen:
+            # 单通道或只有一个候选
+            if len(candidates) == 1:
+                _, selected_network, selected_buffer = candidates[0]
+                flit = selected_buffer.popleft()
+                flit.is_arrive = True
+                flit.set_position("H2L_H", self.current_cycle)
+                net_info["h2l_fifo_h_pre"] = flit
                 return
 
-            flit = eq_buf.popleft()
-            flit.is_arrive = True
-            flit.set_position("H2L_H", self.current_cycle)
-            net_info["h2l_fifo_h_pre"] = flit
-            # arrive_flits添加移动到IP_eject阶段，确保只记录真正完成的flit
+            # 多通道仲裁：使用 EQ 匹配仲裁器进行全局最优选择
+            # 将每个通道视为一个“输入端口”，当前 IP 视为唯一“输出端口”
+            # request_matrix: inputs(通道) × outputs(单一IP)
+            request_matrix = [[True] for _ in candidates]
+
+            # 简单权重：所有通道权重相同，保持与 EQ 仲裁器接口一致
+            weight_matrix = [[1.0] for _ in candidates]
+
+            # 为该 IP/位置生成独立的队列 ID，保证轮询指针独立
+            queue_id = f"EQ_h2l_{network_type}_{self.ip_type}_pos{pos_index}"
+
+            matches = self.multi_channel_arbiter.match(
+                request_matrix,
+                weight_matrix=weight_matrix,
+                queue_id=queue_id,
+            )
+
+            if matches:
+                # 只有一个输出端口，因此最多选择一个输入端口
+                selected_idx = matches[0][0]
+                _, selected_network, selected_buffer = candidates[selected_idx]
+                flit = selected_buffer.popleft()
+                flit.is_arrive = True
+                flit.set_position("H2L_H", self.current_cycle)
+                net_info["h2l_fifo_h_pre"] = flit
 
         except (KeyError, AttributeError) as e:
             logging.warning(f"EQ to h2l_h transfer failed for {network_type}: {e}")

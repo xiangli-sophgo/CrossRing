@@ -16,6 +16,7 @@ from src.utils.flit import (
     get_original_source_type,
     get_original_destination_type,
 )
+from src.utils.arbitration import create_arbiter_from_config
 import logging
 import inspect
 
@@ -63,10 +64,11 @@ class IPInterface:
         ip_type: str,
         ip_pos: int,
         config: KCINConfigBase,
-        req_network,
-        rsp_network,
-        data_network,
+        req_networks,
+        rsp_networks,
+        data_networks,
         routes: dict,
+        channel_selector=None,
         ip_id: int = None,
     ):
         self.current_cycle = 0
@@ -74,9 +76,25 @@ class IPInterface:
         self.ip_pos = ip_pos
         self.ip_id = ip_id if ip_id is not None else 0  # IP在其类型中的唯一ID
         self.config = config
-        self.req_network = req_network
-        self.rsp_network = rsp_network
-        self.data_network = data_network
+
+        # 支持单网络和网络列表两种输入方式
+        self.req_networks = req_networks if isinstance(req_networks, list) else [req_networks]
+        self.rsp_networks = rsp_networks if isinstance(rsp_networks, list) else [rsp_networks]
+        self.data_networks = data_networks if isinstance(data_networks, list) else [data_networks]
+
+        # 兼容性：保留单网络引用
+        self.req_network = self.req_networks[0]
+        self.rsp_network = self.rsp_networks[0]
+        self.data_network = self.data_networks[0]
+
+        # 通道选择器（多通道时使用）
+        self.channel_selector = channel_selector
+
+        # 创建多通道仲裁器（用于接收侧合并）
+        self.multi_channel_arbiter = create_arbiter_from_config(
+            getattr(config, 'arbitration', {}).get('multi_channel', {'type': 'round_robin'})
+        )
+
         self.routes = routes
         self.read_retry_num_stat = 0
         self.write_retry_num_stat = 0
@@ -305,8 +323,38 @@ class IPInterface:
             "write_retry": None,
         }
 
+    # ==================== 多通道支持方法 ====================
+    def _get_networks_by_type(self, network_type):
+        """根据网络类型返回网络列表"""
+        if network_type == "req":
+            return self.req_networks
+        elif network_type == "rsp":
+            return self.rsp_networks
+        return self.data_networks
+
+    def _select_channel(self, flit, network_type):
+        """选择通道并返回目标网络和通道ID"""
+        networks = self._get_networks_by_type(network_type)
+
+        # 单通道时直接返回
+        if len(networks) == 1:
+            return networks[0], 0
+
+        # 多通道时使用通道选择器
+        if self.channel_selector is None:
+            return networks[0], 0
+
+        if flit.base_channel_id is None:
+            flit.base_channel_id = self.channel_selector.select_channel(flit, self.ip_id)
+
+        actual_ch = flit.base_channel_id % len(networks)
+        return networks[actual_ch], actual_ch
+
     def enqueue(self, flit: Flit, network_type: str, retry=False):
         """IP 核把flit丢进对应网络的 inject_fifo"""
+        # 选择目标网络
+        target_network, ch_id = self._select_channel(flit, network_type)
+
         if network_type == "rsp":
             # Response按优先级分流到对应队列
             rsp_type = getattr(flit, "rsp_type", "Pcredit")
@@ -325,7 +373,7 @@ class IPInterface:
 
         # 检查是否为新请求并记录统计
         # 新请求必须满足：1) 请求网络 2) 本IP首次见到此packet_id 3) 非重试 4) 当前IP是原始发起IP
-        is_new_request = network_type == "req" and not self.networks[network_type]["send_flits"][flit.packet_id] and not retry and hasattr(flit, "source_type") and flit.source_type == self.ip_type
+        is_new_request = network_type == "req" and not target_network.send_flits[flit.packet_id] and not retry and hasattr(flit, "source_type") and flit.source_type == self.ip_type
 
         if is_new_request and hasattr(flit, "req_type"):
             # 记录请求开始时间（tracker消耗开始）
@@ -340,9 +388,9 @@ class IPInterface:
                 die_id = getattr(self.config, "DIE_ID", 0)
                 d2d_model.record_request_issued(flit.packet_id, die_id, flit.req_type, is_cross_die)
 
-        if network_type == "req" and self.networks[network_type]["send_flits"][flit.packet_id]:
+        if network_type == "req" and target_network.send_flits[flit.packet_id]:
             return True
-        self.networks[network_type]["send_flits"][flit.packet_id].append(flit)
+        target_network.send_flits[flit.packet_id].append(flit)
 
         # 注：flit添加到RequestTracker的操作移至接收端（避免重复添加）
         # request_flit在process_req_from_network时添加

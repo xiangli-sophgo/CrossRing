@@ -201,9 +201,10 @@ class CrossPoint:
         if direction not in ["TL", "TU"]:
             return False
 
-        # 获取flit当前slot_id
-        slot = self.network.links_tag[flit.current_link][flit.current_seat_index]
-        flit_slot_id = slot.slot_id
+        # 获取flit当前slot_id（新架构：flit上环时已记录slot_id）
+        flit_slot_id = flit.slot_id
+        if flit_slot_id is None:
+            return False
 
         # 获取对应的ring_slots、T0_table和指针
         if direction == "TL":
@@ -241,8 +242,10 @@ class CrossPoint:
         if self.network is None:
             return
 
-        slot = self.network.links_tag[flit.current_link][flit.current_seat_index]
-        slot_id = slot.slot_id
+        # 新架构：使用flit.slot_id（上环时已记录）
+        slot_id = flit.slot_id
+        if slot_id is None:
+            return
 
         if direction == "TL":
             self.network.T0_table_h[self.node_id].add(slot_id)
@@ -260,8 +263,10 @@ class CrossPoint:
         if self.network is None:
             return
 
-        slot = self.network.links_tag[flit.current_link][flit.current_seat_index]
-        slot_id = slot.slot_id
+        # 新架构：使用flit.slot_id（上环时已记录）
+        slot_id = flit.slot_id
+        if slot_id is None:
+            return
 
         if direction == "TL":
             self.network.T0_table_h[self.node_id].discard(slot_id)
@@ -346,28 +351,58 @@ class CrossPoint:
 
         return None
 
+    def upgrade_etag_on_failure(self, flit: Flit, direction: str):
+        """
+        下环失败时执行ETag升级
+
+        Args:
+            flit: 当前flit
+            direction: 下环方向
+        """
+        upgrade_target = self._determine_etag_upgrade(flit, direction)
+        if upgrade_target is None:
+            return
+
+        flit.ETag_priority = upgrade_target
+        flit.is_delay = True
+
+        # 如果升级到T0，加入T0表
+        if upgrade_target == "T0" and direction in ["TL", "TU"]:
+            self.T0_table_record(flit, direction)
+
     # ------------------------------------------------------------------
     # I-Tag: 预约管理
     # ------------------------------------------------------------------
 
     def update_excess_ITag(self):
-        """处理多余ITag释放"""
+        """处理多余ITag释放（新架构：从Ring.itag中释放）"""
         if self.network is None:
             return
 
         for direction in self.managed_directions:
             for node_id in list(self.excess_ITag_to_remove[direction].keys()):
                 if self.excess_ITag_to_remove[direction][node_id] > 0:
+                    # 获取对应的Ring对象
+                    is_horizontal = direction in ["TL", "TR"]
+                    if is_horizontal:
+                        row = node_id // self.config.NUM_COL
+                        ring = self.network.horizontal_rings.get(row)
+                    else:
+                        col = node_id % self.config.NUM_COL
+                        ring = self.network.vertical_rings.get(col)
+
+                    if ring is None:
+                        continue
+
                     # 寻找该节点创建的ITag并释放
-                    for link, seats in self.network.links_tag.items():
-                        for slot in seats:
-                            if slot.itag_reserved and slot.check_itag_match(node_id, direction) and link[0] == node_id:
-                                # 释放多余ITag
-                                slot.clear_itag()
-                                self.tagged_counter[direction][node_id] -= 1
-                                self.remain_tag[direction][node_id] += 1
-                                self.excess_ITag_to_remove[direction][node_id] -= 1
-                                break
+                    for slot_id, info in list(ring.itag.items()):
+                        if info["reserver_node"] == node_id and info["reserver_dir"] == direction:
+                            # 释放多余ITag
+                            ring.release_itag(slot_id)
+                            self.tagged_counter[direction][node_id] -= 1
+                            self.remain_tag[direction][node_id] += 1
+                            self.excess_ITag_to_remove[direction][node_id] -= 1
+                            break
 
     # ------------------------------------------------------------------
     # 下环逻辑
@@ -404,6 +439,7 @@ class CrossPoint:
 
         can_use_T1 = self._entry_available(direction, key, "T1") if t1_enabled else False
         can_use_T2 = self._entry_available(direction, key, "T2")
+
 
         if flit.ETag_priority == "T0":
             # T0优先级：需要T0专用/T1/T2中至少有一个可用，且T0需要赢得轮询仲裁
@@ -486,7 +522,7 @@ class CrossPoint:
             key: entry的键（ring_bridge用节点号，eject_queues用节点号）
             entry_level: 占用的entry等级 ("T0"/"T1"/"T2")
         """
-        # 1. T0相关处理（必须在清空link位置之前，因为需要访问slot_id）
+        # 1. T0相关处理（必须在清空slice位置之前，因为需要访问slot_id）
         if flit.ETag_priority == "T0" and direction in ["TL", "TU"]:
             # 无论使用什么Entry，都从T0_table移除
             self.T0_remove_from_table(flit, direction)
@@ -494,15 +530,16 @@ class CrossPoint:
             if entry_level == "T0":
                 self._advance_T0_arb_pointer(direction)
 
-        # 2. 清空当前link位置
-        link[flit.current_seat_index] = None
+        # 2. 清空当前slice位置（新架构：使用flit.current_slice）
+        if flit.current_slice is not None:
+            flit.current_slice.flit = None
 
         # 3. 根据下环目标设置flit状态并添加到pre缓冲
         if direction in ["TL", "TR"]:
             # 横向环下环到ring_bridge
             flit.is_delay = False
-            flit.current_link = None
-            flit.current_seat_index = -1
+            flit.current_slice = None
+            flit.slot_id = None
             flit.set_position(f"RB_{direction}_N{key}", self.network.cycle)
 
             # 添加到ring_bridge_pre缓冲位（带检查）
@@ -516,8 +553,8 @@ class CrossPoint:
             # 纵向环下环到eject_queues（最终目的地节点，但还未到IP）
             flit.is_delay = False
             flit.is_arrive = False  # 还未到IP模块，保持False
-            flit.current_link = None
-            flit.current_seat_index = 0
+            flit.current_slice = None
+            flit.slot_id = None
             flit.set_position(f"EQ_{direction}", self.network.cycle)
 
             # 添加到eject_queues_in_pre缓冲位（带检查）
@@ -561,11 +598,12 @@ class CrossPoint:
                 失败原因: "" (成功), "capacity" (容量), "entry" (Entry不足)
         """
         # 1. 获取队列和容量限制
+        # 新架构：从flit.current_slice获取当前节点
+        current_node = flit.current_slice.node_id if flit.current_slice else self.node_id
         if direction in ["TL", "TR"]:
             # 横向环下环到ring_bridge
             if ring_bridge is None:
                 return False, "capacity"
-            current_node = flit.current_link[1]
             key = current_node  # 新架构: ring_bridge键直接使用节点号
             queue = ring_bridge[direction][key]
             capacity = self.config.RB_IN_FIFO_DEPTH
@@ -573,7 +611,7 @@ class CrossPoint:
             # 纵向环下环到eject_queues
             if eject_queues is None:
                 return False, "capacity"
-            key = flit.current_link[1]
+            key = current_node
             queue = eject_queues[direction][key]
             capacity = self.config.EQ_IN_FIFO_DEPTH
 
@@ -643,25 +681,12 @@ class CrossPoint:
         final_dest = flit.path[-1]
 
         # 根据当前crosspoint维度过滤不匹配的链路方向，避免错误下环
-        if hasattr(flit, "current_link") and flit.current_link is not None and len(flit.current_link) >= 2:
-            u, v = flit.current_link[:2]
-            hop_diff = abs(u - v)
-            is_self_loop = u == v  # 自环
-
-            if self.direction == "horizontal":
-                # 横向环：处理横向链路或横向自环
-                if not is_self_loop and (hop_diff != 1 or (u // self.config.NUM_COL) != (v // self.config.NUM_COL)):
-                    return False, "", ""
-                # 如果是自环，检查是否为横向自环
-                if is_self_loop and len(flit.current_link) == 3 and flit.current_link[2] != "h":
-                    return False, "", ""
-            elif self.direction == "vertical":
-                # 纵向环：处理纵向链路或纵向自环
-                if not is_self_loop and (hop_diff != self.config.NUM_COL or (u % self.config.NUM_COL) != (v % self.config.NUM_COL)):
-                    return False, "", ""
-                # 如果是自环，检查是否为纵向自环
-                if is_self_loop and len(flit.current_link) == 3 and flit.current_link[2] != "v":
-                    return False, "", ""
+        if flit.current_slice is not None:
+            slice_dir = flit.current_slice.direction
+            if self.direction == "horizontal" and slice_dir not in ("TL", "TR"):
+                return False, "", ""
+            elif self.direction == "vertical" and slice_dir not in ("TU", "TD"):
+                return False, "", ""
 
         # 1. 检查是否到达最终目标
         if current_node == final_dest:
@@ -708,7 +733,7 @@ class CrossPoint:
         """
         获取水平CrossPoint的下环方向
 
-        根据flit的实际移动方向确定应该从哪个方向下环
+        根据flit当前所在slice的方向确定应该从哪个方向下环
 
         Args:
             flit: 当前flit对象
@@ -718,32 +743,19 @@ class CrossPoint:
         Returns:
             str: "TL"或"TR"
         """
-        prev_node = flit.current_link[0]
-        curr_node = flit.current_link[1]
+        # 直接使用flit当前所在slice的方向
+        if flit.current_slice is not None:
+            return flit.current_slice.direction
 
-        # 自环：根据节点所在边缘判断流动方向
-        if prev_node == curr_node:
-            col = curr_node % self.config.NUM_COL
-            # 左边缘 -> 向右流动 -> TR
-            # 右边缘 -> 向左流动 -> TL
-            return "TR" if col == 0 else "TL"
-
-        # 非自环：比较列号判断移动方向
-        prev_col = prev_node % self.config.NUM_COL
-        curr_col = curr_node % self.config.NUM_COL
-
-        if curr_col > prev_col or (prev_col == self.config.NUM_COL - 1 and curr_col == 0):
-            # 向右移动 -> 从右侧下环
-            return "TR"
-        else:
-            # 向左移动 -> 从左侧下环
-            return "TL"
+        # 如果没有current_slice信息，根据节点位置推断
+        col = current_node % self.config.NUM_COL
+        return "TR" if col == 0 else "TL"
 
     def _get_eject_direction_vertical(self, flit: Flit, current_node: int, target_node: int) -> str:
         """
         获取垂直CrossPoint的下环方向
 
-        根据flit的实际移动方向确定应该从哪个方向下环
+        根据flit当前所在slice的方向确定应该从哪个方向下环
 
         Args:
             flit: 当前flit对象
@@ -753,27 +765,13 @@ class CrossPoint:
         Returns:
             str: "TU"或"TD"
         """
-        prev_node = flit.current_link[0]
-        curr_node = flit.current_link[1]
+        # 直接使用flit当前所在slice的方向
+        if flit.current_slice is not None:
+            return flit.current_slice.direction
 
-        # 自环：根据节点所在边缘判断流动方向
-        if prev_node == curr_node:
-            row = curr_node // self.config.NUM_COL
-            num_rows = self.config.NUM_NODE // self.config.NUM_COL
-            # 上边缘 -> 向下流动 -> TD
-            # 下边缘 -> 向上流动 -> TU
-            return "TD" if row == 0 else "TU"
-
-        # 非自环：比较行号判断移动方向
-        prev_row = prev_node // self.config.NUM_COL
-        curr_row = curr_node // self.config.NUM_COL
-
-        if curr_row > prev_row:
-            # 向下移动 -> 从下侧下环
-            return "TD"
-        else:
-            # 向上移动 -> 从上侧下环
-            return "TU"
+        # 如果没有current_slice信息，根据节点位置推断
+        row = current_node // self.config.NUM_COL
+        return "TD" if row == 0 else "TU"
 
     # ------------------------------------------------------------------
     # 拥塞感知流控 - 智能综合策略 (v3.0)
@@ -861,23 +859,31 @@ class CrossPoint:
             if conflict_status[0]:
                 return False
 
-        # 新架构：检查CP的out_slice是否可用（取代原来的link[0]检查）
-        cp = self.network.crosspoints[current_pos][dim]
-        out_slice_occupied = cp.cp_slices[direction][-1] is not None
+        # 纯offset模式：获取cp_out_slice（RingSlice）
+        is_horizontal = direction in ["TL", "TR"]
+        cp_out_slice = self.network.cp_out_slices.get((current_pos, direction))
+        if cp_out_slice is None or cp_out_slice.ring is None:
+            return False
 
-        # 获取对应的ITag slot（仍然使用link的tag结构）
-        slot = self.network.links_tag[link][0]
+        ring = cp_out_slice.ring
+        slot_id = cp_out_slice.slot_id
+
+        # 纯offset模式：检查RingSlice是否被占用
+        out_slice_occupied = cp_out_slice.flit is not None
 
         # 区分横向和纵向配置
-        is_horizontal = direction in ["TL", "TR"]
         wait_cycle = flit.wait_cycle_h if is_horizontal else flit.wait_cycle_v
         trigger_threshold = self.config.ITag_TRIGGER_Th_H if is_horizontal else self.config.ITag_TRIGGER_Th_V
         max_itag = self.config.ITag_MAX_NUM_H if is_horizontal else self.config.ITag_MAX_NUM_V
 
+        # 检查是否有ITag预约
+        itag_reserved = slot_id in ring.itag
+        itag_is_mine = ring.check_itag(slot_id, current_pos, direction)
+
         if out_slice_occupied:
             # CP的out_slice被占用，无论是否有ITag都不能注入
             # 但可以在没有预约时尝试创建ITag（为下次空闲时预约）
-            if not slot.itag_reserved:
+            if not itag_reserved:
                 # 没有预约，尝试创建I-Tag
                 if (
                     wait_cycle > trigger_threshold
@@ -888,7 +894,7 @@ class CrossPoint:
                     # 创建I-Tag预约
                     self.remain_tag[direction][current_pos] -= 1
                     self.tagged_counter[direction][current_pos] += 1
-                    slot.reserve_itag(current_pos, direction)
+                    ring.reserve_itag(slot_id, current_pos, direction)
                     if is_horizontal:
                         flit.itag_h = True
                     else:
@@ -897,10 +903,10 @@ class CrossPoint:
             return False
         else:
             # CP的out_slice未占用
-            if not slot.itag_reserved:
+            if not itag_reserved:
                 # 没有预约，可以上环
                 return True
-            elif slot.check_itag_match(current_pos, direction):
+            elif itag_is_mine:
                 # 有预约且是自己的预约，使用预约
                 return True
             else:
@@ -909,13 +915,10 @@ class CrossPoint:
 
     def _inject_flit_to_link(self, flit: Flit, link: tuple, direction: str, cycle: int) -> bool:
         """
-        统一的上环执行方法
-
-        新架构：上环到CP的out_slice，而不是直接进入Link
-        flit将在下一个周期由process_cp_slices传输到Link
+        统一的上环执行方法（纯offset模式）
 
         执行流程：
-        1. 注入flit到CP的out_slice
+        1. 注入flit到RingSlice（cp_out_slice）
         2. 释放I-Tag预约（如果使用了预约）
         3. 重置E-Tag显示优先级为T2
 
@@ -932,27 +935,25 @@ class CrossPoint:
             return False
 
         current_pos = link[0]
-        slot = self.network.links_tag[link][0]
         is_horizontal = direction in ["TL", "TR"]
-        dim = "horizontal" if is_horizontal else "vertical"
 
-        # 1. 注入到CP的out_slice
-        cp = self.network.crosspoints[current_pos][dim]
-        out_slice_idx = len(cp.cp_slices[direction]) - 1
-        cp.cp_slices[direction][out_slice_idx] = flit
-        flit.current_link = None  # 在CP内部，不在Link上
-        flit.current_seat_index = -1
-        # 设置CP位置属性（用于统一两阶段处理）
-        flit.cp_node_id = current_pos
-        flit.cp_direction = direction
-        flit.cp_slice_index = out_slice_idx
-        cp_pos = "CP_H" if is_horizontal else "CP_V"
-        flit.set_position(cp_pos, cycle)
+        # 纯offset模式：获取cp_out_slice（RingSlice）
+        cp_out_slice = self.network.cp_out_slices.get((current_pos, direction))
+        if cp_out_slice is None or cp_out_slice.ring is None:
+            return False
 
-        # 2. 处理I-Tag释放
-        if slot.itag_reserved and slot.check_itag_match(current_pos, direction):
-            # 使用了预约，释放
-            slot.clear_itag()
+        ring = cp_out_slice.ring
+        slot_id = cp_out_slice.slot_id
+
+        # 1. 注入到RingSlice
+        cp_out_slice.flit = flit
+        flit.current_slice = cp_out_slice
+        flit.slot_id = slot_id
+        flit.set_position(cp_out_slice.get_position_str(), cycle)
+
+        # 2. 处理I-Tag释放（使用Ring.itag）
+        if ring.check_itag(slot_id, current_pos, direction):
+            ring.release_itag(slot_id)
             self.remain_tag[direction][current_pos] += 1
             self.tagged_counter[direction][current_pos] -= 1
 
@@ -1009,8 +1010,7 @@ class CrossPoint:
 
         # 注入到CP slice的第一个位置
         self.cp_slices[direction][0] = flit
-        flit.current_link = None
-        flit.current_seat_index = -1
+        flit.current_slice = None  # 在CP内部，不在RingSlice上
         # 设置CP位置属性（用于统一两阶段处理）
         flit.cp_node_id = self.node_id
         flit.cp_direction = direction

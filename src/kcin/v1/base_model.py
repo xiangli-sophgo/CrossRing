@@ -21,6 +21,7 @@ import threading
 
 from src.kcin.v1.mixins import StatsMixin, DataflowMixin
 from src.utils.statistical_fifo import StatisticalFIFO
+from src.kcin.base.channel_selector import ChannelSelector
 
 
 class BaseModel(StatsMixin, DataflowMixin):
@@ -412,13 +413,92 @@ class BaseModel(StatsMixin, DataflowMixin):
         # print("\n提示: 按 Ctrl+C 可以随时中断仿真并查看当前结果\n")
         self.run()
 
+    # ==================== 多通道辅助方法 ====================
+    def _load_network_channel_config(self):
+        """从config加载网络通道配置"""
+        config_dict = getattr(self.config, "NETWORK_CHANNEL_CONFIG", {})
+
+        # 默认配置（单通道）
+        default_config = {
+            "req": {"num_channels": 1},
+            "rsp": {"num_channels": 1},
+            "data": {"num_channels": 1}
+        }
+
+        # 合并用户配置
+        for net_type in ["req", "rsp", "data"]:
+            if net_type in config_dict:
+                default_config[net_type].update(config_dict[net_type])
+
+        return default_config
+
+    def _create_networks(self, net_type):
+        """创建指定类型的网络列表"""
+        config = self.network_configs.get(net_type, {})
+        num_channels = config.get("num_channels", 1)
+
+        name_map = {"req": "Request", "rsp": "Response", "data": "Data"}
+        base_name = name_map[net_type]
+
+        networks = []
+        for ch_id in range(num_channels):
+            name = f"{base_name} Channel {ch_id}" if num_channels > 1 else f"{base_name} Network"
+            network = Network(self.config, self.adjacency_matrix, name)
+            networks.append(network)
+        return networks
+
+    def _get_networks_by_type(self, network_type):
+        """根据网络类型返回网络列表"""
+        if network_type == "req":
+            return self.req_networks
+        elif network_type == "rsp":
+            return self.rsp_networks
+        return self.data_networks
+
+    def _get_positions_list(self, network_type):
+        """根据网络类型返回位置列表"""
+        if network_type == "req":
+            return self.rn_positions_list
+        elif network_type == "rsp":
+            return self.sn_positions_list
+        return self.flit_positions_list
+
+    def _is_multi_channel(self):
+        """检查是否有任何网络使用多通道"""
+        for config in self.network_configs.values():
+            if config.get("num_channels", 1) > 1:
+                return True
+        return False
+
+    def _get_num_channels(self, network_type):
+        """获取指定网络的通道数量"""
+        return len(self._get_networks_by_type(network_type))
+
     def initial(self):
         self.topo_type_stat = self.config.TOPO_TYPE
         self.config.update_config(self.topo_type_stat)
         self.adjacency_matrix = create_adjacency_matrix("CrossRing", self.config.NUM_NODE, self.config.NUM_COL)
-        self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
-        self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
-        self.data_network = Network(self.config, self.adjacency_matrix, name="Data Network")
+
+        # 加载网络通道配置
+        self.network_configs = self._load_network_channel_config()
+
+        # 创建网络列表
+        self.req_networks = self._create_networks("req")
+        self.rsp_networks = self._create_networks("rsp")
+        self.data_networks = self._create_networks("data")
+
+        # 兼容性：保留原有属性名指向第一个网络
+        self.req_network = self.req_networks[0]
+        self.rsp_network = self.rsp_networks[0]
+        self.data_network = self.data_networks[0]
+
+        # 创建通道选择器（多通道时使用）
+        if self._is_multi_channel():
+            strategy = getattr(self.config, "CHANNEL_SELECT_STRATEGY", "ip_id_based")
+            max_channels = max(len(self.req_networks), len(self.rsp_networks), len(self.data_networks))
+            self.channel_selector = ChannelSelector(strategy, max_channels)
+        else:
+            self.channel_selector = None
         self.result_processor = SingleDieAnalyzer(
             self.config,
             min_gap_threshold=200,
@@ -432,9 +512,15 @@ class BaseModel(StatsMixin, DataflowMixin):
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
 
         # 智能设置各network的双侧升级：全局配置 OR (双侧下环/动态方向 AND 在保序列表中)
-        self.req_network.ETAG_BOTHSIDE_UPGRADE = self.config.ETAG_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES)
-        self.rsp_network.ETAG_BOTHSIDE_UPGRADE = self.config.ETAG_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES)
-        self.data_network.ETAG_BOTHSIDE_UPGRADE = self.config.ETAG_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        req_bothside = self.config.ETAG_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        rsp_bothside = self.config.ETAG_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        data_bothside = self.config.ETAG_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        for network in self.req_networks:
+            network.ETAG_BOTHSIDE_UPGRADE = req_bothside
+        for network in self.rsp_networks:
+            network.ETAG_BOTHSIDE_UPGRADE = rsp_bothside
+        for network in self.data_networks:
+            network.ETAG_BOTHSIDE_UPGRADE = data_bothside
 
         # Initialize arbiters based on configuration
         arbitration_config = getattr(self.config, "arbitration", {})
@@ -577,9 +663,8 @@ class BaseModel(StatsMixin, DataflowMixin):
         self._initialize_per_node_etag_stats()
 
         # 初始化Network的channel buffer(延迟初始化)
-        self.req_network.initialize_buffers()
-        self.rsp_network.initialize_buffers()
-        self.data_network.initialize_buffers()
+        for network in self.req_networks + self.rsp_networks + self.data_networks:
+            network.initialize_buffers()
 
     def _create_dynamic_ip_interfaces(self):
         """
@@ -649,10 +734,11 @@ class BaseModel(StatsMixin, DataflowMixin):
                 ip_type,
                 node_id,
                 self.config,
-                self.req_network,
-                self.rsp_network,
-                self.data_network,
+                self.req_networks,
+                self.rsp_networks,
+                self.data_networks,
                 self.routes,
+                channel_selector=self.channel_selector,
             )
         elif ip_type == "d2d_sn_0":
             from src.dcin.components import D2D_SN_Interface
@@ -661,10 +747,11 @@ class BaseModel(StatsMixin, DataflowMixin):
                 ip_type,
                 node_id,
                 self.config,
-                self.req_network,
-                self.rsp_network,
-                self.data_network,
+                self.req_networks,
+                self.rsp_networks,
+                self.data_networks,
                 self.routes,
+                channel_selector=self.channel_selector,
             )
         else:
             # 普通IP接口
@@ -672,10 +759,11 @@ class BaseModel(StatsMixin, DataflowMixin):
                 ip_type,
                 node_id,
                 self.config,
-                self.req_network,
-                self.rsp_network,
-                self.data_network,
+                self.req_networks,
+                self.rsp_networks,
+                self.data_networks,
                 self.routes,
+                channel_selector=self.channel_selector,
             )
 
     def _initialize_per_node_etag_stats(self):
@@ -709,48 +797,54 @@ class BaseModel(StatsMixin, DataflowMixin):
 
     def step(self):
         """Execute one simulation cycle step."""
-        # Tag moves
+        # Tag moves - 每周期执行
         self.release_completed_sn_tracker()
 
         self.process_new_request()
 
-        self.tag_move_all_networks()
+        # 网络域操作 - 每 NETWORK_SCALE 个仿真周期执行一次
+        if self.cycle % self.config.NETWORK_SCALE == 0:
+            self.advance_all_network_rings()
 
-        self.ip_inject_to_network()
+            self.ip_inject_to_network()
 
-        # Network arbitration and movement
-        self._step_reqs = self.move_flits_in_network(self.req_network, self._step_reqs, "req")
-        self._step_rsps = self.move_flits_in_network(self.rsp_network, self._step_rsps, "rsp")
-        self._step_flits = self.move_flits_in_network(self.data_network, self._step_flits, "data")
+            # Network arbitration and movement - 通用多通道循环
+            for ch_id, network in enumerate(self.req_networks):
+                self._step_reqs[ch_id] = self.move_flits_in_network(network, self._step_reqs[ch_id], "req")
+            for ch_id, network in enumerate(self.rsp_networks):
+                self._step_rsps[ch_id] = self.move_flits_in_network(network, self._step_rsps[ch_id], "rsp")
+            for ch_id, network in enumerate(self.data_networks):
+                self._step_flits[ch_id] = self.move_flits_in_network(network, self._step_flits[ch_id], "data")
 
-        self.network_to_ip_eject()
+            self.network_to_ip_eject()
 
-        self.move_pre_to_queues_all()
+            self.move_pre_to_queues_all()
 
-        # Collect statistics
-        self.req_network.collect_cycle_end_link_statistics(self.cycle)
-        self.rsp_network.collect_cycle_end_link_statistics(self.cycle)
-        self.data_network.collect_cycle_end_link_statistics(self.cycle)
+            # Collect statistics - 所有网络
+            for network in self.req_networks + self.rsp_networks + self.data_networks:
+                network.collect_cycle_end_link_statistics(self.cycle)
 
         self.debug_func()
 
-        # Evaluate throughput time
-        self.update_throughput_metrics(self._step_flits)
+        # Evaluate throughput time - 合并所有data通道
+        all_data_flits = sum(self._step_flits, [])
+        self.update_throughput_metrics(all_data_flits)
 
         # 检查traffic完成情况并推进链
         completed_traffics = self.traffic_scheduler.check_and_advance_chains(self.cycle)
         if completed_traffics and self.verbose:
             print(f"Completed traffics: {completed_traffics}")
 
-        # 处理延迟释放的Entry
-        self._process_pending_entry_release(self.req_network)
-        self._process_pending_entry_release(self.rsp_network)
-        self._process_pending_entry_release(self.data_network)
+        # 处理延迟释放的Entry - 所有网络
+        for network in self.req_networks + self.rsp_networks + self.data_networks:
+            self._process_pending_entry_release(network)
 
     def is_completed(self):
         """Check if this die's simulation is completed."""
         traffic_completed = self.traffic_scheduler.is_all_completed()
-        recv_completed = self.data_network.recv_flits_num >= (self.read_flit + self.write_flit)
+        # 合并所有data通道的recv_flits_num
+        total_recv = sum(network.recv_flits_num for network in self.data_networks)
+        recv_completed = total_recv >= (self.read_flit + self.write_flit)
         trans_completed = self.trans_flits_num == 0
         write_completed = not self.new_write_req
 
@@ -760,8 +854,10 @@ class BaseModel(StatsMixin, DataflowMixin):
         """Main simulation loop."""
         simulation_start = time.perf_counter()
         self.load_request_stream()
-        # Initialize step variables
-        self._step_flits, self._step_reqs, self._step_rsps = [], [], []
+        # Initialize step variables - 每个网络每个通道一个列表
+        self._step_reqs = [[] for _ in self.req_networks]
+        self._step_rsps = [[] for _ in self.rsp_networks]
+        self._step_flits = [[] for _ in self.data_networks]
         self.cycle = 0
         tail_time = 6
 
@@ -828,6 +924,8 @@ class BaseModel(StatsMixin, DataflowMixin):
         current_time = self.cycle // self.config.CYCLES_PER_NS
         total_req = getattr(self, 'read_req', 0) + getattr(self, 'write_req', 0)
         total_flits = getattr(self, 'read_flit', 0) + getattr(self, 'write_flit', 0)
+        # 合并所有data通道的recv_flits_num
+        total_recv = sum(network.recv_flits_num for network in self.data_networks)
         summary_data = {
             "current_time": current_time,
             "max_time": self.end_time,
@@ -839,7 +937,7 @@ class BaseModel(StatsMixin, DataflowMixin):
             "read_flits": self.send_read_flits_num_stat,
             "write_flits": self.send_write_flits_num_stat,
             "trans_flits": self.trans_flits_num,
-            "recv_flits": self.data_network.recv_flits_num,
+            "recv_flits": total_recv,
             "total_flits": total_flits,
         }
 
@@ -851,7 +949,7 @@ class BaseModel(StatsMixin, DataflowMixin):
             print(
                 f"T: {current_time}, Req_cnt: {self.req_count} In_Req: {self.req_num}, Rsp: {self.rsp_num},"
                 f" R_fn: {self.send_read_flits_num_stat}, W_fn: {self.send_write_flits_num_stat}, "
-                f"Trans_fn: {self.trans_flits_num}, Recv_fn: {self.data_network.recv_flits_num}"
+                f"Trans_fn: {self.trans_flits_num}, Recv_fn: {total_recv}"
             )
 
     def update_throughput_metrics(self, flits):

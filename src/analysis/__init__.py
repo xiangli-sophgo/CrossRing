@@ -62,7 +62,6 @@ from .result_visualizers import (
 )
 from .Link_State_Visualizer import NetworkLinkVisualizer
 from .D2D_Link_State_Visualizer import D2D_Link_State_Visualizer
-from .Dual_Channel_Link_State_Visualizer import DualChannelNetworkLinkVisualizer
 
 __all__ = [
     # 数据类
@@ -102,5 +101,4 @@ __all__ = [
     "IPInfoBoxDrawer",
     "NetworkLinkVisualizer",
     "D2D_Link_State_Visualizer",
-    "DualChannelNetworkLinkVisualizer",
 ]

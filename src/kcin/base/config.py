@@ -122,6 +122,10 @@ class KCINConfigBase:
         # ==================== 仲裁配置 ====================
         self.arbitration = config.get("arbitration", {})
 
+        # ==================== 多通道配置 ====================
+        self.NETWORK_CHANNEL_CONFIG = config.get("NETWORK_CHANNEL_CONFIG", {})
+        self.CHANNEL_SELECT_STRATEGY = config.get("CHANNEL_SELECT_STRATEGY", "ip_id_based")
+
         # ==================== 方向控制 ====================
         self.TL_ALLOWED_SOURCE_NODES = config.get("TL_ALLOWED_SOURCE_NODES", None)
         self.TR_ALLOWED_SOURCE_NODES = config.get("TR_ALLOWED_SOURCE_NODES", None)

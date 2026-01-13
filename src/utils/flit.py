@@ -110,6 +110,8 @@ class Flit:
         "ETag_priority",
         "used_entry_level",
         "eject_direction",  # 下环方向（TL/TR/TU/TD），用于释放 entry
+        "slot_id",  # 当前所在的slot_id（上环时设置，新架构）
+        "current_slice",  # 当前所在的RingSlice对象（新架构）
         "T0_slot_id",  # T0轮询机制的slot ID
         "T0_fifo_direction",  # T0 slot注册的FIFO方向（"TL"/"TR"/"TU"/"TD"）
         "cmd_entry_cake0_cycle",
@@ -130,6 +132,7 @@ class Flit:
         "packet_category",
         "allowed_eject_directions",  # 允许下环的方向列表
         "data_channel_id",
+        "base_channel_id",  # 多通道架构中的基础通道ID
         # D2D相关属性
         "d2d_origin_die",  # 发起Die ID
         "d2d_origin_node",  # 发起节点物理ID
@@ -283,6 +286,8 @@ class Flit:
         self.ETag_priority = "T2"  # 默认优先级为 T2
         # 记录下环 / 弹出时实际占用的是哪一级 entry（"T0" / "T1" / "T2"）
         self.used_entry_level = None
+        self.slot_id = None  # 当前所在的slot_id（上环时设置，新架构）
+        self.current_slice = None  # 当前所在的RingSlice对象（新架构）
         self.T0_slot_id = None  # T0轮询机制的slot ID
         self.T0_fifo_direction = None  # T0 slot注册的FIFO方向（"TL"/"TR"/"TU"/"TD"）
         # Latency record
@@ -305,6 +310,7 @@ class Flit:
         self.packet_category = None
         self.allowed_eject_directions = None  # 允许下环的方向列表
         self.data_channel_id = 0  # 默认数据通道0
+        self.base_channel_id = None  # 多通道架构中的基础通道ID
         self.d2d_noc_inject_cycle = np.inf  # D2D NoC注入时间
         self.d2d_noc_eject_cycle = np.inf  # D2D NoC弹出时间
 
@@ -403,6 +409,8 @@ class Flit:
         self.reverse_inject_h = 0
         self.reverse_inject_v = 0
         self.ETag_priority = "T2"
+        self.slot_id = None
+        self.current_slice = None
         self.T0_slot_id = None
         self.path_index = 0
         self.current_seat_index = -1
@@ -412,6 +420,7 @@ class Flit:
         self.packet_category = None
         self.allowed_eject_directions = None
         self.data_channel_id = 0
+        self.base_channel_id = None
         # 重置D2D属性
         self.d2d_origin_die = None
         self.d2d_origin_node = None

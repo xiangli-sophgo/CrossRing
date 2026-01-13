@@ -400,6 +400,7 @@ class CSVExporter:
                     "source_node": src,
                     "destination_node": dst,
                     "direction": direction,
+                    "bandwidth_GB_s": f"{stats.get('bandwidth_GB_s', 0.0):.2f}",
                     "utilization": f"{stats.get('utilization', 0.0)*100:.2f}%",
                     "ITag_ratio": f"{stats.get('ITag_ratio', 0.0)*100:.2f}%",
                     "empty_ratio": f"{stats.get('empty_ratio', 0.0)*100:.2f}%",
@@ -434,6 +435,8 @@ class CSVExporter:
                     "source_node",
                     "destination_node",
                     "direction",
+                    # 带宽 (GB/s)
+                    "bandwidth_GB_s",
                     # 下环尝试次数比例（按用户要求放在前面）
                     "eject_attempts_h_0_ratio",
                     "eject_attempts_h_1_ratio",

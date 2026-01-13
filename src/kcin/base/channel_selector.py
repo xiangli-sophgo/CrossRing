@@ -1,32 +1,19 @@
 """
-Channel selector classes for dual-channel data transmission.
-Provides three simple strategies for selecting data channels in dual-channel networks.
+Channel selector classes for multi-channel data transmission.
+Provides strategies for selecting data channels in multi-channel networks.
+通道选择器返回base_channel_id，IPInterface通过模运算映射到实际通道。
 """
 
-from abc import ABC, abstractmethod
 
+class ChannelSelector:
+    """通道选择器，支持任意通道数"""
 
-class ChannelSelector(ABC):
-    """抽象基类，定义通道选择接口"""
-
-    @abstractmethod
-    def select_channel(self, flit, ip_id=None):
-        """选择数据通道
-
-        Args:
-            flit: 需要选择通道的flit对象
-            ip_id: IP的ID（用于ip_id_based策略）
-
-        Returns:
-            int: 选择的通道ID (0 or 1)
+    def __init__(self, strategy="ip_id_based", num_channels=2):
         """
-        pass
-
-
-class DefaultChannelSelector(ChannelSelector):
-    """默认通道选择器，支持从配置文件中读取的策略名称"""
-
-    def __init__(self, strategy="ip_id_based", network=None):
+        Args:
+            strategy: 选择策略 ("ip_id_based", "target_node_based", "flit_id_based")
+            num_channels: 最大通道数量（用于生成base_channel_id）
+        """
         # 映射配置文件中的策略名称到实际实现的策略
         self.strategy_mapping = {
             "hash_based": "ip_id_based",
@@ -41,13 +28,17 @@ class DefaultChannelSelector(ChannelSelector):
         }
 
         self.strategy = strategy
-        self.network = network
+        self.num_channels = num_channels
 
         # 将配置中的策略名称映射到实际实现的策略
         self.actual_strategy = self.strategy_mapping.get(strategy, "ip_id_based")
 
     def select_channel(self, flit, ip_id=None):
-        """根据配置的策略选择通道"""
+        """根据配置的策略选择通道
+
+        Returns:
+            int: base_channel_id，通过模运算映射到实际通道
+        """
         if self.actual_strategy == "ip_id_based":
             return self._select_by_ip_id(ip_id)
         elif self.actual_strategy == "target_node_based":
@@ -55,36 +46,36 @@ class DefaultChannelSelector(ChannelSelector):
         elif self.actual_strategy == "flit_id_based":
             return self._select_by_flit_id(flit)
         else:
-            # 默认使用ip_id策略
             return self._select_by_ip_id(ip_id)
 
     def _select_by_ip_id(self, ip_id):
-        """基于IP的ID奇偶选择通道"""
+        """基于IP的ID选择通道"""
         if ip_id is None:
-            ip_id = 0  # 默认值
-        channel = ip_id % 2
-        # 调试信息：记录通道选择
-        if not hasattr(self, '_debug_logged'):
-            print(f"    DEBUG: ip_id={ip_id} -> channel={channel}")
-            self._debug_logged = True
-        return channel
+            ip_id = 0
+        return ip_id % self.num_channels
 
     def _select_by_target_node(self, flit):
-        """基于目标节点ID奇偶选择通道"""
+        """基于目标节点ID选择通道"""
         destination = getattr(flit, "destination", 0)
-        return destination % 2
+        return destination % self.num_channels
 
     def _select_by_flit_id(self, flit):
-        """基于flit_id奇偶选择通道"""
-        flit_id = getattr(flit, "flit_id", 0)
-        return flit_id % 2
+        """基于flit_id选择通道（保证同一请求的flit在同一通道）"""
+        # 使用packet_id而非flit_id，保证同一packet的所有flit在同一通道
+        packet_id = getattr(flit, "packet_id", 0)
+        return packet_id % self.num_channels
+
+
+# 保留兼容性别名
+DefaultChannelSelector = ChannelSelector
 
 
 class StaticChannelSelector(ChannelSelector):
     """静态通道选择器，总是选择固定通道"""
 
-    def __init__(self, channel_id=0):
-        self.channel_id = channel_id if channel_id in [0, 1] else 0
+    def __init__(self, channel_id=0, num_channels=2):
+        super().__init__("ip_id_based", num_channels)
+        self.channel_id = channel_id % num_channels
 
     def select_channel(self, flit, ip_id=None):
         """总是返回固定的通道ID"""

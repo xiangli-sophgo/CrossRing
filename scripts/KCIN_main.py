@@ -10,9 +10,9 @@ def main():
     """运行CrossRing仿真 - 使用新的简化配置接口"""
 
     # ==================== 流量配置 ====================
-    traffic_file_path = r"../traffic/DeepSeek/step6_ch_map/"
+    # traffic_file_path = r"../traffic/DeepSeek/step6_ch_map/"
     # traffic_file_path = r"../test_data"
-    # traffic_file_path = r"../traffic"
+    traffic_file_path = r"../traffic"
     traffic_config = [
         [
             "LLama2_AllReduce.txt"
@@ -94,11 +94,11 @@ def main():
         result_save_path=f"../Result/CrossRing/{model_type}/",
         show_result_analysis=1,
     )
-    # sim.setup_debug(print_trace=1, show_trace_id=[52], update_interval=0.0)  # 关闭debug加速仿真
+    # sim.setup_debug(print_trace=1, show_trace_id=[1], update_interval=0.1)  # 关闭debug加速仿真
     # sim.setup_visualization(plot_link_state=1, plot_start_cycle=500, show_node_id=1)
     np.random.seed(801)
 
-    sim.run_simulation(max_time=5000, print_interval=500)
+    sim.run_simulation(max_time=6000, print_interval=500)
 
     # ==================== 保存结果到数据库 ====================
     # sim.save_to_database(experiment_name="KCIN 仿真")

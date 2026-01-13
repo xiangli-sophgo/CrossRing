@@ -7,11 +7,9 @@ from .REQ_RSP import REQ_RSP_model
 # NoC组件
 from .components import (
     Network,
-    LinkSlot,
     IPInterface,
     RingIPInterface,
     CrossPoint,
-    DualChannelIPInterface,
 )
 
 __all__ = [
@@ -22,9 +20,7 @@ __all__ = [
     "REQ_RSP_model",
     # 组件
     "Network",
-    "LinkSlot",
     "IPInterface",
     "RingIPInterface",
     "CrossPoint",
-    "DualChannelIPInterface",
 ]

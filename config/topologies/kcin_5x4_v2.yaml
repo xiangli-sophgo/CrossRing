@@ -4,15 +4,7 @@ TOPO_TYPE: 5x4  # 格式 AxB，自动计算拓扑参数
 FLIT_SIZE: 128
 BURST: 4
 NETWORK_FREQUENCY: 2
-
-# ==================== v2 RingStation 架构配置 ====================
-KCIN_VERSION: v2  # 使用 RingStation 架构
-
-# RingStation FIFO 深度配置
-RS_INPUT_CH_DEPTH: 4      # RS输入端 ch_buffer 深度
-RS_INPUT_RING_DEPTH: 4    # RS输入端 环方向 FIFO 深度
-RS_OUTPUT_CH_DEPTH: 4     # RS输出端 ch_buffer 深度
-RS_OUTPUT_RING_DEPTH: 4   # RS输出端 环方向 FIFO 深度
+IP_FREQUENCY: 1  # IP核频率(GHz)，默认为网络频率的一半
 
 # Buffer Size
 RN_RDB_SIZE: 256  # RN读数据缓冲区
@@ -29,15 +21,19 @@ SN_L2M_R_TRACKER_OSTD: auto
 SN_L2M_W_TRACKER_OSTD: auto
 
 # KCIN Config
-SLICE_PER_LINK_HORIZONTAL: 9
-SLICE_PER_LINK_VERTICAL: 9
-CP_SLICE_COUNT: 2 
-
+KCIN_VERSION: v2  # 架构版本: v1 (IQ/RB/EQ) 或 v2 (RingStation)
+SLICE_PER_LINK_HORIZONTAL: 7
+SLICE_PER_LINK_VERTICAL: 7
+CP_SLICE_COUNT: 2  # CrossPoint slice数量 (流水线深度)
+RS_IN_CH_BUFFER: 4  # RS输入端 ch_buffer 深度
+RS_OUT_CH_BUFFER: 4  # RS输出端 ch_buffer 深度
+RS_IN_FIFO_DEPTH: 4  # RS输入端 环方向 FIFO 深度
+RS_OUT_FIFO_DEPTH: 4  # RS输出端 环方向 FIFO 深度
 IP_L2H_FIFO_DEPTH: 3
 IP_H2L_H_FIFO_DEPTH: 2
 IP_H2L_L_FIFO_DEPTH: 2
-TL_Etag_T1_UE_MAX: 3
 TL_Etag_T2_UE_MAX: 3
+TL_Etag_T1_UE_MAX: 3
 TR_Etag_T2_UE_MAX: 4
 TU_Etag_T2_UE_MAX: 3
 TU_Etag_T1_UE_MAX: 3

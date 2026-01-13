@@ -326,20 +326,18 @@ class NetworkLinkVisualizer:
                 import matplotlib.pyplot as plt
 
                 for link_id, info in self.link_artists.items():
-                    tag_list = getattr(self.network, "links_tag", {}).get(tuple(map(int, link_id.split("-"))), [])
-                    if not tag_list:
-                        continue
                     flit_artists = info.get("flit_artists", [])
                     for idx, artist in enumerate(flit_artists):
                         if not isinstance(artist, plt.Polygon):
                             continue
                         bbox = artist.get_window_extent()
                         if bbox.contains(event.x, event.y):
-                            if 0 <= idx < len(tag_list):
-                                tag_val = getattr(artist, "tag_val", None)
+                            # 新架构：从artist.tag_val获取ITag信息
+                            tag_val = getattr(artist, "tag_val", None)
+                            if tag_val is not None:
                                 self.info_text.set_text(f"ITag: {tag_val}")
                                 self.fig.canvas.draw_idle()
-                                return
+                            return
 
     def _update_tracked_labels(self):
         highlight_on = self.tracked_pid is not None
@@ -382,7 +380,7 @@ class NetworkLinkVisualizer:
 
         # 绘制所有链路的框架
         self.link_artists.clear()
-        for link_key in self.network.links.keys():
+        for link_key in self.network.links_flow_stat.keys():
             # 处理2-tuple或3-tuple格式的link key
             src, dest = link_key[:2] if len(link_key) >= 2 else link_key
             # 根据链路类型选择正确的 slice 数量
@@ -438,7 +436,7 @@ class NetworkLinkVisualizer:
         dest_arrow = (dest_center[0] - dx * half_w, dest_center[1] - dy * half_h)
 
         # 检查是否为双向链路
-        bidirectional = (dest, src) in self.network.links
+        bidirectional = (dest, src) in self.network.links_flow_stat
         extra_arrow_offset = 0.1  # 双向箭头的额外偏移量
         if bidirectional:
             # 使用简单的 id 大小比较决定偏移方向
@@ -591,12 +589,12 @@ class NetworkLinkVisualizer:
         if cycle is not None and self.networks is not None:
             for i, net in enumerate(self.networks):
                 # 构建快照（存储 Flit 对象或 None）
-                # 处理2-tuple或3-tuple格式的link key
-                snap = {link_key[:2]: [f if f is not None else None for f in flits] for link_key, flits in net.links.items()}
+                # 纯offset模式：从Ring.slices获取flit
+                snap = self._build_snapshot_from_rings(net)
                 meta = {
                     "network_name": net.name,
                     "cross_point": copy.deepcopy(net.cross_point),
-                    "links_tag": copy.deepcopy(net.links_tag),
+                    # 新架构：ITag存储在Ring.itag中，不再使用links_tag
                 }
                 # v2 架构：保存 ring_stations
                 if hasattr(net, "ring_stations"):
@@ -625,21 +623,25 @@ class NetworkLinkVisualizer:
                             "vertical": SimpleNamespace(cp_slices=copy.deepcopy(cps["vertical"].cp_slices)),
                         }
                     meta["crosspoints"] = crosspoints_snapshot
+                    # 新架构：保存Ring的itag信息（用于ITag显示）
+                    # 直接引用live Ring对象（ITag回放时使用实时网络）
+                    meta["horizontal_rings"] = net.horizontal_rings
+                    meta["vertical_rings"] = net.vertical_rings
                 self.histories[i].append((cycle, snap, meta))
 
         # 渲染当前选中网络的快照
         if self.networks is not None:
             current_net = self.networks[self.selected_network_index]
-            # 处理2-tuple或3-tuple格式的link key
-            render_snap = {link_key[:2]: [f if f is not None else None for f in flits] for link_key, flits in current_net.links.items()}
+            # 纯offset模式：从Ring.slices获取flit
+            render_snap = self._build_snapshot_from_rings(current_net)
             self._render_snapshot(render_snap)
             # 若已有选中节点，实时更新右侧 Piece 视图
             if self._selected_node is not None:
                 self._refresh_piece_view()
             self.ax.set_title(current_net.name)
         else:
-            # 处理2-tuple或3-tuple格式的link key
-            self._render_snapshot({link_key[:2]: [f if f is not None else None for f in flits] for link_key, flits in self.network.links.items()})
+            # 纯offset模式：从Ring.slices获取flit
+            self._render_snapshot(self._build_snapshot_from_rings(self.network))
             # 若已有选中节点，实时更新右侧 Piece 视图
             if self._selected_node is not None:
                 self._refresh_piece_view()
@@ -698,7 +700,9 @@ class NetworkLinkVisualizer:
                     eject_queues=meta["eject_queues"],
                     ring_bridge=meta["ring_bridge"],
                     cross_point=meta["cross_point"],
-                    links_tag=meta["links_tag"],
+                    # 新架构：ITag存储在Ring.itag中
+                    horizontal_rings=meta.get("horizontal_rings", {}),
+                    vertical_rings=meta.get("vertical_rings", {}),
                     IQ_arbiter_input_fifo=meta.get("IQ_arbiter_input_fifo", {}),
                     EQ_arbiter_input_fifo=meta.get("EQ_arbiter_input_fifo", {}),
                     crosspoints=meta.get("crosspoints", {}),
@@ -793,12 +797,107 @@ class NetworkLinkVisualizer:
     def _draw_state(self, snapshot):
         self._render_snapshot(snapshot)
 
-    def _render_snapshot(self, snapshot):
-        # Determine tag source: use historical tags during replay, else live network tags
-        if self.paused and self._play_idx is not None and self.networks is not None:
-            tags_dict = self.histories[self.selected_network_index][self._play_idx][2].get("links_tag", {})
+    def _get_itag_from_ring(self, network, src, dest, slice_index):
+        """从新架构的Ring.itag获取ITag信息
+
+        Args:
+            network: 网络对象
+            src, dest: link的源和目标节点
+            slice_index: slice在link中的索引
+
+        Returns:
+            tag信息 [reserver_node, reserver_dir] 或 None
+        """
+        if not hasattr(network, 'horizontal_rings') or not hasattr(network, 'vertical_rings'):
+            return None
+
+        # 判断是横向还是纵向link
+        num_col = network.config.NUM_COL
+        is_horizontal = abs(src - dest) == 1 or (src // num_col == dest // num_col)
+
+        if is_horizontal:
+            row = src // num_col
+            if row not in network.horizontal_rings:
+                return None
+            ring = network.horizontal_rings[row]
         else:
-            tags_dict = getattr(self.network, "links_tag", {})
+            col = src % num_col
+            if col not in network.vertical_rings:
+                return None
+            ring = network.vertical_rings[col]
+
+        # 在Ring中找到对应的slice并获取slot_id
+        # 遍历ring.slices找到属于这个link的slice
+        link_slice_count = 0
+        for s in ring.slices:
+            if s.slice_type == "LINK" and s.node_id == src:
+                if link_slice_count == slice_index:
+                    slot_id = ring.get_slot_id_at(s.ring_index)
+                    if slot_id in ring.itag:
+                        info = ring.itag[slot_id]
+                        return [info.get("reserver_node"), info.get("reserver_dir")]
+                    return None
+                link_slice_count += 1
+        return None
+
+    def _get_link_flits_from_ring(self, network, src, dest):
+        """从Ring.slices获取link上的flit列表（纯offset模式）
+
+        Args:
+            network: 网络对象
+            src, dest: link的源和目标节点
+
+        Returns:
+            list: link上每个slice的flit列表（可能为None）
+        """
+        # 判断是横向还是纵向link
+        num_col = network.config.NUM_COL
+        is_horizontal = abs(src - dest) == 1 or (src // num_col == dest // num_col)
+
+        # 确定方向
+        if is_horizontal:
+            row = src // num_col
+            if row not in network.horizontal_rings:
+                return []
+            ring = network.horizontal_rings[row]
+            direction = "TR" if dest > src else "TL"
+        else:
+            col = src % num_col
+            if col not in network.vertical_rings:
+                return []
+            ring = network.vertical_rings[col]
+            direction = "TD" if dest > src else "TU"
+
+        # 收集属于这个link的slice的flit
+        flits = []
+        for s in ring.slices:
+            if s.slice_type == "LINK" and s.node_id == src and s.direction == direction:
+                flits.append(s.flit)
+
+        return flits
+
+    def _build_snapshot_from_rings(self, network):
+        """从Ring.slices构建快照（纯offset模式）
+
+        Args:
+            network: 网络对象
+
+        Returns:
+            dict: {(src, dest): [flit列表]}
+        """
+        snap = {}
+
+        # 使用links_flow_stat的键（它与links的键相同）
+        for link_key in network.links_flow_stat.keys():
+            src, dest = link_key[:2]
+            flits = self._get_link_flits_from_ring(network, src, dest)
+            snap[(src, dest)] = flits
+
+        return snap
+
+    def _render_snapshot(self, snapshot):
+        # 新架构：从Ring.itag获取tag信息
+        current_net = self.networks[self.selected_network_index] if self.networks else self.network
         # keep snapshot for later info refresh
         self.last_snapshot = snapshot
         # 重置 flit→文本映射
@@ -856,14 +955,9 @@ class NetworkLinkVisualizer:
                 x = slot_x + slot_size / 2
                 y = slot_y + slot_size / 2
 
-                # 获取tag信息
+                # 获取tag信息（新架构：从Ring.itag获取）
                 idx_slice = i  # 现在显示全部slice，索引直接对应
-                tag = None
-                tag_list = tags_dict.get((src, dest), None)
-                if isinstance(tag_list, (list, tuple)) and len(tag_list) > idx_slice:
-                    slot_obj = tag_list[idx_slice]
-                    if hasattr(slot_obj, "itag_reserved") and slot_obj.itag_reserved:
-                        tag = [slot_obj.itag_reserver_id, slot_obj.itag_direction]
+                tag = self._get_itag_from_ring(current_net, src, dest, idx_slice)
 
                 if flit is None:
                     # 空slot，如果有tag画三角

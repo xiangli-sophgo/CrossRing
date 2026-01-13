@@ -131,7 +131,7 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                 </Col>
               </Row>
 
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Slice Per Link</Text>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Slice Config</Text>
               <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
                 {configValues.SLICE_PER_LINK_HORIZONTAL !== undefined && (
                   <Col span={8}>
@@ -145,10 +145,10 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                     <InputNumber value={configValues.SLICE_PER_LINK_VERTICAL} onChange={(v) => updateConfigValue('SLICE_PER_LINK_VERTICAL', v)} min={1} style={{ width: '100%' }} />
                   </Col>
                 )}
-                {configValues.SLICE_PER_LINK_SELF !== undefined && (
+                {configValues.CP_SLICE_COUNT !== undefined && (
                   <Col span={8}>
-                    <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_SELF" /></div>
-                    <InputNumber value={configValues.SLICE_PER_LINK_SELF} onChange={(v) => updateConfigValue('SLICE_PER_LINK_SELF', v)} min={1} style={{ width: '100%' }} />
+                    <div style={{ marginBottom: 4 }}><ConfigLabel name="CP_SLICE_COUNT" /></div>
+                    <InputNumber value={configValues.CP_SLICE_COUNT} onChange={(v) => updateConfigValue('CP_SLICE_COUNT', v)} min={1} style={{ width: '100%' }} />
                   </Col>
                 )}
               </Row>
@@ -340,6 +340,75 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                   </Col>
                 </Row>
               )}
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8, marginTop: 16 }}>Multi-Channel Config</Text>
+              <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                <Col span={10}><ConfigLabel name="REQ_NUM_CHANNELS" /></Col>
+                <Col span={14}>
+                  <InputNumber
+                    value={configValues.NETWORK_CHANNEL_CONFIG?.req?.num_channels ?? 1}
+                    onChange={(v) => {
+                      const newConfig = {
+                        ...configValues.NETWORK_CHANNEL_CONFIG,
+                        req: { ...(configValues.NETWORK_CHANNEL_CONFIG?.req || {}), num_channels: v ?? 1 }
+                      }
+                      updateConfigValue('NETWORK_CHANNEL_CONFIG', newConfig)
+                    }}
+                    min={1}
+                    max={8}
+                    style={{ width: 120 }}
+                  />
+                </Col>
+              </Row>
+              <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                <Col span={10}><ConfigLabel name="RSP_NUM_CHANNELS" /></Col>
+                <Col span={14}>
+                  <InputNumber
+                    value={configValues.NETWORK_CHANNEL_CONFIG?.rsp?.num_channels ?? 1}
+                    onChange={(v) => {
+                      const newConfig = {
+                        ...configValues.NETWORK_CHANNEL_CONFIG,
+                        rsp: { ...(configValues.NETWORK_CHANNEL_CONFIG?.rsp || {}), num_channels: v ?? 1 }
+                      }
+                      updateConfigValue('NETWORK_CHANNEL_CONFIG', newConfig)
+                    }}
+                    min={1}
+                    max={8}
+                    style={{ width: 120 }}
+                  />
+                </Col>
+              </Row>
+              <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                <Col span={10}><ConfigLabel name="DATA_NUM_CHANNELS" /></Col>
+                <Col span={14}>
+                  <InputNumber
+                    value={configValues.NETWORK_CHANNEL_CONFIG?.data?.num_channels ?? 1}
+                    onChange={(v) => {
+                      const newConfig = {
+                        ...configValues.NETWORK_CHANNEL_CONFIG,
+                        data: { ...(configValues.NETWORK_CHANNEL_CONFIG?.data || {}), num_channels: v ?? 1 }
+                      }
+                      updateConfigValue('NETWORK_CHANNEL_CONFIG', newConfig)
+                    }}
+                    min={1}
+                    max={8}
+                    style={{ width: 120 }}
+                  />
+                </Col>
+              </Row>
+              <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                <Col span={10}><ConfigLabel name="CHANNEL_SELECT_STRATEGY" /></Col>
+                <Col span={14}>
+                  <Select
+                    value={configValues.CHANNEL_SELECT_STRATEGY ?? 'ip_id_based'}
+                    onChange={(v) => updateConfigValue('CHANNEL_SELECT_STRATEGY', v)}
+                    style={{ width: 200 }}
+                  >
+                    <Option value="ip_id_based">IP ID Based</Option>
+                    <Option value="target_node_based">Target Node Based</Option>
+                    <Option value="flit_id_based">Flit ID Based</Option>
+                  </Select>
+                </Col>
+              </Row>
               {configValues.arbitration?.default?.type !== undefined && (
                 <>
                   <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>

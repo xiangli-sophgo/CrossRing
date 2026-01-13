@@ -403,13 +403,7 @@ class RingStation:
             # 从输入端口移除
             self.input_fifos[input_port].popleft()
 
-            # v2统一Entry释放：当flit从环方向输入端口转出时，释放对应的Entry
-            if input_port in self.RING_DIRECTIONS and hasattr(flit, 'used_entry_level'):
-                eject_dir = getattr(flit, 'eject_direction', None)
-                if eject_dir in self.RING_DIRECTIONS and self.network:
-                    self.network.RS_pending_entry_release[eject_dir][self.node_id].append(
-                        (flit.used_entry_level, cycle + 1)
-                    )
+            # Entry释放已在network._try_eject中处理（下环时直接添加到RS_pending_entry_release）
 
             # 更新 flit position（input → output_pre，等待下周期移入 output FIFO）
             flit.set_position(f"RS_OUT_{output_port}", cycle)

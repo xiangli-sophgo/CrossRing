@@ -72,7 +72,7 @@ export const CONFIG_TOOLTIPS: Record<string, string> = {
   IP_FREQUENCY: 'IP core operating frequency in GHz (default: NETWORK_FREQUENCY / 2)',
   SLICE_PER_LINK_HORIZONTAL: 'Slice number per horizontal link',
   SLICE_PER_LINK_VERTICAL: 'Slice number per vertical link',
-  SLICE_PER_LINK_SELF: 'Slice number per self-loop link',
+  CP_SLICE_COUNT: 'CrossPoint slice count',
   // Buffer Size
   RN_RDB_SIZE: 'RN read data buffer size',
   RN_WDB_SIZE: 'RN write data buffer size',
@@ -144,6 +144,11 @@ export const CONFIG_TOOLTIPS: Record<string, string> = {
   ARBITRATION_TYPE: 'Arbitration algorithm type for queue selection',
   ARBITRATION_ITERATIONS: 'Number of iterations for iSLIP algorithm',
   ARBITRATION_WEIGHT_STRATEGY: 'Weight calculation strategy: queue_length, fixed, priority',
+  // Multi-Channel Config
+  REQ_NUM_CHANNELS: 'Number of channels for request network (1=single, 2+=multi-channel)',
+  RSP_NUM_CHANNELS: 'Number of channels for response network (1=single, 2+=multi-channel)',
+  DATA_NUM_CHANNELS: 'Number of channels for data network (1=single, 2+=multi-channel)',
+  CHANNEL_SELECT_STRATEGY: 'Channel selection strategy: ip_id_based, target_node_based, flit_id_based',
   // D2D Config (DCIN模式)
   NUM_DIES: 'Number of dies in the system',
   D2D_ENABLED: 'Enable D2D (Die-to-Die) communication',

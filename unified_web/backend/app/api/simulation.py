@@ -20,6 +20,7 @@ logger = get_logger("simulation")
 
 # ==================== 安全辅助函数 ====================
 
+
 def _validate_path(base_dir: Path, user_path: str) -> Path:
     """
     验证用户路径在允许的目录范围内，防止路径遍历攻击
@@ -44,8 +45,10 @@ def _validate_path(base_dir: Path, user_path: str) -> Path:
 
 # ==================== 请求/响应模型 ====================
 
+
 class SimulationRequest(BaseModel):
     """仿真请求"""
+
     mode: Literal["kcin", "dcin"] = Field(..., description="仿真模式: kcin(单Die) 或 dcin(多Die)")
     topology: str = Field(default="5x4", description="拓扑类型")
     config_path: Optional[str] = Field(None, description="配置文件路径(相对于config/topologies/)")
@@ -66,6 +69,7 @@ class SimulationRequest(BaseModel):
 
 class TaskResponse(BaseModel):
     """任务响应"""
+
     task_id: str
     status: str
     message: str
@@ -73,6 +77,7 @@ class TaskResponse(BaseModel):
 
 class SimDetailsResponse(BaseModel):
     """仿真进度详细数据"""
+
     file_index: int
     total_files: int
     current_file: str
@@ -89,6 +94,7 @@ class SimDetailsResponse(BaseModel):
 
 class TaskStatusResponse(BaseModel):
     """任务状态响应"""
+
     task_id: str
     status: str
     progress: int
@@ -105,18 +111,21 @@ class TaskStatusResponse(BaseModel):
 
 class ConfigOption(BaseModel):
     """配置选项"""
+
     name: str
     path: str
 
 
 class TrafficFileInfo(BaseModel):
     """流量文件信息"""
+
     name: str
     path: str
     size: int
 
 
 # ==================== API端点 ====================
+
 
 @router.post("/run", response_model=TaskResponse)
 async def run_simulation(request: SimulationRequest):
@@ -214,6 +223,7 @@ async def get_task_status(task_id: str):
 
 class BatchStatusRequest(BaseModel):
     """批量状态查询请求"""
+
     task_ids: List[str]
 
 
@@ -274,10 +284,7 @@ async def get_running_tasks():
     获取正在运行的任务列表（用于页面刷新后恢复状态）
     """
     all_tasks = task_manager.get_all_tasks()
-    running_tasks = [
-        t for t in all_tasks
-        if t.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
-    ]
+    running_tasks = [t for t in all_tasks if t.status in (TaskStatus.PENDING, TaskStatus.RUNNING)]
 
     return {
         "tasks": [
@@ -339,7 +346,7 @@ async def get_history_grouped(limit: int = 50):
     def extract_batch_id(description: Optional[str]) -> Optional[str]:
         if not description:
             return None
-        match = re.search(r'\[batch:(\d+)\]', description)
+        match = re.search(r"\[batch:(\d+)\]", description)
         return match.group(1) if match else None
 
     groups: Dict[str, Dict[str, Any]] = {}
@@ -396,9 +403,7 @@ async def get_history_grouped(limit: int = 50):
                 if failed_count > 0 and t.results.get("file_results"):
                     for fr in t.results["file_results"]:
                         if fr.get("status") == "failed" and fr.get("error"):
-                            groups[group_key]["errors"].append(
-                                f"[{fr.get('file', 'unknown')}] {fr['error']}"
-                            )
+                            groups[group_key]["errors"].append(f"[{fr.get('file', 'unknown')}] {fr['error']}")
             else:
                 groups[group_key]["completed_count"] += task_unit_count
         elif t.status.value == "failed":
@@ -422,9 +427,7 @@ async def get_history_grouped(limit: int = 50):
             if t.results and t.results.get("file_results"):
                 for fr in t.results["file_results"]:
                     if fr.get("status") == "failed" and fr.get("error"):
-                        groups[group_key]["errors"].append(
-                            f"[{fr.get('file', 'unknown')}] {fr['error']}"
-                        )
+                        groups[group_key]["errors"].append(f"[{fr.get('file', 'unknown')}] {fr['error']}")
         elif t.status.value in ("running", "pending"):
             # 运行中：使用 sim_details 中的进度
             if t.sim_details and "file_index" in t.sim_details:
@@ -435,11 +438,7 @@ async def get_history_grouped(limit: int = 50):
             groups[group_key]["experiment_id"] = t.results.get("experiment_id")
 
     # 按创建时间排序，取前 limit 个
-    sorted_groups = sorted(
-        groups.values(),
-        key=lambda x: x["created_at"],
-        reverse=True
-    )[:limit]
+    sorted_groups = sorted(groups.values(), key=lambda x: x["created_at"], reverse=True)[:limit]
 
     return {"groups": sorted_groups}
 
@@ -453,12 +452,12 @@ def _parse_kcin_name(name: str) -> tuple:
     if name.lower() == "default":
         return (0, 0)  # default排在最前面
     try:
-        parts = name.lower().split('x')
+        parts = name.lower().split("x")
         if len(parts) == 2:
             return (int(parts[0]), int(parts[1]))
     except (ValueError, IndexError):
         pass
-    return (float('inf'), float('inf'))  # 无法解析的排最后
+    return (float("inf"), float("inf"))  # 无法解析的排最后
 
 
 @router.get("/configs")
@@ -491,6 +490,7 @@ async def list_configs():
 def _sanitize_for_json(obj):
     """将inf/nan等特殊浮点数转换为JSON兼容格式"""
     import math
+
     if isinstance(obj, dict):
         return {k: _sanitize_for_json(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -514,14 +514,14 @@ async def get_config_content(config_path: str):
 
     try:
         # 先加载默认配置
-        default_file = TOPOLOGIES_DIR / "default.yaml"
+        default_file = TOPOLOGIES_DIR / "kcin_default.yaml"
         default_content = {}
         if default_file.exists():
-            with open(default_file, 'r', encoding='utf-8') as f:
+            with open(default_file, "r", encoding="utf-8") as f:
                 default_content = yaml.safe_load(f) or {}
 
         # 加载用户选择的配置
-        with open(config_file, 'r', encoding='utf-8') as f:
+        with open(config_file, "r", encoding="utf-8") as f:
             user_content = yaml.safe_load(f) or {}
 
         # 合并配置：用户配置覆盖默认配置
@@ -530,6 +530,7 @@ async def get_config_content(config_path: str):
         # KCIN 参数默认值（确保所有参数都有值）
         kcin_defaults = {
             # Basic Parameters
+            "KCIN_VERSION": "v1",  # 架构版本: v1 (IQ/RB/EQ) 或 v2 (RingStation)
             "TOPO_TYPE": "5x4",
             "FLIT_SIZE": 128,
             "BURST": 4,
@@ -548,10 +549,10 @@ async def get_config_content(config_path: str):
             "SN_DDR_W_TRACKER_OSTD": "auto",
             "SN_L2M_R_TRACKER_OSTD": "auto",
             "SN_L2M_W_TRACKER_OSTD": "auto",
-            # Slice Per Link
+            # Slice Config
             "SLICE_PER_LINK_HORIZONTAL": 9,
             "SLICE_PER_LINK_VERTICAL": 9,
-            "SLICE_PER_LINK_SELF": 2,
+            "CP_SLICE_COUNT": 2,
             # FIFO Depth (v1)
             "IQ_CH_FIFO_DEPTH": 4,
             "EQ_CH_FIFO_DEPTH": 4,
@@ -615,8 +616,8 @@ async def get_config_content(config_path: str):
                 merged_content[key] = default_val
 
         # IP_FREQUENCY 特殊处理：如果未设置，默认为 NETWORK_FREQUENCY / 2
-        if merged_content.get('IP_FREQUENCY') == 1.0 and merged_content.get('NETWORK_FREQUENCY', 2.0) != 2.0:
-            merged_content['IP_FREQUENCY'] = merged_content['NETWORK_FREQUENCY'] / 2
+        if merged_content.get("IP_FREQUENCY") == 1.0 and merged_content.get("NETWORK_FREQUENCY", 2.0) != 2.0:
+            merged_content["IP_FREQUENCY"] = merged_content["NETWORK_FREQUENCY"] / 2
 
         return _sanitize_for_json(merged_content)
     except yaml.YAMLError as e:
@@ -647,7 +648,7 @@ def _format_config_with_comments(content: dict) -> str:
                 "keys": ["NUM_DIES"],
                 "comments": {
                     "NUM_DIES": "Die数量",
-                }
+                },
             },
             "DCIN Latency (ns)": {
                 "keys": ["D2D_AR_LATENCY", "D2D_R_LATENCY", "D2D_AW_LATENCY", "D2D_W_LATENCY", "D2D_B_LATENCY"],
@@ -657,7 +658,7 @@ def _format_config_with_comments(content: dict) -> str:
                     "D2D_AW_LATENCY": "地址写通道延迟",
                     "D2D_W_LATENCY": "写数据通道延迟",
                     "D2D_B_LATENCY": "写响应通道延迟",
-                }
+                },
             },
             "DCIN Bandwidth Limit (GB/s)": {
                 "keys": ["D2D_RN_BW_LIMIT", "D2D_SN_BW_LIMIT", "D2D_AXI_BANDWIDTH"],
@@ -665,17 +666,25 @@ def _format_config_with_comments(content: dict) -> str:
                     "D2D_RN_BW_LIMIT": "D2D RN带宽限制",
                     "D2D_SN_BW_LIMIT": "D2D SN带宽限制",
                     "D2D_AXI_BANDWIDTH": "AXI通道统一带宽限制",
-                }
+                },
             },
             "DCIN Buffer Size": {
-                "keys": ["D2D_RN_RDB_SIZE", "D2D_RN_WDB_SIZE", "D2D_SN_RDB_SIZE", "D2D_SN_WDB_SIZE",
-                         "D2D_RN_R_TRACKER_OSTD", "D2D_RN_W_TRACKER_OSTD", "D2D_SN_R_TRACKER_OSTD", "D2D_SN_W_TRACKER_OSTD"],
+                "keys": [
+                    "D2D_RN_RDB_SIZE",
+                    "D2D_RN_WDB_SIZE",
+                    "D2D_SN_RDB_SIZE",
+                    "D2D_SN_WDB_SIZE",
+                    "D2D_RN_R_TRACKER_OSTD",
+                    "D2D_RN_W_TRACKER_OSTD",
+                    "D2D_SN_R_TRACKER_OSTD",
+                    "D2D_SN_W_TRACKER_OSTD",
+                ],
                 "comments": {
                     "D2D_RN_RDB_SIZE": "D2D RN读databuffer大小",
                     "D2D_RN_WDB_SIZE": "D2D RN写databuffer大小",
                     "D2D_SN_RDB_SIZE": "D2D SN读databuffer大小",
                     "D2D_SN_WDB_SIZE": "D2D SN写databuffer大小",
-                }
+                },
             },
         }
     else:
@@ -686,12 +695,22 @@ def _format_config_with_comments(content: dict) -> str:
                 "comments": {
                     "TOPO_TYPE": "格式 AxB，自动计算拓扑参数",
                     "IP_FREQUENCY": "IP核频率(GHz)，默认为网络频率的一半",
-                }
+                },
             },
             "Buffer Size": {
                 "keys": [
-                    "RN_RDB_SIZE", "RN_WDB_SIZE", "SN_DDR_RDB_SIZE", "SN_DDR_WDB_SIZE", "SN_L2M_RDB_SIZE", "SN_L2M_WDB_SIZE",
-                    "RN_R_TRACKER_OSTD", "RN_W_TRACKER_OSTD", "SN_DDR_R_TRACKER_OSTD", "SN_DDR_W_TRACKER_OSTD", "SN_L2M_R_TRACKER_OSTD", "SN_L2M_W_TRACKER_OSTD",
+                    "RN_RDB_SIZE",
+                    "RN_WDB_SIZE",
+                    "SN_DDR_RDB_SIZE",
+                    "SN_DDR_WDB_SIZE",
+                    "SN_L2M_RDB_SIZE",
+                    "SN_L2M_WDB_SIZE",
+                    "RN_R_TRACKER_OSTD",
+                    "RN_W_TRACKER_OSTD",
+                    "SN_DDR_R_TRACKER_OSTD",
+                    "SN_DDR_W_TRACKER_OSTD",
+                    "SN_L2M_R_TRACKER_OSTD",
+                    "SN_L2M_W_TRACKER_OSTD",
                 ],
                 "comments": {
                     "RN_RDB_SIZE": "RN读数据缓冲区",
@@ -700,39 +719,90 @@ def _format_config_with_comments(content: dict) -> str:
                     "SN_DDR_WDB_SIZE": "SN DDR写数据缓冲区",
                     "SN_L2M_RDB_SIZE": "SN L2M读数据缓冲区",
                     "SN_L2M_WDB_SIZE": "SN L2M写数据缓冲区",
-                }
+                },
             },
             "KCIN Config": {
                 "keys": [
-                    # Slice Per Link
-                    "SLICE_PER_LINK_HORIZONTAL", "SLICE_PER_LINK_VERTICAL", "SLICE_PER_LINK_SELF",
-                    # FIFO Depth
-                    "IQ_CH_FIFO_DEPTH", "EQ_CH_FIFO_DEPTH", "IQ_OUT_FIFO_DEPTH_HORIZONTAL", "IQ_OUT_FIFO_DEPTH_VERTICAL",
-                    "IQ_OUT_FIFO_DEPTH_EQ", "RB_OUT_FIFO_DEPTH", "RB_IN_FIFO_DEPTH", "EQ_IN_FIFO_DEPTH",
-                    "IP_L2H_FIFO_DEPTH", "IP_H2L_H_FIFO_DEPTH", "IP_H2L_L_FIFO_DEPTH",
+                    # KCIN Version
+                    "KCIN_VERSION",
+                    # Slice Config
+                    "SLICE_PER_LINK_HORIZONTAL",
+                    "SLICE_PER_LINK_VERTICAL",
+                    "CP_SLICE_COUNT",
+                    # FIFO Depth (v1)
+                    "IQ_CH_FIFO_DEPTH",
+                    "EQ_CH_FIFO_DEPTH",
+                    "IQ_OUT_FIFO_DEPTH_HORIZONTAL",
+                    "IQ_OUT_FIFO_DEPTH_VERTICAL",
+                    "IQ_OUT_FIFO_DEPTH_EQ",
+                    "RB_OUT_FIFO_DEPTH",
+                    "RB_IN_FIFO_DEPTH",
+                    "EQ_IN_FIFO_DEPTH",
+                    # FIFO Depth (v2 RingStation)
+                    "RS_IN_CH_BUFFER",
+                    "RS_OUT_CH_BUFFER",
+                    "RS_IN_FIFO_DEPTH",
+                    "RS_OUT_FIFO_DEPTH",
+                    # IP Interface FIFO
+                    "IP_L2H_FIFO_DEPTH",
+                    "IP_H2L_H_FIFO_DEPTH",
+                    "IP_H2L_L_FIFO_DEPTH",
                     # ETag
-                    "TL_Etag_T2_UE_MAX", "TL_Etag_T1_UE_MAX", "TR_Etag_T2_UE_MAX",
-                    "TU_Etag_T2_UE_MAX", "TU_Etag_T1_UE_MAX", "TD_Etag_T2_UE_MAX",
+                    "TL_Etag_T2_UE_MAX",
+                    "TL_Etag_T1_UE_MAX",
+                    "TR_Etag_T2_UE_MAX",
+                    "TU_Etag_T2_UE_MAX",
+                    "TU_Etag_T1_UE_MAX",
+                    "TD_Etag_T2_UE_MAX",
                     # ITag
-                    "ITag_TRIGGER_Th_H", "ITag_TRIGGER_Th_V", "ITag_MAX_Num_H", "ITag_MAX_Num_V",
+                    "ITag_TRIGGER_Th_H",
+                    "ITag_TRIGGER_Th_V",
+                    "ITag_MAX_Num_H",
+                    "ITag_MAX_Num_V",
                     # Latency
-                    "DDR_R_LATENCY", "DDR_R_LATENCY_VAR", "DDR_W_LATENCY", "L2M_R_LATENCY", "L2M_W_LATENCY",
-                    "SN_TRACKER_RELEASE_LATENCY", "SN_PROCESSING_LATENCY", "RN_PROCESSING_LATENCY",
+                    "DDR_R_LATENCY",
+                    "DDR_R_LATENCY_VAR",
+                    "DDR_W_LATENCY",
+                    "L2M_R_LATENCY",
+                    "L2M_W_LATENCY",
+                    "SN_TRACKER_RELEASE_LATENCY",
+                    "SN_PROCESSING_LATENCY",
+                    "RN_PROCESSING_LATENCY",
                     # Bandwidth Limit
-                    "GDMA_BW_LIMIT", "SDMA_BW_LIMIT", "CDMA_BW_LIMIT", "DDR_BW_LIMIT", "L2M_BW_LIMIT",
+                    "GDMA_BW_LIMIT",
+                    "SDMA_BW_LIMIT",
+                    "CDMA_BW_LIMIT",
+                    "DDR_BW_LIMIT",
+                    "L2M_BW_LIMIT",
                 ],
                 "comments": {
+                    "KCIN_VERSION": "架构版本: v1 (IQ/RB/EQ) 或 v2 (RingStation)",
+                    "CP_SLICE_COUNT": "CrossPoint slice数量",
+                    "RS_IN_CH_BUFFER": "RS输入端 ch_buffer 深度",
+                    "RS_OUT_CH_BUFFER": "RS输出端 ch_buffer 深度",
+                    "RS_IN_FIFO_DEPTH": "RS输入端 环方向 FIFO 深度",
+                    "RS_OUT_FIFO_DEPTH": "RS输出端 环方向 FIFO 深度",
                     "SN_PROCESSING_LATENCY": "SN端处理延迟 (ns)",
                     "RN_PROCESSING_LATENCY": "RN端处理延迟 (ns)",
-                }
+                },
             },
             "Feature Config": {
                 "keys": [
-                    "UNIFIED_RW_TRACKER", "ETAG_T1_ENABLED", "ETAG_BOTHSIDE_UPGRADE",
-                    "ORDERING_PRESERVATION_MODE", "ORDERING_ETAG_UPGRADE_MODE", "ORDERING_GRANULARITY",
-                    "TL_ALLOWED_SOURCE_NODES", "TR_ALLOWED_SOURCE_NODES", "TU_ALLOWED_SOURCE_NODES", "TD_ALLOWED_SOURCE_NODES",
-                    "REVERSE_DIRECTION_ENABLED", "REVERSE_DIRECTION_THRESHOLD",
+                    "UNIFIED_RW_TRACKER",
+                    "ETAG_T1_ENABLED",
+                    "ETAG_BOTHSIDE_UPGRADE",
+                    "ORDERING_PRESERVATION_MODE",
+                    "ORDERING_ETAG_UPGRADE_MODE",
+                    "ORDERING_GRANULARITY",
+                    "TL_ALLOWED_SOURCE_NODES",
+                    "TR_ALLOWED_SOURCE_NODES",
+                    "TU_ALLOWED_SOURCE_NODES",
+                    "TD_ALLOWED_SOURCE_NODES",
+                    "REVERSE_DIRECTION_ENABLED",
+                    "REVERSE_DIRECTION_THRESHOLD",
                     "ENABLE_CROSSPOINT_CONFLICT_CHECK",
+                    "NETWORK_CHANNEL_CONFIG",
+                    "CHANNEL_SELECT_STRATEGY",
                 ],
                 "comments": {
                     "UNIFIED_RW_TRACKER": "true=读写共享资源池，false=读写分离",
@@ -743,7 +813,8 @@ def _format_config_with_comments(content: dict) -> str:
                     "REVERSE_DIRECTION_ENABLED": "启用反方向流控 (0=禁用, 1=启用)",
                     "REVERSE_DIRECTION_THRESHOLD": "阈值比例 (0.25=激进, 0.5=推荐, 0.75=保守)",
                     "ENABLE_CROSSPOINT_CONFLICT_CHECK": "CrossPoint冲突检查 (0=检查当前周期, 1=检查当前+前一周期)",
-                }
+                    "CHANNEL_SELECT_STRATEGY": "通道选择策略: ip_id_based, target_node_based, flit_id_based",
+                },
             },
         }
 
@@ -755,9 +826,9 @@ def _format_config_with_comments(content: dict) -> str:
         if isinstance(v, bool):
             return str(v).lower()
         elif isinstance(v, str):
-            if v in [".inf", "inf"] or (isinstance(v, float) and v == float('inf')):
+            if v in [".inf", "inf"] or (isinstance(v, float) and v == float("inf")):
                 return ".inf"
-            return f'"{v}"' if ' ' in v or ':' in v else v
+            return f'"{v}"' if " " in v or ":" in v else v
         elif isinstance(v, list):
             return yaml.dump(v, default_flow_style=True, allow_unicode=True).strip()
         elif isinstance(v, dict):
@@ -765,20 +836,47 @@ def _format_config_with_comments(content: dict) -> str:
         else:
             return str(v)
 
+    # 根据KCIN_VERSION过滤参数
+    kcin_version = content.get("KCIN_VERSION", "v1")
+    v1_only_keys = {
+        "IQ_CH_FIFO_DEPTH",
+        "EQ_CH_FIFO_DEPTH",
+        "IQ_OUT_FIFO_DEPTH_HORIZONTAL",
+        "IQ_OUT_FIFO_DEPTH_VERTICAL",
+        "IQ_OUT_FIFO_DEPTH_EQ",
+        "RB_OUT_FIFO_DEPTH",
+        "RB_IN_FIFO_DEPTH",
+        "EQ_IN_FIFO_DEPTH",
+    }
+    v2_only_keys = {
+        "RS_IN_CH_BUFFER",
+        "RS_OUT_CH_BUFFER",
+        "RS_IN_FIFO_DEPTH",
+        "RS_OUT_FIFO_DEPTH",
+    }
+
+    def should_save_key(key: str) -> bool:
+        """根据KCIN_VERSION判断是否应该保存该key"""
+        if kcin_version == "v2" and key in v1_only_keys:
+            return False
+        if kcin_version == "v1" and key in v2_only_keys:
+            return False
+        return True
+
     # 按分类输出
     for category_name, category_info in categories.items():
         category_keys = category_info["keys"]
         category_comments = category_info["comments"]
 
-        # 检查该分类是否有值
-        has_values = any(key in content for key in category_keys)
+        # 检查该分类是否有值（过滤版本专有参数）
+        has_values = any(key in content and should_save_key(key) for key in category_keys)
         if not has_values:
             continue
 
         lines.append(f"\n# {category_name}")
 
         for key in category_keys:
-            if key in content:
+            if key in content and should_save_key(key):
                 value = content[key]
                 formatted_value = format_value(value)
                 if formatted_value is not None:
@@ -842,6 +940,19 @@ def _format_config_with_comments(content: dict) -> str:
                         lines.append(f"    weight_strategy: {format_value(arb['default']['weight_strategy'])}")
         processed_keys.add("arbitration")
 
+    # 多通道配置
+    if "NETWORK_CHANNEL_CONFIG" in content:
+        ncc = content["NETWORK_CHANNEL_CONFIG"]
+        if ncc:
+            lines.append("\n# 多通道配置")
+            lines.append("NETWORK_CHANNEL_CONFIG:")
+            for net_type in ["req", "rsp", "data"]:
+                if net_type in ncc:
+                    lines.append(f"  {net_type}:")
+                    for k, v in ncc[net_type].items():
+                        lines.append(f"    {k}: {v}")
+        processed_keys.add("NETWORK_CHANNEL_CONFIG")
+
     # DCIN配置需要过滤的参数（这些应该在KCIN配置中定义，或者自动生成）
     dcin_exclude_keys = {
         "D2D_ENABLED",  # 已废弃
@@ -854,7 +965,7 @@ def _format_config_with_comments(content: dict) -> str:
         "BURST",  # 从KCIN获取
         "SLICE_PER_LINK_HORIZONTAL",  # 从KCIN获取
         "SLICE_PER_LINK_VERTICAL",  # 从KCIN获取
-        "SLICE_PER_LINK_SELF",  # 从KCIN获取
+        "CP_SLICE_COUNT",  # 从KCIN获取
         "arbitration",  # DCIN不需要
     }
 
@@ -865,6 +976,9 @@ def _format_config_with_comments(content: dict) -> str:
     if is_dcin:
         remaining = {k: v for k, v in remaining.items() if k not in dcin_exclude_keys}
 
+    # 根据KCIN_VERSION过滤版本专有参数
+    remaining = {k: v for k, v in remaining.items() if should_save_key(k)}
+
     if remaining:
         lines.append("\n# 其他配置")
         for key, value in remaining.items():
@@ -874,14 +988,15 @@ def _format_config_with_comments(content: dict) -> str:
             elif isinstance(value, dict):
                 lines.append(f"{key}:")
                 dumped = yaml.dump(value, default_flow_style=False, allow_unicode=True)
-                for line in dumped.strip().split('\n'):
+                for line in dumped.strip().split("\n"):
                     lines.append(f"  {line}")
 
-    return '\n'.join(lines) + '\n'
+    return "\n".join(lines) + "\n"
 
 
 class SaveConfigRequest(BaseModel):
     """保存配置请求"""
+
     content: Dict[str, Any]
     save_as: Optional[str] = Field(None, description="另存为的新文件名（不含路径和扩展名）")
 
@@ -896,7 +1011,8 @@ async def save_config_content(config_path: str, request: SaveConfigRequest):
     if request.save_as:
         # 另存为新文件 - 验证文件名安全性
         import re
-        if not re.match(r'^[a-zA-Z0-9_\-]+$', request.save_as):
+
+        if not re.match(r"^[a-zA-Z0-9_\-]+$", request.save_as):
             raise HTTPException(status_code=400, detail="文件名只能包含字母、数字、下划线和连字符")
         new_filename = f"{request.save_as}.yaml"
         config_file = _validate_path(TOPOLOGIES_DIR, new_filename)
@@ -911,7 +1027,7 @@ async def save_config_content(config_path: str, request: SaveConfigRequest):
 
     try:
         formatted_content = _format_config_with_comments(request.content)
-        with open(config_file, 'w', encoding='utf-8') as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             f.write(formatted_content)
         logger.info(f"配置文件已保存: {config_file.name}")
         return {"success": True, "message": f"配置文件已保存: {config_file.name}", "filename": config_file.name}
@@ -943,11 +1059,13 @@ async def list_traffic_files(path: str = ""):
         if item.is_dir():
             directories.append(item.name)
         elif item.suffix == ".txt":
-            files.append(TrafficFileInfo(
-                name=item.name,
-                path=str(item.relative_to(TRAFFIC_OUTPUT_DIR)),
-                size=item.stat().st_size,
-            ).dict())
+            files.append(
+                TrafficFileInfo(
+                    name=item.name,
+                    path=str(item.relative_to(TRAFFIC_OUTPUT_DIR)),
+                    size=item.stat().st_size,
+                ).dict()
+            )
 
     return {
         "current_path": path,
@@ -964,14 +1082,14 @@ def _detect_traffic_format(file_path: Path) -> str:
     返回: "kcin", "dcin", 或 "unknown"
     """
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 # 跳过空行和注释行
-                if not line or line.startswith('#'):
+                if not line or line.startswith("#"):
                     continue
                 # 解析第一行有效数据
-                parts = line.split(',')
+                parts = line.split(",")
                 field_count = len(parts)
                 if field_count == 7:
                     return "kcin"
@@ -1018,12 +1136,14 @@ def _build_traffic_tree(base_path: Path, relative_path: str = "", mode: Optional
         children = _build_traffic_tree(dir_item, dir_relative_path, mode)
         # 只有当子节点非空时才添加目录
         if children:
-            tree.append({
-                "key": dir_relative_path,
-                "title": dir_item.name,
-                "isLeaf": False,
-                "children": children,
-            })
+            tree.append(
+                {
+                    "key": dir_relative_path,
+                    "title": dir_item.name,
+                    "isLeaf": False,
+                    "children": children,
+                }
+            )
 
     # 处理文件
     for file_item in files:
@@ -1032,14 +1152,16 @@ def _build_traffic_tree(base_path: Path, relative_path: str = "", mode: Optional
         if mode and file_format != mode:
             continue
         file_relative_path = f"{relative_path}/{file_item.name}" if relative_path else file_item.name
-        tree.append({
-            "key": file_relative_path,
-            "title": file_item.name,
-            "isLeaf": True,
-            "path": file_relative_path,
-            "size": file_item.stat().st_size,
-            "format": file_format,
-        })
+        tree.append(
+            {
+                "key": file_relative_path,
+                "title": file_item.name,
+                "isLeaf": True,
+                "path": file_relative_path,
+                "size": file_item.stat().st_size,
+                "format": file_format,
+            }
+        )
 
     return tree
 
@@ -1071,11 +1193,11 @@ async def get_traffic_file_content(file_path: str, max_lines: int = 100):
     try:
         lines = []
         total_lines = 0
-        with open(full_path, 'r', encoding='utf-8') as f:
+        with open(full_path, "r", encoding="utf-8") as f:
             for i, line in enumerate(f):
                 total_lines += 1
                 if i < max_lines:
-                    lines.append(line.rstrip('\n'))
+                    lines.append(line.rstrip("\n"))
 
         return {
             "content": lines,
@@ -1097,6 +1219,7 @@ async def get_traffic_file_content(file_path: str, max_lines: int = 100):
 
 # ==================== WebSocket 实时进度 ====================
 
+
 @router.websocket("/ws/global")
 async def websocket_global_progress(websocket: WebSocket):
     """
@@ -1110,30 +1233,28 @@ async def websocket_global_progress(websocket: WebSocket):
 
     try:
         # 发送当前所有运行中任务的状态
-        running_tasks = [t for t in task_manager.get_all_tasks()
-                         if t.status in (TaskStatus.PENDING, TaskStatus.RUNNING)]
+        running_tasks = [t for t in task_manager.get_all_tasks() if t.status in (TaskStatus.PENDING, TaskStatus.RUNNING)]
         for task in running_tasks:
-            await websocket.send_json({
-                'type': 'task_update',
-                'task_id': task.task_id,
-                'status': task.status.value,
-                'progress': task.progress,
-                'message': task.message,
-                'experiment_name': task.experiment_name,
-                'current_file': task.current_file,
-            })
+            await websocket.send_json(
+                {
+                    "type": "task_update",
+                    "task_id": task.task_id,
+                    "status": task.status.value,
+                    "progress": task.progress,
+                    "message": task.message,
+                    "experiment_name": task.experiment_name,
+                    "current_file": task.current_file,
+                }
+            )
 
         # 持续推送更新
         while True:
             try:
                 update = await asyncio.wait_for(queue.get(), timeout=30.0)
-                await websocket.send_json({
-                    'type': 'task_update',
-                    **update
-                })
+                await websocket.send_json({"type": "task_update", **update})
             except asyncio.TimeoutError:
                 # 发送心跳
-                await websocket.send_json({'type': 'heartbeat'})
+                await websocket.send_json({"type": "heartbeat"})
 
     except WebSocketDisconnect:
         pass
@@ -1159,30 +1280,34 @@ async def websocket_progress(websocket: WebSocket, task_id: str):
 
     try:
         # 发送当前状态
-        await websocket.send_json({
-            "task_id": task.task_id,
-            "status": task.status.value,
-            "progress": task.progress,
-            "current_file": task.current_file,
-            "message": task.message,
-            "sim_details": task.sim_details,
-            "experiment_name": task.experiment_name,
-        })
+        await websocket.send_json(
+            {
+                "task_id": task.task_id,
+                "status": task.status.value,
+                "progress": task.progress,
+                "current_file": task.current_file,
+                "message": task.message,
+                "sim_details": task.sim_details,
+                "experiment_name": task.experiment_name,
+            }
+        )
 
         # 持续推送更新
         while True:
             try:
                 updated_task = await asyncio.wait_for(queue.get(), timeout=30.0)
-                await websocket.send_json({
-                    "task_id": updated_task.task_id,
-                    "status": updated_task.status.value,
-                    "progress": updated_task.progress,
-                    "current_file": updated_task.current_file,
-                    "message": updated_task.message,
-                    "error": updated_task.error,
-                    "sim_details": updated_task.sim_details,
-                    "experiment_name": updated_task.experiment_name,
-                })
+                await websocket.send_json(
+                    {
+                        "task_id": updated_task.task_id,
+                        "status": updated_task.status.value,
+                        "progress": updated_task.progress,
+                        "current_file": updated_task.current_file,
+                        "message": updated_task.message,
+                        "error": updated_task.error,
+                        "sim_details": updated_task.sim_details,
+                        "experiment_name": updated_task.experiment_name,
+                    }
+                )
 
                 # 任务完成后退出
                 if updated_task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):

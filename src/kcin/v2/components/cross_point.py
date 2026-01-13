@@ -190,9 +190,10 @@ class CrossPoint:
         if direction not in ["TL", "TU"]:
             return False
 
-        # 获取flit当前slot_id
-        slot = self.network.links_tag[flit.current_link][flit.current_seat_index]
-        flit_slot_id = slot.slot_id
+        # 获取flit当前slot_id（新架构：flit上环时已记录slot_id）
+        flit_slot_id = flit.slot_id
+        if flit_slot_id is None:
+            return False
 
         # 获取对应的ring_slots、T0_table和指针
         if direction == "TL":
@@ -230,8 +231,10 @@ class CrossPoint:
         if self.network is None:
             return
 
-        slot = self.network.links_tag[flit.current_link][flit.current_seat_index]
-        slot_id = slot.slot_id
+        # 新架构：使用flit.slot_id（上环时已记录）
+        slot_id = flit.slot_id
+        if slot_id is None:
+            return
 
         if direction == "TL":
             self.network.T0_table_h[self.node_id].add(slot_id)
@@ -249,8 +252,10 @@ class CrossPoint:
         if self.network is None:
             return
 
-        slot = self.network.links_tag[flit.current_link][flit.current_seat_index]
-        slot_id = slot.slot_id
+        # 新架构：使用flit.slot_id（上环时已记录）
+        slot_id = flit.slot_id
+        if slot_id is None:
+            return
 
         if direction == "TL":
             self.network.T0_table_h[self.node_id].discard(slot_id)
@@ -335,28 +340,58 @@ class CrossPoint:
 
         return None
 
+    def upgrade_etag_on_failure(self, flit: Flit, direction: str):
+        """
+        下环失败时执行ETag升级
+
+        Args:
+            flit: 当前flit
+            direction: 下环方向
+        """
+        upgrade_target = self._determine_etag_upgrade(flit, direction)
+        if upgrade_target is None:
+            return
+
+        flit.ETag_priority = upgrade_target
+        flit.is_delay = True
+
+        # 如果升级到T0，加入T0表
+        if upgrade_target == "T0" and direction in ["TL", "TU"]:
+            self.T0_table_record(flit, direction)
+
     # ------------------------------------------------------------------
     # I-Tag: 预约管理
     # ------------------------------------------------------------------
 
     def update_excess_ITag(self):
-        """处理多余ITag释放"""
+        """处理多余ITag释放（新架构：从Ring.itag中释放）"""
         if self.network is None:
             return
 
         for direction in self.managed_directions:
             for node_id in list(self.excess_ITag_to_remove[direction].keys()):
                 if self.excess_ITag_to_remove[direction][node_id] > 0:
+                    # 获取对应的Ring对象
+                    is_horizontal = direction in ["TL", "TR"]
+                    if is_horizontal:
+                        row = node_id // self.config.NUM_COL
+                        ring = self.network.horizontal_rings.get(row)
+                    else:
+                        col = node_id % self.config.NUM_COL
+                        ring = self.network.vertical_rings.get(col)
+
+                    if ring is None:
+                        continue
+
                     # 寻找该节点创建的ITag并释放
-                    for link, seats in self.network.links_tag.items():
-                        for slot in seats:
-                            if slot.itag_reserved and slot.check_itag_match(node_id, direction) and link[0] == node_id:
-                                # 释放多余ITag
-                                slot.clear_itag()
-                                self.tagged_counter[direction][node_id] -= 1
-                                self.remain_tag[direction][node_id] += 1
-                                self.excess_ITag_to_remove[direction][node_id] -= 1
-                                break
+                    for slot_id, info in list(ring.itag.items()):
+                        if info["reserver_node"] == node_id and info["reserver_dir"] == direction:
+                            # 释放多余ITag
+                            ring.release_itag(slot_id)
+                            self.tagged_counter[direction][node_id] -= 1
+                            self.remain_tag[direction][node_id] += 1
+                            self.excess_ITag_to_remove[direction][node_id] -= 1
+                            break
 
     # ------------------------------------------------------------------
     # 下环逻辑
@@ -823,23 +858,31 @@ class CrossPoint:
             if conflict_status[0]:
                 return False
 
-        # 新架构：检查CP的out_slice是否可用（取代原来的link[0]检查）
-        cp = self.network.crosspoints[current_pos][dim]
-        out_slice_occupied = cp.cp_slices[direction][-1] is not None
+        # 纯offset模式：获取cp_out_slice（RingSlice）
+        is_horizontal = direction in ["TL", "TR"]
+        cp_out_slice = self.network.cp_out_slices.get((current_pos, direction))
+        if cp_out_slice is None or cp_out_slice.ring is None:
+            return False
 
-        # 获取对应的ITag slot（仍然使用link的tag结构）
-        slot = self.network.links_tag[link][0]
+        ring = cp_out_slice.ring
+        slot_id = cp_out_slice.slot_id
+
+        # 纯offset模式：检查RingSlice是否被占用
+        out_slice_occupied = cp_out_slice.flit is not None
 
         # 区分横向和纵向配置
-        is_horizontal = direction in ["TL", "TR"]
         wait_cycle = flit.wait_cycle_h if is_horizontal else flit.wait_cycle_v
         trigger_threshold = self.config.ITag_TRIGGER_Th_H if is_horizontal else self.config.ITag_TRIGGER_Th_V
         max_itag = self.config.ITag_MAX_NUM_H if is_horizontal else self.config.ITag_MAX_NUM_V
 
+        # 检查是否有ITag预约
+        itag_reserved = slot_id in ring.itag
+        itag_is_mine = ring.check_itag(slot_id, current_pos, direction)
+
         if out_slice_occupied:
             # CP的out_slice被占用，无论是否有ITag都不能注入
             # 但可以在没有预约时尝试创建ITag（为下次空闲时预约）
-            if not slot.itag_reserved:
+            if not itag_reserved:
                 # 没有预约，尝试创建I-Tag
                 if (
                     wait_cycle > trigger_threshold
@@ -850,7 +893,7 @@ class CrossPoint:
                     # 创建I-Tag预约
                     self.remain_tag[direction][current_pos] -= 1
                     self.tagged_counter[direction][current_pos] += 1
-                    slot.reserve_itag(current_pos, direction)
+                    ring.reserve_itag(slot_id, current_pos, direction)
                     if is_horizontal:
                         flit.itag_h = True
                     else:
@@ -859,10 +902,10 @@ class CrossPoint:
             return False
         else:
             # CP的out_slice未占用
-            if not slot.itag_reserved:
+            if not itag_reserved:
                 # 没有预约，可以上环
                 return True
-            elif slot.check_itag_match(current_pos, direction):
+            elif itag_is_mine:
                 # 有预约且是自己的预约，使用预约
                 return True
             else:
@@ -871,13 +914,10 @@ class CrossPoint:
 
     def _inject_flit_to_link(self, flit: Flit, link: tuple, direction: str, cycle: int) -> bool:
         """
-        统一的上环执行方法
-
-        新架构：上环到CP的out_slice，而不是直接进入Link
-        flit将在下一个周期由process_cp_slices传输到Link
+        统一的上环执行方法（纯offset模式）
 
         执行流程：
-        1. 注入flit到CP的out_slice
+        1. 注入flit到RingSlice（cp_out_slice）
         2. 释放I-Tag预约（如果使用了预约）
         3. 重置E-Tag显示优先级为T2
 
@@ -894,22 +934,25 @@ class CrossPoint:
             return False
 
         current_pos = link[0]
-        slot = self.network.links_tag[link][0]
         is_horizontal = direction in ["TL", "TR"]
-        dim = "horizontal" if is_horizontal else "vertical"
 
-        # 1. 注入到CP的out_slice
-        cp = self.network.crosspoints[current_pos][dim]
-        cp.cp_slices[direction][-1] = flit
-        flit.current_link = None  # 在CP内部，不在Link上
-        flit.current_seat_index = -1
-        cp_pos = "CP_H" if is_horizontal else "CP_V"
-        flit.set_position(cp_pos, cycle)
+        # 纯offset模式：获取cp_out_slice（RingSlice）
+        cp_out_slice = self.network.cp_out_slices.get((current_pos, direction))
+        if cp_out_slice is None or cp_out_slice.ring is None:
+            return False
 
-        # 2. 处理I-Tag释放
-        if slot.itag_reserved and slot.check_itag_match(current_pos, direction):
-            # 使用了预约，释放
-            slot.clear_itag()
+        ring = cp_out_slice.ring
+        slot_id = cp_out_slice.slot_id
+
+        # 1. 注入到RingSlice
+        cp_out_slice.flit = flit
+        flit.current_slice = cp_out_slice
+        flit.slot_id = slot_id
+        flit.set_position(cp_out_slice.get_position_str(), cycle)
+
+        # 2. 处理I-Tag释放（使用Ring.itag）
+        if ring.check_itag(slot_id, current_pos, direction):
+            ring.release_itag(slot_id)
             self.remain_tag[direction][current_pos] += 1
             self.tagged_counter[direction][current_pos] -= 1
 
