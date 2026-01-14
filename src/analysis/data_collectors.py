@@ -947,7 +947,7 @@ class CircuitStatsCollector:
 
                             capacity = capacities["IQ"][direction]
                             base_stats = self._calculate_fifo_stats(
-                                fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles
+                                fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles, fifo.depth_events
                             )
 
                             # ITag统计 (仅TR/TL横向注入)
@@ -981,7 +981,7 @@ class CircuitStatsCollector:
                         pos_key = f"{pos}_{ip_type}"
                         capacity = capacities["IQ"]["CH"]
                         base_stats = self._calculate_fifo_stats(
-                            fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles
+                            fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles, fifo.depth_events
                         )
                         results[net_name][ch_idx]["IQ"]["CH"][pos_key] = {
                             **base_stats,
@@ -1006,7 +1006,7 @@ class CircuitStatsCollector:
 
                             capacity = capacities["RB"][direction]
                             base_stats = self._calculate_fifo_stats(
-                                fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles
+                                fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles, fifo.depth_events
                             )
 
                             # ITag统计 (仅TU/TD纵向转向)
@@ -1059,7 +1059,7 @@ class CircuitStatsCollector:
 
                             capacity = capacities["EQ"][direction]
                             base_stats = self._calculate_fifo_stats(
-                                fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles
+                                fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles, fifo.depth_events
                             )
 
                             # ETag统计 (TU/TD纵向下环)
@@ -1104,7 +1104,7 @@ class CircuitStatsCollector:
                         pos_key = f"{pos}_{ip_type}"
                         capacity = capacities["EQ"]["CH"]
                         base_stats = self._calculate_fifo_stats(
-                            fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles
+                            fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles, fifo.depth_events
                         )
                         results[net_name][ch_idx]["EQ"]["CH"][pos_key] = {
                             **base_stats,
@@ -1121,7 +1121,7 @@ class CircuitStatsCollector:
         return results
 
     @staticmethod
-    def _calculate_fifo_stats(sum_depth: float, max_depth: int, capacity: int, flit_count: int, total_cycles: int) -> Dict:
+    def _calculate_fifo_stats(sum_depth: float, max_depth: int, capacity: int, flit_count: int, total_cycles: int, depth_events: list = None) -> Dict:
         """计算单个FIFO的统计数据"""
         avg_depth = sum_depth / total_cycles
         return {
@@ -1132,6 +1132,7 @@ class CircuitStatsCollector:
             "flit_count": flit_count,
             "avg_throughput": flit_count / total_cycles if total_cycles > 0 else 0,
             "capacity": capacity,
+            "depth_events": list(depth_events) if depth_events else [],
         }
 
     def generate_fifo_usage_csv(self, model, output_path: str = None, return_content: bool = False):

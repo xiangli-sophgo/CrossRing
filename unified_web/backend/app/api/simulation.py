@@ -803,6 +803,7 @@ def _format_config_with_comments(content: dict) -> str:
                     "ENABLE_CROSSPOINT_CONFLICT_CHECK",
                     "NETWORK_CHANNEL_CONFIG",
                     "CHANNEL_SELECT_STRATEGY",
+                    "CHANNEL_SELECT_PARAMS",
                 ],
                 "comments": {
                     "UNIFIED_RW_TRACKER": "true=读写共享资源池，false=读写分离",
@@ -813,7 +814,8 @@ def _format_config_with_comments(content: dict) -> str:
                     "REVERSE_DIRECTION_ENABLED": "启用反方向流控 (0=禁用, 1=启用)",
                     "REVERSE_DIRECTION_THRESHOLD": "阈值比例 (0.25=激进, 0.5=推荐, 0.75=保守)",
                     "ENABLE_CROSSPOINT_CONFLICT_CHECK": "CrossPoint冲突检查 (0=检查当前周期, 1=检查当前+前一周期)",
-                    "CHANNEL_SELECT_STRATEGY": "通道选择策略: ip_id_based, target_node_based, flit_id_based",
+                    "CHANNEL_SELECT_STRATEGY": "通道选择策略: coord_based, node_id_based, burst_interleave, ip_type_id_based, round_robin",
+                    "CHANNEL_SELECT_PARAMS": "通道选择参数: basis(source/destination), dimension(x/y), granularity(packet/flit/request)",
                 },
             },
         }

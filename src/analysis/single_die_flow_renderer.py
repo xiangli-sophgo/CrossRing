@@ -286,9 +286,9 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
                 y=1.12,
                 xanchor="center",
                 yanchor="top",
-                bgcolor="lightgreen",
-                bordercolor="green",
-                font=dict(size=12),
+                bgcolor="#f0f0f0",
+                bordercolor="#ccc",
+                font=dict(size=12, color="#333"),
                 type="buttons",
             )
         ]
@@ -305,9 +305,9 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
                 y=1.12,
                 xanchor="center",
                 yanchor="top",
-                bgcolor="lightyellow",
-                bordercolor="orange",
-                font=dict(size=12),
+                bgcolor="#f0f0f0",
+                bordercolor="#ccc",
+                font=dict(size=12, color="#333"),
                 type="buttons",
             ))
 

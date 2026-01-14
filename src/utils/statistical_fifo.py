@@ -14,6 +14,10 @@ class StatisticalFIFO:
     # 类级别注册表 - 收集所有实例
     _registry: Dict[str, 'StatisticalFIFO'] = {}
 
+    # 类变量 - 存储当前cycle和是否启用事件记录
+    _current_cycle: int = 0
+    _event_recording_enabled: bool = True  # 默认启用
+
     def __init__(self, name: str, maxlen: int, node_pos: int,
                  category: str, fifo_type: str, ip_type: str = None):
         """
@@ -41,6 +45,9 @@ class StatisticalFIFO:
         self.flit_count = 0
         self.sample_count = 0
 
+        # 事件记录列表 [(cycle, delta), ...] delta: +1=入队, -1=出队
+        self.depth_events: List[tuple] = []
+
         # 注册到全局注册表
         StatisticalFIFO._registry[name] = self
 
@@ -50,18 +57,26 @@ class StatisticalFIFO:
         """添加元素到队尾"""
         self._fifo.append(item)
         self.flit_count += 1
+        if StatisticalFIFO._event_recording_enabled:
+            self.depth_events.append((StatisticalFIFO._current_cycle, +1))
 
     def appendleft(self, item):
         """添加元素到队首"""
         self._fifo.appendleft(item)
         self.flit_count += 1
+        if StatisticalFIFO._event_recording_enabled:
+            self.depth_events.append((StatisticalFIFO._current_cycle, +1))
 
     def popleft(self):
         """从队首弹出元素"""
+        if StatisticalFIFO._event_recording_enabled:
+            self.depth_events.append((StatisticalFIFO._current_cycle, -1))
         return self._fifo.popleft()
 
     def pop(self):
         """从队尾弹出元素"""
+        if StatisticalFIFO._event_recording_enabled:
+            self.depth_events.append((StatisticalFIFO._current_cycle, -1))
         return self._fifo.pop()
 
     def clear(self):
@@ -131,8 +146,27 @@ class StatisticalFIFO:
         self.max_depth = 0
         self.flit_count = 0
         self.sample_count = 0
+        self.depth_events.clear()
+
+    def get_depth_events(self) -> List[tuple]:
+        """获取深度事件列表"""
+        return self.depth_events
+
+    def reset_events(self):
+        """重置事件记录"""
+        self.depth_events.clear()
 
     # ========== 类方法 ==========
+
+    @classmethod
+    def set_current_cycle(cls, cycle: int):
+        """每周期开始时调用，更新全局cycle"""
+        cls._current_cycle = cycle
+
+    @classmethod
+    def enable_event_recording(cls, enabled: bool = True):
+        """启用/禁用事件记录"""
+        cls._event_recording_enabled = enabled
 
     @classmethod
     def get_all_fifos(cls) -> Dict[str, 'StatisticalFIFO']:

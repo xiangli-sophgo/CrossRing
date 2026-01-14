@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AliveScope, KeepAlive } from 'react-activation'
 import { Layout, Menu, Typography, Button, Tooltip } from 'antd'
 import {
   DashboardOutlined,
@@ -306,18 +307,20 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 const App: React.FC = () => {
   return (
     <BrowserRouter>
-      <MainLayout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/traffic" element={<TrafficConfig />} />
-          <Route path="/simulation" element={<Simulation />} />
-          <Route path="/experiments" element={<ExperimentList />} />
-          <Route path="/experiments/:id" element={<ExperimentDetail />} />
-          <Route path="/compare" element={<CompareView />} />
-          <Route path="/analysis" element={<Analysis />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </MainLayout>
+      <AliveScope>
+        <MainLayout>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/traffic" element={<KeepAlive cacheKey="traffic"><TrafficConfig /></KeepAlive>} />
+            <Route path="/simulation" element={<KeepAlive cacheKey="simulation"><Simulation /></KeepAlive>} />
+            <Route path="/experiments" element={<ExperimentList />} />
+            <Route path="/experiments/:id" element={<ExperimentDetail />} />
+            <Route path="/compare" element={<CompareView />} />
+            <Route path="/analysis" element={<KeepAlive cacheKey="analysis"><Analysis /></KeepAlive>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </MainLayout>
+      </AliveScope>
     </BrowserRouter>
   )
 }

@@ -3,6 +3,7 @@
  */
 
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { ConfigOption, TrafficTreeNode } from '../api/simulation'
 
 interface FormValues {
@@ -11,8 +12,11 @@ interface FormValues {
   cols?: number
   config_path?: string
   die_config_path?: string
-  max_cycles?: number
-  timeout_ns?: number
+  max_time?: number
+  max_workers?: number
+  save_to_db?: boolean
+  experiment_name?: string
+  experiment_description?: string
 }
 
 interface SimulationState {
@@ -49,31 +53,47 @@ interface SimulationState {
   updateFormValue: <K extends keyof FormValues>(key: K, value: FormValues[K]) => void
 }
 
-export const useSimulationStore = create<SimulationState>((set) => ({
-  // 初始状态
-  configs: { kcin: [], dcin: [] },
-  configsLoaded: false,
-  trafficTree: [],
-  trafficTreeMode: null,
-  trafficTreeLoaded: false,
-  configValues: {},
-  dieConfigValues: {},
-  originalConfigValues: {},
-  originalDieConfigValues: {},
-  selectedFiles: [],
-  formValues: { mode: 'kcin', rows: 5, cols: 4 },
+export const useSimulationStore = create<SimulationState>()(
+  persist(
+    (set) => ({
+      // 初始状态
+      configs: { kcin: [], dcin: [] },
+      configsLoaded: false,
+      trafficTree: [],
+      trafficTreeMode: null,
+      trafficTreeLoaded: false,
+      configValues: {},
+      dieConfigValues: {},
+      originalConfigValues: {},
+      originalDieConfigValues: {},
+      selectedFiles: [],
+      formValues: { mode: 'kcin', rows: 5, cols: 4, max_time: 6000, max_workers: 8, save_to_db: true },
 
-  // Actions
-  setConfigs: (configs) => set({ configs, configsLoaded: true }),
-  setTrafficTree: (tree, mode) => set({ trafficTree: tree, trafficTreeMode: mode, trafficTreeLoaded: true }),
-  clearTrafficTree: () => set({ trafficTree: [], trafficTreeMode: null, trafficTreeLoaded: false }),
-  setConfigValues: (values) => set({ configValues: values }),
-  updateConfigValue: (key, value) => set((state) => ({ configValues: { ...state.configValues, [key]: value } })),
-  setDieConfigValues: (values) => set({ dieConfigValues: values }),
-  updateDieConfigValue: (key, value) => set((state) => ({ dieConfigValues: { ...state.dieConfigValues, [key]: value } })),
-  setOriginalConfigValues: (values) => set({ originalConfigValues: values }),
-  setOriginalDieConfigValues: (values) => set({ originalDieConfigValues: values }),
-  setSelectedFiles: (files) => set({ selectedFiles: files }),
-  setFormValues: (values) => set({ formValues: values }),
-  updateFormValue: (key, value) => set((state) => ({ formValues: { ...state.formValues, [key]: value } })),
-}))
+      // Actions
+      setConfigs: (configs) => set({ configs, configsLoaded: true }),
+      setTrafficTree: (tree, mode) => set({ trafficTree: tree, trafficTreeMode: mode, trafficTreeLoaded: true }),
+      clearTrafficTree: () => set({ trafficTree: [], trafficTreeMode: null, trafficTreeLoaded: false }),
+      setConfigValues: (values) => set({ configValues: values }),
+      updateConfigValue: (key, value) => set((state) => ({ configValues: { ...state.configValues, [key]: value } })),
+      setDieConfigValues: (values) => set({ dieConfigValues: values }),
+      updateDieConfigValue: (key, value) => set((state) => ({ dieConfigValues: { ...state.dieConfigValues, [key]: value } })),
+      setOriginalConfigValues: (values) => set({ originalConfigValues: values }),
+      setOriginalDieConfigValues: (values) => set({ originalDieConfigValues: values }),
+      setSelectedFiles: (files) => set({ selectedFiles: files }),
+      setFormValues: (values) => set({ formValues: values }),
+      updateFormValue: (key, value) => set((state) => ({ formValues: { ...state.formValues, [key]: value } })),
+    }),
+    {
+      name: 'simulation-store',
+      // 只持久化用户编辑的配置值和表单值，不持久化缓存数据
+      partialize: (state) => ({
+        configValues: state.configValues,
+        dieConfigValues: state.dieConfigValues,
+        originalConfigValues: state.originalConfigValues,
+        originalDieConfigValues: state.originalDieConfigValues,
+        selectedFiles: state.selectedFiles,
+        formValues: state.formValues,
+      }),
+    }
+  )
+)

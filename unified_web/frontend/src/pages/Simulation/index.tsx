@@ -151,8 +151,11 @@ const Simulation: React.FC = () => {
       cols: values.cols,
       config_path: values.config_path,
       die_config_path: values.die_config_path,
-      max_cycles: values.max_cycles,
-      timeout_ns: values.timeout_ns,
+      max_time: values.max_time,
+      max_workers: values.max_workers,
+      save_to_db: values.save_to_db,
+      experiment_name: values.experiment_name,
+      experiment_description: values.experiment_description,
     })
   }, [form, setFormValues])
 
@@ -196,8 +199,10 @@ const Simulation: React.FC = () => {
 
   // 全局 WebSocket 处理：接收所有任务状态变化
   const handleGlobalTaskUpdate = useCallback((update: GlobalTaskUpdate) => {
+    console.log('[DEBUG] handleGlobalTaskUpdate:', update.task_id, 'progress:', update.progress, 'has in ref:', runningTasksRef.current.has(update.task_id))
     // 更新运行中任务卡片（如果存在）
     if (runningTasksRef.current.has(update.task_id)) {
+      console.log('[DEBUG] Updating task in runningTasks')
       setRunningTasks(prev => {
         const newMap = new Map(prev)
         const existing = newMap.get(update.task_id)
@@ -211,6 +216,7 @@ const Simulation: React.FC = () => {
               message: update.message,
               current_file: update.current_file || existing.task.current_file,
               error: update.error ?? existing.task.error,
+              sim_details: update.sim_details ?? existing.task.sim_details,
             }
           })
         }
@@ -1142,6 +1148,7 @@ const Simulation: React.FC = () => {
               <Collapse
                 size="small"
                 style={{ marginBottom: 16 }}
+                defaultActiveKey={['sim_settings']}
                 items={[{
                   key: 'sim_settings',
                   label: '仿真设置',

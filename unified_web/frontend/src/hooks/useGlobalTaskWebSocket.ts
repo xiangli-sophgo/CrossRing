@@ -9,6 +9,15 @@ export interface GlobalTaskUpdate {
   experiment_name?: string
   current_file?: string
   error?: string | null
+  sim_details?: {
+    current_time?: number
+    max_time?: number
+    total_requests?: number
+    completed_requests?: number
+    total_flits?: number
+    received_flits?: number
+    in_flight_flits?: number
+  } | null
 }
 
 interface UseGlobalTaskWebSocketOptions {
@@ -46,6 +55,7 @@ export const useGlobalTaskWebSocket = (options: UseGlobalTaskWebSocketOptions) =
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data) as GlobalTaskUpdate
+        console.log('[DEBUG] Global WebSocket received:', data)
         if (data.type === 'heartbeat') return
         onTaskUpdateRef.current(data)
       } catch (e) {

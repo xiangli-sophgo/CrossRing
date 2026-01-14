@@ -124,7 +124,8 @@ class KCINConfigBase:
 
         # ==================== 多通道配置 ====================
         self.NETWORK_CHANNEL_CONFIG = config.get("NETWORK_CHANNEL_CONFIG", {})
-        self.CHANNEL_SELECT_STRATEGY = config.get("CHANNEL_SELECT_STRATEGY", "ip_id_based")
+        self.CHANNEL_SELECT_STRATEGY = config.get("CHANNEL_SELECT_STRATEGY", "ip_type_id_based")
+        self.CHANNEL_SELECT_PARAMS = config.get("CHANNEL_SELECT_PARAMS", {})
 
         # ==================== 方向控制 ====================
         self.TL_ALLOWED_SOURCE_NODES = config.get("TL_ALLOWED_SOURCE_NODES", None)

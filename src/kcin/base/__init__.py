@@ -6,7 +6,7 @@ KCIN 基类模块
 
 from .config import KCINConfigBase
 from .routing_strategies import create_routing_strategy, RoutingStrategy
-from .channel_selector import ChannelSelector, DefaultChannelSelector
+from .channel_selector import ChannelSelector
 from .topology_utils import (
     create_adjacency_matrix,
     find_shortest_paths,
@@ -22,7 +22,6 @@ __all__ = [
     "RoutingStrategy",
     # 通道选择
     "ChannelSelector",
-    "DefaultChannelSelector",
     # 拓扑工具
     "create_adjacency_matrix",
     "find_shortest_paths",

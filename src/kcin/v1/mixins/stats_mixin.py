@@ -455,13 +455,23 @@ class StatsMixin:
 
                 if html_content:
                     # 注入tracker功能到HTML内容
+                    print(f"[DEBUG] Checking tracker injection: has _result_file_contents={hasattr(self, '_result_file_contents')}")
+                    if hasattr(self, "_result_file_contents"):
+                        print(f"[DEBUG] _result_file_contents keys: {list(self._result_file_contents.keys())}")
                     if hasattr(self, "_result_file_contents") and "tracker_data.json" in self._result_file_contents:
                         try:
                             from src.analysis.tracker_html_injector import inject_tracker_functionality_to_content
                             tracker_json = self._result_file_contents["tracker_data.json"]
+                            print(f"[DEBUG] Injecting tracker, json length: {len(tracker_json) if tracker_json else 0}")
                             html_content = inject_tracker_functionality_to_content(html_content, tracker_json)
-                        except Exception:
-                            pass
+                            print("[DEBUG] Tracker injection completed")
+                            print(f"[DEBUG] HTML contains tracker-panel: {'tracker-panel' in html_content}")
+                        except Exception as e:
+                            print(f"[DEBUG] Tracker injection failed: {e}")
+                            import traceback
+                            traceback.print_exc()
+                    else:
+                        print("[DEBUG] No tracker_data.json in _result_file_contents, skipping injection")
 
                     # 保存HTML内容
                     self._result_html_content = html_content
@@ -871,6 +881,9 @@ class StatsMixin:
 
         # 获取HTML报告内容
         result_html = getattr(self, "_result_html_content", None)
+        print(f"[DEBUG] save_to_database: result_html length={len(result_html) if result_html else 0}")
+        if result_html:
+            print(f"[DEBUG] save_to_database: result_html contains tracker-panel: {'tracker-panel' in result_html}")
 
         # 获取收集到的文件内容（所有结果文件都在这里，包括Parquet）
         result_file_contents = getattr(self, "_result_file_contents", {})

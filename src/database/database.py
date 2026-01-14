@@ -264,51 +264,89 @@ class DatabaseManager:
 
     def delete_experiment(self, experiment_id: int) -> bool:
         """删除实验（级联删除所有结果和结果文件）"""
+        # 先估算将要删除的数据大小
+        deleted_size = 0
         with self.get_session() as session:
             experiment = session.query(Experiment).filter(Experiment.id == experiment_id).first()
-            if experiment:
-                # 先获取所有结果ID，用于删除result_files
-                kcin_result_ids = [r.id for r in session.query(KcinResult).filter(
+            if not experiment:
+                return False
+
+            # 先获取所有结果ID，用于删除result_files
+            kcin_result_ids = [r.id for r in session.query(KcinResult).filter(
+                KcinResult.experiment_id == experiment_id
+            ).all()]
+            dcin_result_ids = [r.id for r in session.query(DcinResult).filter(
+                DcinResult.experiment_id == experiment_id
+            ).all()]
+
+            # 估算删除的数据大小
+            if kcin_result_ids:
+                file_size_sum = session.query(func.sum(ResultFile.file_size)).filter(
+                    ResultFile.result_type == "kcin",
+                    ResultFile.result_id.in_(kcin_result_ids)
+                ).scalar() or 0
+                deleted_size += file_size_sum
+
+                # 估算result_html大小
+                html_size_sum = session.query(func.sum(func.length(KcinResult.result_html))).filter(
                     KcinResult.experiment_id == experiment_id
-                ).all()]
-                dcin_result_ids = [r.id for r in session.query(DcinResult).filter(
+                ).scalar() or 0
+                deleted_size += html_size_sum
+
+            if dcin_result_ids:
+                file_size_sum = session.query(func.sum(ResultFile.file_size)).filter(
+                    ResultFile.result_type == "dcin",
+                    ResultFile.result_id.in_(dcin_result_ids)
+                ).scalar() or 0
+                deleted_size += file_size_sum
+
+                # 估算result_html大小
+                html_size_sum = session.query(func.sum(func.length(DcinResult.result_html))).filter(
                     DcinResult.experiment_id == experiment_id
-                ).all()]
+                ).scalar() or 0
+                deleted_size += html_size_sum
 
-                # 删除result_files表中的相关记录
-                if kcin_result_ids:
-                    session.query(ResultFile).filter(
-                        ResultFile.result_type == "kcin",
-                        ResultFile.result_id.in_(kcin_result_ids)
-                    ).delete(synchronize_session=False)
-                if dcin_result_ids:
-                    session.query(ResultFile).filter(
-                        ResultFile.result_type == "dcin",
-                        ResultFile.result_id.in_(dcin_result_ids)
-                    ).delete(synchronize_session=False)
-
-                # 删除AnalysisChart（SQLite可能不启用外键CASCADE）
-                session.query(AnalysisChart).filter(
-                    AnalysisChart.experiment_id == experiment_id
+            # 删除result_files表中的相关记录
+            if kcin_result_ids:
+                session.query(ResultFile).filter(
+                    ResultFile.result_type == "kcin",
+                    ResultFile.result_id.in_(kcin_result_ids)
+                ).delete(synchronize_session=False)
+            if dcin_result_ids:
+                session.query(ResultFile).filter(
+                    ResultFile.result_type == "dcin",
+                    ResultFile.result_id.in_(dcin_result_ids)
                 ).delete(synchronize_session=False)
 
-                # 手动删除kcin_results和dcin_results（SQLite默认不启用外键CASCADE）
-                session.query(KcinResult).filter(
-                    KcinResult.experiment_id == experiment_id
-                ).delete(synchronize_session=False)
-                session.query(DcinResult).filter(
-                    DcinResult.experiment_id == experiment_id
-                ).delete(synchronize_session=False)
+            # 删除AnalysisChart（SQLite可能不启用外键CASCADE）
+            session.query(AnalysisChart).filter(
+                AnalysisChart.experiment_id == experiment_id
+            ).delete(synchronize_session=False)
 
-                # 删除实验
-                session.delete(experiment)
-                return True
-            return False
+            # 手动删除kcin_results和dcin_results（SQLite默认不启用外键CASCADE）
+            session.query(KcinResult).filter(
+                KcinResult.experiment_id == experiment_id
+            ).delete(synchronize_session=False)
+            session.query(DcinResult).filter(
+                DcinResult.experiment_id == experiment_id
+            ).delete(synchronize_session=False)
+
+            # 删除实验
+            session.delete(experiment)
+
+        # 如果删除量超过100MB，执行VACUUM回收空间
+        if deleted_size > 100 * 1024 * 1024:
+            self.vacuum()
+
+        return True
 
     def delete_experiments_batch(self, experiment_ids: list) -> int:
         """批量删除实验（级联删除所有结果和结果文件）"""
         if not experiment_ids:
             return 0
+
+        # 先估算将要删除的数据大小
+        deleted_size = 0
         with self.get_session() as session:
             # 先获取所有结果ID
             kcin_result_ids = [r.id for r in session.query(KcinResult).filter(
@@ -317,6 +355,33 @@ class DatabaseManager:
             dcin_result_ids = [r.id for r in session.query(DcinResult).filter(
                 DcinResult.experiment_id.in_(experiment_ids)
             ).all()]
+
+            # 估算删除的数据大小
+            if kcin_result_ids:
+                file_size_sum = session.query(func.sum(ResultFile.file_size)).filter(
+                    ResultFile.result_type == "kcin",
+                    ResultFile.result_id.in_(kcin_result_ids)
+                ).scalar() or 0
+                deleted_size += file_size_sum
+
+                # 估算result_html大小
+                html_size_sum = session.query(func.sum(func.length(KcinResult.result_html))).filter(
+                    KcinResult.experiment_id.in_(experiment_ids)
+                ).scalar() or 0
+                deleted_size += html_size_sum
+
+            if dcin_result_ids:
+                file_size_sum = session.query(func.sum(ResultFile.file_size)).filter(
+                    ResultFile.result_type == "dcin",
+                    ResultFile.result_id.in_(dcin_result_ids)
+                ).scalar() or 0
+                deleted_size += file_size_sum
+
+                # 估算result_html大小
+                html_size_sum = session.query(func.sum(func.length(DcinResult.result_html))).filter(
+                    DcinResult.experiment_id.in_(experiment_ids)
+                ).scalar() or 0
+                deleted_size += html_size_sum
 
             # 删除result_files表中的相关记录
             if kcin_result_ids:
@@ -347,7 +412,12 @@ class DatabaseManager:
             count = session.query(Experiment).filter(
                 Experiment.id.in_(experiment_ids)
             ).delete(synchronize_session=False)
-            return count
+
+        # 如果删除量超过100MB，执行VACUUM回收空间
+        if deleted_size > 100 * 1024 * 1024:
+            self.vacuum()
+
+        return count
 
     # ==================== 结果相关操作 ====================
 
@@ -881,6 +951,20 @@ class DatabaseManager:
             # 按结果数量降序排序
             stats.sort(key=lambda x: x["count"], reverse=True)
             return stats
+
+    def vacuum(self):
+        """
+        执行VACUUM命令回收SQLite数据库空间
+
+        注意：VACUUM会重建整个数据库文件，删除未使用的空间
+        此操作可能需要较长时间，且需要临时空间（最多等于当前数据库大小）
+        """
+        # VACUUM 必须在自动提交模式下执行，不能在事务中
+        raw_conn = self.engine.raw_connection()
+        try:
+            raw_conn.execute("VACUUM")
+        finally:
+            raw_conn.close()
 
     @classmethod
     def reset_instance(cls):

@@ -1201,8 +1201,8 @@ class BaseFlowRenderer:
                         mode="markers",
                         marker=dict(
                             size=square_size * 16,  # 约为IP方块大小，确保覆盖
-                            opacity=0.0,  # 稍微可见，便于调试（生产环境可改为0.01）
-                            color="rgba(0,0,0,0.05)",
+                            opacity=0.01,  # 几乎不可见但可接收点击事件
+                            color="rgba(0,0,0,0)",
                             line=dict(width=0),
                         ),
                         text=ip_click_text,

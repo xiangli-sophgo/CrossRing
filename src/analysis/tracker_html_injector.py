@@ -33,22 +33,21 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
     # 生成tracker面板HTML（动态创建，竖向优先布局）
     tracker_panel_html = """
     <div class="tracker-section" id="tracker-panel">
-        <button class="close-btn" onclick="closeTrackerPanel()">关闭全部</button>
-        <h2 id="tracker-title">Tracker使用情况</h2>
+        <button class="close-btn" onclick="closeTrackerPanel()" title="关闭全部">×</button>
         <div class="tracker-grid" id="tracker-container">
             <!-- tracker-item将由JavaScript动态创建 -->
         </div>
     </div>
     """
 
-    # 生成CSS样式（响应式竖向优先布局）
+    # 生成CSS样式（响应式竖向优先布局，与FIFO热力图保持一致）
     tracker_css = """
     <style>
         .tracker-section {
             position: fixed;
             right: 10px;
             top: 10px;
-            width: 1300px;  /* 默认宽度，适合2列 */
+            width: 920px;
             max-width: 95vw;
             max-height: 95vh;
             background: white;
@@ -56,58 +55,60 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             display: none;
-            overflow-y: auto;
+            overflow: auto;
             z-index: 10000;
             transition: width 0.3s ease;
         }
         /* 1-2个tracker时窄布局 */
         .tracker-section.narrow {
-            width: 670px;  /* 620 + padding */
+            width: 480px;
         }
         .tracker-section.active {
             display: block;
         }
         .close-btn {
-            float: right;
+            position: absolute;
+            top: 8px;
+            right: 8px;
             cursor: pointer;
             background: #f44336;
             color: white;
             border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-size: 14px;
-            margin-bottom: 10px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            font-size: 18px;
+            line-height: 1;
+            padding: 0;
+            z-index: 1;
         }
         .close-btn:hover {
             background: #d32f2f;
         }
         .tracker-grid {
             display: grid;
-            grid-template-rows: repeat(2, 470px);  /* 固定2行 */
-            grid-auto-columns: 620px;  /* 自动列宽 */
-            grid-auto-flow: column;  /* 竖向优先填充 */
-            gap: 15px;
-            margin-top: 10px;
-            max-height: calc(95vh - 60px);
+            grid-template-columns: repeat(2, 440px);
+            grid-auto-rows: 320px;
+            grid-auto-flow: row;
+            gap: 10px;
+            margin-top: 5px;
+            max-height: calc(95vh - 50px);
             justify-content: start;
         }
-        /* 1个tracker时：单列单行 */
+        /* 1个tracker时：单行单列 */
         .tracker-grid[data-count="1"] {
-            grid-template-rows: 470px;
-            grid-auto-columns: 620px;
+            grid-template-columns: 440px;
             justify-content: center;
         }
-        /* 2个tracker时：单列2行 */
+        /* 2个tracker时：单行2列 */
         .tracker-grid[data-count="2"] {
-            grid-template-rows: repeat(2, 470px);
-            grid-auto-columns: 620px;
+            grid-template-columns: repeat(2, 440px);
             justify-content: center;
         }
-        /* 3-4个tracker时：2行，自动列 */
+        /* 3-4个tracker时：2列，自动行 */
         .tracker-grid[data-count="3"],
         .tracker-grid[data-count="4"] {
-            grid-template-rows: repeat(2, 470px);
-            grid-auto-columns: 620px;
+            grid-template-columns: repeat(2, 440px);
         }
         .tracker-item {
             position: relative;
@@ -115,8 +116,8 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             padding: 5px;
             border-radius: 6px;
             border: 1px solid #ddd;
-            width: 620px;  /* 固定宽度 */
-            height: 470px;  /* 固定高度 */
+            width: 440px;
+            height: 320px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -129,8 +130,8 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             flex-shrink: 0;
         }
         .tracker-chart {
-            width: 600px;
-            height: 450px;
+            width: 430px;
+            height: 310px;
             flex-shrink: 0;
         }
         .close-item-btn {
@@ -161,202 +162,162 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
         // 嵌入tracker数据
         const trackerData = {json.dumps(tracker_data, ensure_ascii=False)};
 
-        // IP显示队列（最多4个，FIFO）
-        const trackerQueue = [];
+        // IP显示队列（最多4个，FIFO）- 使用window全局变量以便与FIFO图表共享
+        window.trackerQueue = [];
         const MAX_TRACKERS = 4;
 
-        // 页面加载后自动显示前两个IP的tracker曲线
+        // 页面加载后初始化点击监听
         document.addEventListener('DOMContentLoaded', function() {{
-            console.log('[Tracker] 页面加载完成，准备显示tracker曲线');
-            console.log('[Tracker] trackerData:', trackerData);
-
-            // 延迟以确保DOM完全加载
-            setTimeout(function() {{
-                initializeTrackerListener();  // 启用点击监听
-                console.log('[Tracker] 点击监听器已启用，等待用户点击IP');
-            }}, 1000);
+            console.log('[Tracker] DOMContentLoaded, waiting 1s to init...');
+            setTimeout(initializeTrackerListener, 1000);
         }});
 
         function initializeTrackerListener() {{
-            console.log('[Tracker] 开始初始化点击监听器');
-
-            // 只绑定到流量图（第一个图表 chart-0）
+            console.log('[Tracker] initializeTrackerListener called');
             const flowGraphDiv = document.getElementById('chart-0');
-
             if (!flowGraphDiv) {{
-                console.error('[Tracker] 找不到流量图 chart-0');
+                console.log('[Tracker] ERROR: chart-0 not found!');
+                // 尝试查找其他可能的图表容器
+                const allDivs = document.querySelectorAll('[id^="chart-"]');
+                console.log('[Tracker] Available chart divs:', Array.from(allDivs).map(d => d.id));
                 return;
             }}
+            console.log('[Tracker] Found chart-0 div');
 
-            console.log('[Tracker] 找到流量图chart-0，准备绑定点击事件');
+            // 检查Plotly图表是否已初始化
+            if (!flowGraphDiv.data || !flowGraphDiv.layout) {{
+                console.log('[Tracker] Plotly not ready, retrying in 100ms...');
+                setTimeout(initializeTrackerListener, 100);
+                return;
+            }}
+            console.log('[Tracker] Plotly ready, bindng click event...');
+            console.log('[Tracker] trackerData keys:', Object.keys(trackerData));
 
-            // 获取plotly元素
-            const plotlyDiv = flowGraphDiv.querySelector('.plotly-graph-div') || flowGraphDiv;
-
-            // 检查Plotly是否可用，使用try-catch保护
-            try {
-                if (typeof Plotly === 'undefined' || !Plotly.d3) {
-                    console.log('[Tracker] Plotly.d3未加载，延迟初始化');
-                    setTimeout(initializeTrackerListener, 100);
-                    return;
-                }
-
-                // 使用Plotly.d3.select的正确方式绑定事件
-                Plotly.d3.select(plotlyDiv).on('plotly_click', function(data) {{
-                console.log('[Tracker] 流量图点击事件触发!');
-                console.log('[Tracker] 点击数据:', data);
-
+            // 使用Plotly原生事件绑定
+            flowGraphDiv.on('plotly_click', function(data) {{
+                console.log('[Tracker] plotly_click event fired!');
+                console.log('[Tracker] Click data:', data);
                 if (data.points && data.points.length > 0) {{
                     const point = data.points[0];
-                    console.log('[Tracker] 点击的点:', point);
-                    console.log('[Tracker] customdata:', point.customdata);
-                    console.log('[Tracker] text:', point.text);
-
-                    // 尝试从不同的customdata格式获取IP信息
+                    console.log('[Tracker] Clicked point:', point);
+                    console.log('[Tracker] point.customdata:', point.customdata);
+                    console.log('[Tracker] point.text:', point.text);
                     let dieId, ipType, ipPos;
 
                     if (point.customdata) {{
                         if (Array.isArray(point.customdata)) {{
-                            // 格式: [die_id, ip_type, ip_pos]
                             dieId = point.customdata[0];
                             ipType = point.customdata[1];
                             ipPos = point.customdata[2];
-                            console.log('[Tracker] 从数组customdata解析: dieId=', dieId, 'ipType=', ipType, 'ipPos=', ipPos);
+                            console.log('[Tracker] Parsed from array customdata:', dieId, ipType, ipPos);
                         }} else if (typeof point.customdata === 'object') {{
-                            // 格式: {{die_id, ip_type, ip_pos}}
                             dieId = point.customdata.die_id;
                             ipType = point.customdata.ip_type;
                             ipPos = point.customdata.ip_pos;
-                            console.log('[Tracker] 从对象customdata解析: dieId=', dieId, 'ipType=', ipType, 'ipPos=', ipPos);
+                            console.log('[Tracker] Parsed from object customdata:', dieId, ipType, ipPos);
                         }}
                     }}
 
                     // 从text中解析IP信息（备用方案）
                     if (!ipType && point.text) {{
-                        console.log('[Tracker] 尝试从text解析IP信息:', point.text);
-
-                        // 格式1: "ip_type @ Pos N" (scatter点的text)
+                        console.log('[Tracker] Trying to parse from text...');
                         let match = point.text.match(/(\\w+_\\d+)\\s*@\\s*Pos\\s*(\\d+)/);
                         if (match) {{
                             ipType = match[1];
                             ipPos = parseInt(match[2]);
                             dieId = 0;
-                            console.log('[Tracker] 从scatter点text解析: ipType=', ipType, 'ipPos=', ipPos);
+                            console.log('[Tracker] Parsed from text:', dieId, ipType, ipPos);
                         }} else {{
-                            // 格式2: "<b>节点 N</b><br>GDMA_0: XX GB/s<br>" (节点shapes的text)
-                            // 忽略节点整体点击，只允许点击具体的IP方块
-                            console.log('[Tracker] 点击的是节点整体，忽略（请点击具体的IP方块）');
+                            console.log('[Tracker] Text does not match IP pattern, ignoring click');
                             return;
                         }}
                     }}
 
                     if (ipType && ipPos !== undefined) {{
-                        console.log('[Tracker] 准备添加IP到队列: dieId=', dieId, 'ipType=', ipType, 'ipPos=', ipPos);
+                        console.log('[Tracker] Calling addTrackerToQueue...');
                         addTrackerToQueue(dieId || 0, ipType, ipPos);
                     }} else {{
-                        console.warn('[Tracker] 无法从点击数据中提取IP信息');
+                        console.log('[Tracker] ipType or ipPos undefined, not adding to queue');
                     }}
                 }} else {{
-                    console.warn('[Tracker] 点击数据中没有points');
+                    console.log('[Tracker] No points in click data');
                 }}
             }});
-
-            console.log('[Tracker] 点击监听器绑定完成');
+            console.log('[Tracker] Click event bindng complete');
         }}
 
         function addTrackerToQueue(dieId, ipType, ipPos) {{
-            console.log(`[Tracker] addTrackerToQueue调用: dieId=${{dieId}}, ipType=${{ipType}}, ipPos=${{ipPos}}`);
-
-            // 检查tracker数据是否存在
+            console.log('[Tracker] addTrackerToQueue called:', dieId, ipType, ipPos);
             const dieData = trackerData[dieId.toString()];
             if (!dieData) {{
-                console.error(`[Tracker] 没有找到Die ${{dieId}}的数据`);
-                console.log('[Tracker] 可用的Die:', Object.keys(trackerData));
-                alert(`没有找到Die ${{dieId}}的tracker数据`);
+                console.log('[Tracker] dieData not found for die:', dieId);
                 return;
             }}
 
             const ipTypeData = dieData[ipType];
             if (!ipTypeData) {{
-                console.error(`[Tracker] 没有找到${{ipType}}的数据`);
-                console.log(`[Tracker] Die${{dieId}}可用的IP类型:`, Object.keys(dieData));
-                alert(`没有找到${{ipType}}的tracker数据`);
+                console.log('[Tracker] ipTypeData not found for:', ipType);
                 return;
             }}
 
             const ipData = ipTypeData[ipPos.toString()];
             if (!ipData) {{
-                console.error(`[Tracker] 没有找到${{ipType}}@${{ipPos}}的数据`);
-                console.log(`[Tracker] ${{ipType}}可用的位置:`, Object.keys(ipTypeData));
-                alert(`没有找到${{ipType}}@${{ipPos}}的tracker数据`);
+                console.log('[Tracker] ipData not found for pos:', ipPos);
                 return;
             }}
 
-            console.log(`[Tracker] 找到数据:`, ipData);
-
             // 检查是否已经在队列中
             const ipKey = `${{dieId}}_${{ipType}}_${{ipPos}}`;
-            const existingIndex = trackerQueue.findIndex(item => item.key === ipKey);
+            const existingIndex = window.trackerQueue.findIndex(item => item.key === ipKey);
             if (existingIndex !== -1) {{
-                // 已存在，不重复添加
+                console.log('[Tracker] Already in queue:', ipKey);
                 return;
             }}
 
             // 添加到队列，如果满了则移除最旧的
-            if (trackerQueue.length >= MAX_TRACKERS) {{
-                trackerQueue.shift(); // 移除最旧的
+            if (window.trackerQueue.length >= MAX_TRACKERS) {{
+                window.trackerQueue.shift();
             }}
 
-            trackerQueue.push({{ key: ipKey, dieId, ipType, ipPos, ipData }});
-            console.log(`[Tracker] 队列更新，当前长度: ${{trackerQueue.length}}`);
+            // 添加到队列，包含type字段以便与FIFO图表兼容
+            window.trackerQueue.push({{ type: 'tracker', key: ipKey, dieId, ipType, ipPos, ipData }});
+            console.log('[Tracker] Added to queue, length:', window.trackerQueue.length);
 
-            // 显示tracker面板
             const panel = document.getElementById('tracker-panel');
-            if (panel) {{
-                panel.classList.add('active');
-                console.log('[Tracker] tracker-panel已激活显示');
-            }} else {{
-                console.error('[Tracker] 找不到tracker-panel元素');
-            }}
+            if (panel) panel.classList.add('active');
 
-            // 更新所有图表
-            updateAllTrackerCharts();
+            // 优先使用统一的updateAllCharts（如果FIFO热力图也存在），否则用自己的
+            if (typeof window.updateAllCharts === 'function') {{
+                console.log('[Tracker] Using window.updateAllCharts');
+                window.updateAllCharts();
+            }} else {{
+                console.log('[Tracker] Using updateAllTrackerCharts (fallback)');
+                updateAllTrackerCharts();
+            }}
         }}
 
         function updateAllTrackerCharts() {{
-            console.log(`[Tracker] updateAllTrackerCharts调用，队列长度: ${{trackerQueue.length}}`);
-
             const container = document.getElementById('tracker-container');
             const panel = document.getElementById('tracker-panel');
 
-            // 如果队列为空，隐藏整个面板
-            if (trackerQueue.length === 0) {{
+            if (window.trackerQueue.length === 0) {{
                 panel.classList.remove('active');
-                console.log('[Tracker] 队列为空，隐藏面板');
                 return;
             }}
 
-            // 显示面板
             panel.classList.add('active');
 
-            // 根据tracker数量调整面板宽度
-            if (trackerQueue.length <= 2) {{
+            if (window.trackerQueue.length === 1) {{
                 panel.classList.add('narrow');
-                console.log('[Tracker] 1-2个tracker，使用窄布局');
             }} else {{
                 panel.classList.remove('narrow');
-                console.log('[Tracker] 3+个tracker，使用宽布局');
             }}
 
-            // 清空容器
             container.innerHTML = '';
-
-            // 设置grid的data-count属性用于CSS响应式
-            container.setAttribute('data-count', trackerQueue.length);
-            console.log(`[Tracker] 设置data-count=${{trackerQueue.length}}`);
+            container.setAttribute('data-count', window.trackerQueue.length);
 
             // 动态创建tracker-item
-            trackerQueue.forEach((item, index) => {{
+            window.trackerQueue.forEach((item, index) => {{
                 const trackerItem = document.createElement('div');
                 trackerItem.className = 'tracker-item';
                 trackerItem.innerHTML = `
@@ -365,38 +326,29 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
                 `;
                 container.appendChild(trackerItem);
 
-                console.log(`[Tracker] 创建tracker-item ${{index}}: ${{item.ipType}}@Pos${{item.ipPos}}`);
-
-                // 延迟渲染图表，确保DOM已插入
                 setTimeout(() => {{
-                    createTrackerChart(item.ipData, item.ipType, item.ipPos, `tracker-chart-${{index}}`, item.dieId);
+                    window.createTrackerChart(item.ipData, item.ipType, item.ipPos, `tracker-chart-${{index}}`, item.dieId);
                 }}, 10);
             }});
         }}
 
         function closeTrackerItem(index) {{
-            console.log(`[Tracker] 关闭tracker: ${{index}}`);
-            if (index < trackerQueue.length) {{
-                trackerQueue.splice(index, 1);
-                updateAllTrackerCharts();  // 重新渲染整个容器
+            if (index < window.trackerQueue.length) {{
+                window.trackerQueue.splice(index, 1);
+                updateAllTrackerCharts();
             }}
         }}
 
         function closeTrackerPanel() {{
             const panel = document.getElementById('tracker-panel');
             panel.classList.remove('active');
-            trackerQueue.length = 0; // 清空队列
+            window.trackerQueue.length = 0; // 清空队列
         }}
 
-        function createTrackerChart(ipData, ipType, ipPos, targetDivId, dieId) {{
-            console.log(`[Tracker] createTrackerChart调用: dieId=${{dieId}}, ipType=${{ipType}}, ipPos=${{ipPos}}, targetDiv=${{targetDivId}}`);
-            console.log('[Tracker] ipData:', ipData);
-
+        window.createTrackerChart = function(ipData, ipType, ipPos, targetDivId, dieId) {{
             const trackerEvents = ipData.events;
             const totalAllocated = ipData.total_allocated;
             const totalConfig = ipData.total_config;
-
-            console.log('[Tracker] trackerEvents:', trackerEvents);
 
             // 准备数据
             const traces = [];
@@ -493,21 +445,19 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
                 maxUsageCount = Math.max(maxUsageCount, ...trace.y);
             }});
 
-            // 布局
-            // 标题格式：单Die时不显示Die ID，多Die时显示
-            const titleText = (dieId !== undefined && dieId !== null) ? `${{ipType}}@${{ipPos}}@DIE${{dieId}}` : `${{ipType}}@${{ipPos}}`;
+            // 布局（尺寸与容器匹配）
             const layout = {{
-                title: titleText,
+                title: false,
                 xaxis: {{ title: '时间 (ns)' }},
                 yaxis: {{
                     title: '使用个数',
-                    range: [0, Math.max(Math.ceil(maxUsageCount * 1.1), 1)]
+                    range: [0, Math.max(Math.ceil(maxUsageCount * 1.1), 1)],
+                    dtick: 1,
+                    tick0: 0
                 }},
-                height: 450,
-                width: 600,
-                margin: {{ l: 60, r: 20, t: 80, b: 50 }},
+                margin: {{ l: 50, r: 15, t: 10, b: 40 }},
                 hovermode: 'closest',
-                legend: {{ orientation: 'h', y: 1.05, xanchor: 'center', x: 0.5 }}
+                legend: {{ orientation: 'h', y: 1.02, xanchor: 'center', x: 0.5 }}
             }};
 
             // 渲染图表
@@ -518,7 +468,7 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             }}
 
             try {{
-                Plotly.newPlot(targetDivId, traces, layout, {{displayModeBar: false}});
+                Plotly.newPlot(targetDivId, traces, layout, {{displayModeBar: false, responsive: true}});
                 console.log(`[Tracker] 图表渲染成功: ${{targetDivId}}`);
             }} catch (error) {{
                 console.error(`[Tracker] 渲染失败:`, error);
@@ -561,8 +511,7 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
     # 生成tracker面板HTML（动态创建，竖向优先布局）
     tracker_panel_html = """
     <div class="tracker-section" id="tracker-panel">
-        <button class="close-btn" onclick="closeTrackerPanel()">关闭全部</button>
-        <h2 id="tracker-title">Tracker使用情况</h2>
+        <button class="close-btn" onclick="closeTrackerPanel()" title="关闭全部">×</button>
         <div class="tracker-grid" id="tracker-container">
             <!-- tracker-item将由JavaScript动态创建 -->
         </div>
@@ -576,7 +525,7 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             position: fixed;
             right: 10px;
             top: 10px;
-            width: 1300px;  /* 默认宽度，适合2列 */
+            width: 920px;
             max-width: 95vw;
             max-height: 95vh;
             background: white;
@@ -584,58 +533,60 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             display: none;
-            overflow-y: auto;
+            overflow: auto;
             z-index: 10000;
             transition: width 0.3s ease;
         }
         /* 1-2个tracker时窄布局 */
         .tracker-section.narrow {
-            width: 670px;  /* 620 + padding */
+            width: 480px;
         }
         .tracker-section.active {
             display: block;
         }
         .close-btn {
-            float: right;
+            position: absolute;
+            top: 8px;
+            right: 8px;
             cursor: pointer;
             background: #f44336;
             color: white;
             border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-size: 14px;
-            margin-bottom: 10px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            font-size: 18px;
+            line-height: 1;
+            padding: 0;
+            z-index: 1;
         }
         .close-btn:hover {
             background: #d32f2f;
         }
         .tracker-grid {
             display: grid;
-            grid-template-rows: repeat(2, 470px);  /* 固定2行 */
-            grid-auto-columns: 620px;  /* 自动列宽 */
-            grid-auto-flow: column;  /* 竖向优先填充 */
-            gap: 15px;
-            margin-top: 10px;
-            max-height: calc(95vh - 60px);
+            grid-template-columns: repeat(2, 440px);
+            grid-auto-rows: 320px;
+            grid-auto-flow: row;
+            gap: 10px;
+            margin-top: 5px;
+            max-height: calc(95vh - 50px);
             justify-content: start;
         }
-        /* 1个tracker时：单列单行 */
+        /* 1个tracker时：单行单列 */
         .tracker-grid[data-count="1"] {
-            grid-template-rows: 470px;
-            grid-auto-columns: 620px;
+            grid-template-columns: 440px;
             justify-content: center;
         }
-        /* 2个tracker时：单列2行 */
+        /* 2个tracker时：单行2列 */
         .tracker-grid[data-count="2"] {
-            grid-template-rows: repeat(2, 470px);
-            grid-auto-columns: 620px;
+            grid-template-columns: repeat(2, 440px);
             justify-content: center;
         }
-        /* 3-4个tracker时：2行，自动列 */
+        /* 3-4个tracker时：2列，自动行 */
         .tracker-grid[data-count="3"],
         .tracker-grid[data-count="4"] {
-            grid-template-rows: repeat(2, 470px);
-            grid-auto-columns: 620px;
+            grid-template-columns: repeat(2, 440px);
         }
         .tracker-item {
             position: relative;
@@ -643,8 +594,8 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             padding: 5px;
             border-radius: 6px;
             border: 1px solid #ddd;
-            width: 620px;  /* 固定宽度 */
-            height: 470px;  /* 固定高度 */
+            width: 440px;
+            height: 320px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -657,8 +608,8 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             flex-shrink: 0;
         }
         .tracker-chart {
-            width: 600px;
-            height: 450px;
+            width: 430px;
+            height: 310px;
             flex-shrink: 0;
         }
         .close-item-btn {
@@ -687,205 +638,167 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
     tracker_data_str = json.dumps(tracker_data, ensure_ascii=False)
     tracker_js = f"""
     <script>
+        console.log('[Tracker] Script loaded! trackerData keys:', Object.keys({tracker_data_str}));
+
         // 嵌入tracker数据
         const trackerData = {tracker_data_str};
 
-        // IP显示队列（最多4个，FIFO）
-        const trackerQueue = [];
+        // IP显示队列（最多4个，FIFO）- 使用window全局变量以便与FIFO图表共享
+        window.trackerQueue = [];
         const MAX_TRACKERS = 4;
 
-        // 页面加载后自动显示前两个IP的tracker曲线
+        // 页面加载后初始化点击监听
         document.addEventListener('DOMContentLoaded', function() {{
-            console.log('[Tracker] 页面加载完成，准备显示tracker曲线');
-            console.log('[Tracker] trackerData:', trackerData);
-
-            // 延迟以确保DOM完全加载
-            setTimeout(function() {{
-                initializeTrackerListener();  // 启用点击监听
-                console.log('[Tracker] 点击监听器已启用，等待用户点击IP');
-            }}, 1000);
+            console.log('[Tracker] DOMContentLoaded, waiting 1s to init...');
+            setTimeout(initializeTrackerListener, 1000);
         }});
 
         function initializeTrackerListener() {{
-            console.log('[Tracker] 开始初始化点击监听器');
-
-            // 只绑定到流量图（第一个图表 chart-0）
+            console.log('[Tracker] initializeTrackerListener called');
             const flowGraphDiv = document.getElementById('chart-0');
-
             if (!flowGraphDiv) {{
-                console.error('[Tracker] 找不到流量图 chart-0');
+                console.log('[Tracker] ERROR: chart-0 not found!');
+                // 尝试查找其他可能的图表容器
+                const allDivs = document.querySelectorAll('[id^="chart-"]');
+                console.log('[Tracker] Available chart divs:', Array.from(allDivs).map(d => d.id));
                 return;
             }}
+            console.log('[Tracker] Found chart-0 div');
 
-            console.log('[Tracker] 找到流量图chart-0，准备绑定点击事件');
+            // 检查Plotly图表是否已初始化
+            if (!flowGraphDiv.data || !flowGraphDiv.layout) {{
+                console.log('[Tracker] Plotly not ready, retrying in 100ms...');
+                setTimeout(initializeTrackerListener, 100);
+                return;
+            }}
+            console.log('[Tracker] Plotly ready, bindng click event...');
+            console.log('[Tracker] trackerData keys:', Object.keys(trackerData));
 
-            // 获取plotly元素
-            const plotlyDiv = flowGraphDiv.querySelector('.plotly-graph-div') || flowGraphDiv;
-
-            // 检查Plotly是否可用，使用try-catch保护
-            try {
-                if (typeof Plotly === 'undefined' || !Plotly.d3) {
-                    console.log('[Tracker] Plotly.d3未加载，延迟初始化');
-                    setTimeout(initializeTrackerListener, 100);
-                    return;
-                }
-
-                // 使用Plotly.d3.select的正确方式绑定事件
-                Plotly.d3.select(plotlyDiv).on('plotly_click', function(data) {{
-                console.log('[Tracker] 流量图点击事件触发!');
-                console.log('[Tracker] 点击数据:', data);
-
+            // 使用Plotly原生事件绑定
+            flowGraphDiv.on('plotly_click', function(data) {{
+                console.log('[Tracker] plotly_click event fired!');
+                console.log('[Tracker] Click data:', data);
                 if (data.points && data.points.length > 0) {{
                     const point = data.points[0];
-                    console.log('[Tracker] 点击的点:', point);
-                    console.log('[Tracker] customdata:', point.customdata);
-                    console.log('[Tracker] text:', point.text);
-
-                    // 尝试从不同的customdata格式获取IP信息
+                    console.log('[Tracker] Clicked point:', point);
+                    console.log('[Tracker] point.customdata:', point.customdata);
+                    console.log('[Tracker] point.text:', point.text);
                     let dieId, ipType, ipPos;
 
                     if (point.customdata) {{
                         if (Array.isArray(point.customdata)) {{
-                            // 格式: [die_id, ip_type, ip_pos]
                             dieId = point.customdata[0];
                             ipType = point.customdata[1];
                             ipPos = point.customdata[2];
-                            console.log('[Tracker] 从数组customdata解析: dieId=', dieId, 'ipType=', ipType, 'ipPos=', ipPos);
+                            console.log('[Tracker] Parsed from array customdata:', dieId, ipType, ipPos);
                         }} else if (typeof point.customdata === 'object') {{
-                            // 格式: {{die_id, ip_type, ip_pos}}
                             dieId = point.customdata.die_id;
                             ipType = point.customdata.ip_type;
                             ipPos = point.customdata.ip_pos;
-                            console.log('[Tracker] 从对象customdata解析: dieId=', dieId, 'ipType=', ipType, 'ipPos=', ipPos);
+                            console.log('[Tracker] Parsed from object customdata:', dieId, ipType, ipPos);
                         }}
                     }}
 
                     // 从text中解析IP信息（备用方案）
                     if (!ipType && point.text) {{
-                        console.log('[Tracker] 尝试从text解析IP信息:', point.text);
-
-                        // 格式1: "ip_type @ Pos N" (scatter点的text)
+                        console.log('[Tracker] Trying to parse from text...');
                         let match = point.text.match(/(\\w+_\\d+)\\s*@\\s*Pos\\s*(\\d+)/);
                         if (match) {{
                             ipType = match[1];
                             ipPos = parseInt(match[2]);
                             dieId = 0;
-                            console.log('[Tracker] 从scatter点text解析: ipType=', ipType, 'ipPos=', ipPos);
+                            console.log('[Tracker] Parsed from text:', dieId, ipType, ipPos);
                         }} else {{
-                            // 格式2: "<b>节点 N</b><br>GDMA_0: XX GB/s<br>" (节点shapes的text)
-                            // 忽略节点整体点击，只允许点击具体的IP方块
-                            console.log('[Tracker] 点击的是节点整体，忽略（请点击具体的IP方块）');
+                            console.log('[Tracker] Text does not match IP pattern, ignoring click');
                             return;
                         }}
                     }}
 
                     if (ipType && ipPos !== undefined) {{
-                        console.log('[Tracker] 准备添加IP到队列: dieId=', dieId, 'ipType=', ipType, 'ipPos=', ipPos);
+                        console.log('[Tracker] Calling addTrackerToQueue...');
                         addTrackerToQueue(dieId || 0, ipType, ipPos);
                     }} else {{
-                        console.warn('[Tracker] 无法从点击数据中提取IP信息');
+                        console.log('[Tracker] ipType or ipPos undefined, not adding to queue');
                     }}
                 }} else {{
-                    console.warn('[Tracker] 点击数据中没有points');
+                    console.log('[Tracker] No points in click data');
                 }}
             }});
-
-            console.log('[Tracker] 点击监听器绑定完成');
+            console.log('[Tracker] Click event bindng complete');
         }}
 
         function addTrackerToQueue(dieId, ipType, ipPos) {{
-            console.log(`[Tracker] addTrackerToQueue调用: dieId=${{dieId}}, ipType=${{ipType}}, ipPos=${{ipPos}}`);
-
-            // 检查tracker数据是否存在
+            console.log('[Tracker] addTrackerToQueue called:', dieId, ipType, ipPos);
             const dieData = trackerData[dieId.toString()];
             if (!dieData) {{
-                console.error(`[Tracker] 没有找到Die ${{dieId}}的数据`);
-                console.log('[Tracker] 可用的Die:', Object.keys(trackerData));
-                alert(`没有找到Die ${{dieId}}的tracker数据`);
+                console.log('[Tracker] dieData not found for die:', dieId);
                 return;
             }}
 
             const ipTypeData = dieData[ipType];
             if (!ipTypeData) {{
-                console.error(`[Tracker] 没有找到${{ipType}}的数据`);
-                console.log(`[Tracker] Die${{dieId}}可用的IP类型:`, Object.keys(dieData));
-                alert(`没有找到${{ipType}}的tracker数据`);
+                console.log('[Tracker] ipTypeData not found for:', ipType);
                 return;
             }}
 
             const ipData = ipTypeData[ipPos.toString()];
             if (!ipData) {{
-                console.error(`[Tracker] 没有找到${{ipType}}@${{ipPos}}的数据`);
-                console.log(`[Tracker] ${{ipType}}可用的位置:`, Object.keys(ipTypeData));
-                alert(`没有找到${{ipType}}@${{ipPos}}的tracker数据`);
+                console.log('[Tracker] ipData not found for pos:', ipPos);
                 return;
             }}
 
-            console.log(`[Tracker] 找到数据:`, ipData);
-
             // 检查是否已经在队列中
             const ipKey = `${{dieId}}_${{ipType}}_${{ipPos}}`;
-            const existingIndex = trackerQueue.findIndex(item => item.key === ipKey);
+            const existingIndex = window.trackerQueue.findIndex(item => item.key === ipKey);
             if (existingIndex !== -1) {{
-                // 已存在，不重复添加
+                console.log('[Tracker] Already in queue:', ipKey);
                 return;
             }}
 
             // 添加到队列，如果满了则移除最旧的
-            if (trackerQueue.length >= MAX_TRACKERS) {{
-                trackerQueue.shift(); // 移除最旧的
+            if (window.trackerQueue.length >= MAX_TRACKERS) {{
+                window.trackerQueue.shift();
             }}
 
-            trackerQueue.push({{ key: ipKey, dieId, ipType, ipPos, ipData }});
-            console.log(`[Tracker] 队列更新，当前长度: ${{trackerQueue.length}}`);
+            // 添加到队列，包含type字段以便与FIFO图表兼容
+            window.trackerQueue.push({{ type: 'tracker', key: ipKey, dieId, ipType, ipPos, ipData }});
+            console.log('[Tracker] Added to queue, length:', window.trackerQueue.length);
 
-            // 显示tracker面板
             const panel = document.getElementById('tracker-panel');
-            if (panel) {{
-                panel.classList.add('active');
-                console.log('[Tracker] tracker-panel已激活显示');
-            }} else {{
-                console.error('[Tracker] 找不到tracker-panel元素');
-            }}
+            if (panel) panel.classList.add('active');
 
-            // 更新所有图表
-            updateAllTrackerCharts();
+            // 优先使用统一的updateAllCharts（如果FIFO热力图也存在），否则用自己的
+            if (typeof window.updateAllCharts === 'function') {{
+                console.log('[Tracker] Using window.updateAllCharts');
+                window.updateAllCharts();
+            }} else {{
+                console.log('[Tracker] Using updateAllTrackerCharts (fallback)');
+                updateAllTrackerCharts();
+            }}
         }}
 
         function updateAllTrackerCharts() {{
-            console.log(`[Tracker] updateAllTrackerCharts调用，队列长度: ${{trackerQueue.length}}`);
-
             const container = document.getElementById('tracker-container');
             const panel = document.getElementById('tracker-panel');
 
-            // 如果队列为空，隐藏整个面板
-            if (trackerQueue.length === 0) {{
+            if (window.trackerQueue.length === 0) {{
                 panel.classList.remove('active');
-                console.log('[Tracker] 队列为空，隐藏面板');
                 return;
             }}
 
-            // 显示面板
             panel.classList.add('active');
 
-            // 根据tracker数量调整面板宽度
-            if (trackerQueue.length <= 2) {{
+            if (window.trackerQueue.length === 1) {{
                 panel.classList.add('narrow');
-                console.log('[Tracker] 1-2个tracker，使用窄布局');
             }} else {{
                 panel.classList.remove('narrow');
-                console.log('[Tracker] 3+个tracker，使用宽布局');
             }}
 
-            // 清空容器
             container.innerHTML = '';
-
-            // 设置grid的data-count属性用于CSS响应式
-            container.setAttribute('data-count', trackerQueue.length);
-            console.log(`[Tracker] 设置data-count=${{trackerQueue.length}}`);
+            container.setAttribute('data-count', window.trackerQueue.length);
 
             // 动态创建tracker-item
-            trackerQueue.forEach((item, index) => {{
+            window.trackerQueue.forEach((item, index) => {{
                 const trackerItem = document.createElement('div');
                 trackerItem.className = 'tracker-item';
                 trackerItem.innerHTML = `
@@ -894,38 +807,29 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
                 `;
                 container.appendChild(trackerItem);
 
-                console.log(`[Tracker] 创建tracker-item ${{index}}: ${{item.ipType}}@Pos${{item.ipPos}}`);
-
-                // 延迟渲染图表，确保DOM已插入
                 setTimeout(() => {{
-                    createTrackerChart(item.ipData, item.ipType, item.ipPos, `tracker-chart-${{index}}`, item.dieId);
+                    window.createTrackerChart(item.ipData, item.ipType, item.ipPos, `tracker-chart-${{index}}`, item.dieId);
                 }}, 10);
             }});
         }}
 
         function closeTrackerItem(index) {{
-            console.log(`[Tracker] 关闭tracker: ${{index}}`);
-            if (index < trackerQueue.length) {{
-                trackerQueue.splice(index, 1);
-                updateAllTrackerCharts();  // 重新渲染整个容器
+            if (index < window.trackerQueue.length) {{
+                window.trackerQueue.splice(index, 1);
+                updateAllTrackerCharts();
             }}
         }}
 
         function closeTrackerPanel() {{
             const panel = document.getElementById('tracker-panel');
             panel.classList.remove('active');
-            trackerQueue.length = 0; // 清空队列
+            window.trackerQueue.length = 0; // 清空队列
         }}
 
-        function createTrackerChart(ipData, ipType, ipPos, targetDivId, dieId) {{
-            console.log(`[Tracker] createTrackerChart调用: dieId=${{dieId}}, ipType=${{ipType}}, ipPos=${{ipPos}}, targetDiv=${{targetDivId}}`);
-            console.log('[Tracker] ipData:', ipData);
-
+        window.createTrackerChart = function(ipData, ipType, ipPos, targetDivId, dieId) {{
             const trackerEvents = ipData.events;
             const totalAllocated = ipData.total_allocated;
             const totalConfig = ipData.total_config;
-
-            console.log('[Tracker] trackerEvents:', trackerEvents);
 
             // 准备数据
             const traces = [];
@@ -1022,21 +926,19 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
                 maxUsageCount = Math.max(maxUsageCount, ...trace.y);
             }});
 
-            // 布局
-            // 标题格式：单Die时不显示Die ID，多Die时显示
-            const titleText = (dieId !== undefined && dieId !== null) ? `${{ipType}}@${{ipPos}}@DIE${{dieId}}` : `${{ipType}}@${{ipPos}}`;
+            // 布局（尺寸与容器匹配）
             const layout = {{
-                title: titleText,
+                title: false,
                 xaxis: {{ title: '时间 (ns)' }},
                 yaxis: {{
                     title: '使用个数',
-                    range: [0, Math.max(Math.ceil(maxUsageCount * 1.1), 1)]
+                    range: [0, Math.max(Math.ceil(maxUsageCount * 1.1), 1)],
+                    dtick: 1,
+                    tick0: 0
                 }},
-                height: 450,
-                width: 600,
-                margin: {{ l: 60, r: 20, t: 80, b: 50 }},
+                margin: {{ l: 50, r: 15, t: 10, b: 40 }},
                 hovermode: 'closest',
-                legend: {{ orientation: 'h', y: 1.05, xanchor: 'center', x: 0.5 }}
+                legend: {{ orientation: 'h', y: 1.02, xanchor: 'center', x: 0.5 }}
             }};
 
             // 渲染图表
@@ -1047,7 +949,7 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             }}
 
             try {{
-                Plotly.newPlot(targetDivId, traces, layout, {{displayModeBar: false}});
+                Plotly.newPlot(targetDivId, traces, layout, {{displayModeBar: false, responsive: true}});
                 console.log(`[Tracker] 图表渲染成功: ${{targetDivId}}`);
             }} catch (error) {{
                 console.error(`[Tracker] 渲染失败:`, error);

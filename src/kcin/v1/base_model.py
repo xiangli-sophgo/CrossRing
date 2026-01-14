@@ -494,9 +494,15 @@ class BaseModel(StatsMixin, DataflowMixin):
 
         # 创建通道选择器（多通道时使用）
         if self._is_multi_channel():
-            strategy = getattr(self.config, "CHANNEL_SELECT_STRATEGY", "ip_id_based")
+            strategy = getattr(self.config, "CHANNEL_SELECT_STRATEGY", "ip_type_id_based")
             max_channels = max(len(self.req_networks), len(self.rsp_networks), len(self.data_networks))
-            self.channel_selector = ChannelSelector(strategy, max_channels)
+            channel_params = getattr(self.config, "CHANNEL_SELECT_PARAMS", {})
+            self.channel_selector = ChannelSelector(
+                strategy=strategy,
+                num_channels=max_channels,
+                num_cols=self.config.NUM_COL,
+                params=channel_params,
+            )
         else:
             self.channel_selector = None
         self.result_processor = SingleDieAnalyzer(
@@ -861,6 +867,9 @@ class BaseModel(StatsMixin, DataflowMixin):
         self.cycle = 0
         tail_time = 6
 
+        # 启用FIFO事件记录
+        StatisticalFIFO.enable_event_recording(True)
+
         try:
             while True:
                 # 检查取消标志
@@ -871,6 +880,9 @@ class BaseModel(StatsMixin, DataflowMixin):
 
                 self.cycle += 1
                 self.cycle_mod = self.cycle % self.config.CYCLES_PER_NS
+
+                # 更新StatisticalFIFO的当前cycle
+                StatisticalFIFO.set_current_cycle(self.cycle)
 
                 # Execute one step
                 self.step()

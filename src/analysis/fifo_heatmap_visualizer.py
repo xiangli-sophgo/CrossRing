@@ -46,9 +46,7 @@ class FIFOUtilizationCollector:
             fifo_stats = collector.process_fifo_usage_statistics(die_model)
 
             # 转换数据格式为热力图需要的格式
-            self.fifo_utilization_data[die_id] = self._convert_stats_to_heatmap_format(
-                fifo_stats, die_model, total_cycles
-            )
+            self.fifo_utilization_data[die_id] = self._convert_stats_to_heatmap_format(fifo_stats, die_model, total_cycles)
 
         return self.fifo_utilization_data
 
@@ -93,6 +91,7 @@ class FIFOUtilizationCollector:
                                 "etag_t2_rate": stats.get("etag_t2_rate", 0.0),
                                 "reverse_inject_count": 0,
                                 "reverse_inject_rate": 0.0,
+                                "depth_events": stats.get("depth_events", []),
                             }
 
                             # CH buffer特殊处理
@@ -171,7 +170,9 @@ class FIFOHeatmapVisualizer:
         self.config = config
         self.fifo_data = fifo_data
 
-    def create_interactive_heatmap(self, dies: Dict, die_layout: Optional[Dict] = None, die_rotations: Optional[Dict] = None, save_path: Optional[str] = None, show_fig: bool = False, return_fig_and_js: bool = False):
+    def create_interactive_heatmap(
+        self, dies: Dict, die_layout: Optional[Dict] = None, die_rotations: Optional[Dict] = None, save_path: Optional[str] = None, show_fig: bool = False, return_fig_and_js: bool = False
+    ):
         """
         创建交互式FIFO使用率热力图
 
@@ -202,7 +203,8 @@ class FIFOHeatmapVisualizer:
 
         # 如果只返回Figure和JavaScript
         if return_fig_and_js:
-            js_code = self._generate_custom_javascript(fifo_options, len(dies))
+            cycles_per_ns = self.config.CYCLES_PER_NS
+            js_code = self._generate_custom_javascript(fifo_options, len(dies), cycles_per_ns)
             return fig, js_code
 
         # 保存或显示
@@ -213,7 +215,8 @@ class FIFOHeatmapVisualizer:
             if show_fig:
                 import webbrowser
                 import os
-                webbrowser.open('file://' + os.path.abspath(save_path))
+
+                webbrowser.open("file://" + os.path.abspath(save_path))
             return save_path
         else:
             fig.show()
@@ -330,7 +333,9 @@ class FIFOHeatmapVisualizer:
         options.sort(key=sort_key)
         return options
 
-    def _create_plotly_figure(self, dies: Dict, die_layout: Optional[Dict], die_rotations: Optional[Dict], fifo_options: List[Tuple[str, str, str, str]], hide_subplot_titles: bool = False) -> go.Figure:
+    def _create_plotly_figure(
+        self, dies: Dict, die_layout: Optional[Dict], die_rotations: Optional[Dict], fifo_options: List[Tuple[str, str, str, str]], hide_subplot_titles: bool = False
+    ) -> go.Figure:
         """
         创建Plotly交互式图形 - 左侧热力图 + 右侧架构图
 
@@ -352,9 +357,7 @@ class FIFOHeatmapVisualizer:
 
         # 创建子图布局: 1行2列 (50% + 50%)
         subplot_titles = None if hide_subplot_titles else ("FIFO使用率热力图", "CrossRing架构图")
-        fig = make_subplots(
-            rows=1, cols=2, column_widths=[0.5, 0.5], subplot_titles=subplot_titles, specs=[[{"type": "scatter"}, {"type": "scatter"}]], horizontal_spacing=0.02
-        )
+        fig = make_subplots(rows=1, cols=2, column_widths=[0.3, 0.6], subplot_titles=subplot_titles, specs=[[{"type": "scatter"}, {"type": "scatter"}]], horizontal_spacing=0.0)
 
         # 计算画布范围（用于坐标轴设置）
         die_offsets, max_x, max_y = self._calculate_die_offsets_from_layout(die_layout, die_rotations, dies)
@@ -401,7 +404,7 @@ class FIFOHeatmapVisualizer:
             width=1800,
             height=900,
             plot_bgcolor="white",
-            margin=dict(t=80, b=20, l=20, r=20),  # 紧凑布局，减少边距
+            margin=dict(t=60, b=10, l=10, r=10),  # 紧凑布局，减少边距
             showlegend=False,
         )
 
@@ -764,12 +767,7 @@ class FIFOHeatmapVisualizer:
                             network_display = {"req": "Request", "rsp": "Response", "data": "Data"}
                             net_label = network_display.get(network_type, network_type)
 
-                            hover_text = (
-                                f"Die {die_id} - 节点 {node_id} ({orig_row},{orig_col})<br>"
-                                f"网络: {net_label}<br>"
-                                f"FIFO: {option_name}<br>"
-                                f"状态: 未配置"
-                            )
+                            hover_text = f"Die {die_id} - 节点 {node_id} ({orig_row},{orig_col})<br>" f"网络: {net_label}<br>" f"FIFO: {option_name}<br>" f"状态: 未配置"
                             all_hover_texts.append(hover_text)
 
                 # 根据模式配置colorscale和colorbar
@@ -779,14 +777,14 @@ class FIFOHeatmapVisualizer:
                     cmin = 0
                     cmax = global_max_flit_count
                     colorbar_title = "累计Flit数"
-                    colorbar_config = dict(title=colorbar_title, thickness=18, x=-0.02, tickformat="d")  # 整数格式，不显示小数点
+                    colorbar_config = dict(title=colorbar_title, thickness=15, x=-0.01, len=0.9, tickformat="d")  # 整数格式，不显示小数点
                 else:
                     # 使用率模式：0-100%
                     colorscale = "RdYlGn_r"
                     cmin = 0
                     cmax = 100
                     colorbar_title = "使用率 (%)"
-                    colorbar_config = dict(title=colorbar_title, thickness=18, tickmode="array", x=-0.02)
+                    colorbar_config = dict(title=colorbar_title, thickness=15, tickmode="array", x=-0.01, len=0.9)
 
                 # 创建单个Scatter trace（包含所有Die的所有节点）
                 trace = go.Scatter(
@@ -1082,7 +1080,7 @@ class FIFOHeatmapVisualizer:
         rs_x, rs_y = 0, 0
         rs_padding = 0.5
         fifo_gap = 1.2  # 同方向I/O之间的间距
-        dir_gap = 1.8   # 不同方向之间的间距
+        dir_gap = 1.8  # 不同方向之间的间距
         item_w, item_h = 1.2, 1.5  # FIFO项尺寸
 
         # === 1. 左上角: IP channels (竖向) ===
@@ -1201,13 +1199,14 @@ class FIFOHeatmapVisualizer:
             col=2,
         )
 
-    def _generate_custom_javascript(self, fifo_options: List[Tuple[str, str, str, str, int]], num_dies: int) -> str:
+    def _generate_custom_javascript(self, fifo_options: List[Tuple[str, str, str, str, int]], num_dies: int, cycles_per_ns: int = 1) -> str:
         """
         生成FIFO热力图的自定义JavaScript代码
 
         Args:
             fifo_options: FIFO选项列表（5元组：name, category, fifo_type, network_type, ch_idx）
             num_dies: Die数量
+            cycles_per_ns: 每纳秒的周期数，用于时间转换
 
         Returns:
             str: JavaScript代码字符串
@@ -1219,16 +1218,34 @@ class FIFOHeatmapVisualizer:
             key = f"{category}_{fifo_type}_{network_type}_{ch_idx}"
             fifo_map[key] = idx
 
+        # 构建depth_events数据结构
+        # key: "die_node_category_fifo_type_network_type_ch_idx" -> {"events": [...], "capacity": N}
+        fifo_events_data = {}
+        total_events_count = 0
+        for die_id, networks_data in self.fifo_data.items():
+            for network_type, channels_data in networks_data.items():
+                for ch_idx, die_data in channels_data.items():
+                    for category in ["IQ", "RB", "EQ", "IQ_CH", "EQ_CH", "RS_IN", "RS_OUT"]:
+                        category_data = die_data.get(category, {})
+                        for node_pos, fifo_types in category_data.items():
+                            if isinstance(fifo_types, dict):
+                                for fifo_type, fifo_info in fifo_types.items():
+                                    if isinstance(fifo_info, dict) and "depth_events" in fifo_info:
+                                        events = fifo_info.get("depth_events", [])
+                                        capacity = fifo_info.get("capacity", 0)
+                                        # 只保存有事件的FIFO
+                                        if events:
+                                            key = f"{die_id}_{node_pos}_{category}_{fifo_type}_{network_type}_{ch_idx}"
+                                            fifo_events_data[key] = {"events": events, "capacity": capacity}
+                                            total_events_count += len(events)
+
         # 检测每个网络类型有多少个通道
         channel_counts = {"req": set(), "rsp": set(), "data": set()}
         for _, _, _, network_type, ch_idx in fifo_options:
             channel_counts[network_type].add(ch_idx)
 
         # 转换为有序列表
-        channel_info = {
-            net_type: sorted(list(channels))
-            for net_type, channels in channel_counts.items()
-        }
+        channel_info = {net_type: sorted(list(channels)) for net_type, channels in channel_counts.items()}
         max_channels = max(len(chs) for chs in channel_info.values()) if channel_info else 1
 
         # 计算trace索引
@@ -1237,9 +1254,16 @@ class FIFOHeatmapVisualizer:
         # 创建FIFO选项的详细信息（用于JavaScript）
         fifo_options_js = [[opt[0], opt[1], opt[2], opt[3], opt[4]] for opt in fifo_options]
 
+        # 序列化fifo_events_data为JSON
+        import json
+
+        fifo_events_json = json.dumps(fifo_events_data)
+
         # 生成JavaScript代码
         js_code = f"""
 <script>
+    console.log('[FIFO热力图] JavaScript开始执行');
+
     // FIFO选项映射（包含网络类型和通道索引）
     const fifoMap = {str(fifo_map).replace("'", '"')};
     const fifoOptionsData = {str(fifo_options_js).replace("'", '"')};
@@ -1248,6 +1272,14 @@ class FIFOHeatmapVisualizer:
     const numHeatmapTraces = {num_heatmap_traces};
     const channelInfo = {str(channel_info).replace("'", '"')};  // {{req: [0,1], rsp: [0], data: [0,1,2]}}
     const maxChannels = {max_channels};
+
+    console.log('[FIFO热力图] 基础变量已初始化, numFifoOptions:', numFifoOptions);
+
+    // FIFO深度事件数据（用于曲线图）
+    const fifoEventsData = {fifo_events_json};
+    const cyclesPerNs = {cycles_per_ns};
+
+    console.log('[FIFO热力图] 事件数据已加载, FIFO数量:', Object.keys(fifoEventsData).length);
 
     // 当前选中的状态
     let currentFifoIndex = 0;  // 默认第一个FIFO
@@ -1259,18 +1291,38 @@ class FIFOHeatmapVisualizer:
 
     // 等待Plotly加载完成
     document.addEventListener('DOMContentLoaded', function() {{
+        console.log('[FIFO热力图] DOMContentLoaded事件触发');
         setTimeout(function() {{
+            console.log('[FIFO热力图] setTimeout回调执行');
             const plotDiv = document.getElementsByClassName('plotly-graph-div')[0];
             if (!plotDiv) return;
+
+            // 初始化图表面板（复用tracker-panel或创建新的）
+            initChartPanel();
 
             // 初始化当前FIFO的category和type
             updateCurrentFifoInfo();
 
-            // 监听架构图点击事件
+            // 监听热力图点击事件（显示曲线）
             plotDiv.on('plotly_click', function(data) {{
                 const clickedPoint = data.points[0];
                 const traceIndex = clickedPoint.curveNumber;
                 console.log('点击trace索引:', traceIndex, '热力图trace数:', numHeatmapTraces);
+
+                // 点击热力图节点时显示曲线
+                if (traceIndex < numHeatmapTraces) {{
+                    const pointIndex = clickedPoint.pointIndex;
+                    const hoverText = clickedPoint.hovertext || '';
+                    // 解析hover文本获取节点信息
+                    const dieMatch = hoverText.match(/Die (\\d+)/);
+                    const nodeMatch = hoverText.match(/节点 (\\d+)/);
+                    if (dieMatch && nodeMatch) {{
+                        const dieId = parseInt(dieMatch[1]);
+                        const nodePos = parseInt(nodeMatch[1]);
+                        showFifoChart(dieId, nodePos, currentCategory, currentFifoType, currentNetworkType, currentChannelIdx);
+                    }}
+                    return;  // 不处理架构图切换
+                }}
 
                 if (traceIndex >= numHeatmapTraces) {{
                     const customdata = clickedPoint.customdata;
@@ -1588,9 +1640,330 @@ class FIFOHeatmapVisualizer:
                 }});
             }}
 
-            // 初始化时高亮默认FIFO
-            updateArchitectureHighlight();
-        }}, 500);  // 延迟500ms确保Plotly完全加载
+            // 初始化图表面板（复用tracker-panel或创建新的）
+            function initChartPanel() {{
+                // 检查是否已存在tracker-panel（由tracker_html_injector创建）
+                if (document.getElementById('tracker-panel')) {{
+                    console.log('[FIFO] 复用已存在的tracker-panel');
+                    return;
+                }}
+
+                // 如果没有tracker-panel，创建一个新的chart-panel
+                if (document.getElementById('chart-panel')) return;
+
+                // 添加样式
+                const style = document.createElement('style');
+                style.textContent = `
+                    .chart-section {{
+                        position: fixed;
+                        right: 10px;
+                        top: 10px;
+                        width: 920px;
+                        max-width: 95vw;
+                        max-height: 95vh;
+                        background: white;
+                        padding: 15px;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                        display: none;
+                        overflow: auto;
+                        z-index: 10000;
+                        transition: width 0.3s ease;
+                    }}
+                    .chart-section.narrow {{ width: 480px; }}
+                    .chart-section.active {{ display: block; }}
+                    .chart-grid {{
+                        display: grid;
+                        grid-template-columns: repeat(2, 440px);
+                        grid-auto-rows: 320px;
+                        grid-auto-flow: row;
+                        gap: 10px;
+                        margin-top: 5px;
+                        max-height: calc(95vh - 50px);
+                        justify-content: start;
+                    }}
+                    .chart-grid[data-count="1"] {{ grid-template-columns: 440px; justify-content: center; }}
+                    .chart-grid[data-count="2"] {{ grid-template-columns: repeat(2, 440px); justify-content: center; }}
+                    .chart-item {{
+                        position: relative;
+                        background: #f5f5f5;
+                        padding: 5px;
+                        border-radius: 6px;
+                        border: 1px solid #ddd;
+                        width: 440px;
+                        height: 320px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    }}
+                    .chart-item-chart {{ width: 430px; height: 310px; flex-shrink: 0; }}
+                    .close-chart-btn {{
+                        position: absolute;
+                        top: 5px;
+                        right: 5px;
+                        cursor: pointer;
+                        background: #ff9800;
+                        color: white;
+                        border: none;
+                        width: 24px;
+                        height: 24px;
+                        border-radius: 50%;
+                        font-size: 16px;
+                        line-height: 1;
+                        padding: 0;
+                        z-index: 1;
+                    }}
+                    .close-chart-btn:hover {{ background: #f57c00; }}
+                    .close-all-btn {{
+                        position: absolute;
+                        top: 8px;
+                        right: 8px;
+                        cursor: pointer;
+                        background: #f44336;
+                        color: white;
+                        border: none;
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 50%;
+                        font-size: 18px;
+                        line-height: 1;
+                        padding: 0;
+                    }}
+                    .close-all-btn:hover {{ background: #d32f2f; }}
+                `;
+                document.head.appendChild(style);
+
+                // 创建面板（使用安全的DOM方法）
+                const panel = document.createElement('div');
+                panel.className = 'chart-section';
+                panel.id = 'chart-panel';
+
+                const closeAllBtn = document.createElement('button');
+                closeAllBtn.className = 'close-all-btn';
+                closeAllBtn.textContent = '×';
+                closeAllBtn.title = '关闭全部';
+                closeAllBtn.onclick = function() {{ window.closeChartPanel(); }};
+
+                const container = document.createElement('div');
+                container.className = 'chart-grid';
+                container.id = 'chart-container';
+
+                panel.appendChild(closeAllBtn);
+                panel.appendChild(container);
+                document.body.appendChild(panel);
+
+                // 初始化全局队列
+                if (!window.chartQueue) {{
+                    window.chartQueue = [];
+                }}
+            }}
+
+            // 更新所有图表（全局函数，供tracker也能调用）
+            window.updateAllCharts = function() {{
+                // 优先使用tracker-panel（如果存在）
+                let panel = document.getElementById('tracker-panel');
+                let container = document.getElementById('tracker-container');
+                let queue = window.trackerQueue;
+                let itemClass = 'tracker-item';
+                let chartClass = 'tracker-chart';
+
+                // 如果没有tracker-panel，使用chart-panel
+                if (!panel) {{
+                    panel = document.getElementById('chart-panel');
+                    container = document.getElementById('chart-container');
+                    queue = window.chartQueue;
+                    itemClass = 'chart-item';
+                    chartClass = 'chart-item-chart';
+                }}
+
+                if (!panel || !container || !queue) return;
+
+                if (queue.length === 0) {{
+                    panel.classList.remove('active');
+                    return;
+                }}
+
+                panel.classList.add('active');
+                if (queue.length === 1) {{
+                    panel.classList.add('narrow');
+                }} else {{
+                    panel.classList.remove('narrow');
+                }}
+
+                // 清空容器
+                while (container.firstChild) {{
+                    container.removeChild(container.firstChild);
+                }}
+                container.setAttribute('data-count', queue.length);
+
+                // 动态创建chart-item
+                queue.forEach((item, index) => {{
+                    const chartItem = document.createElement('div');
+                    chartItem.className = itemClass;
+
+                    const closeBtn = document.createElement('button');
+                    closeBtn.className = panel.id === 'tracker-panel' ? 'close-item-btn' : 'close-chart-btn';
+                    closeBtn.textContent = '×';
+                    closeBtn.onclick = () => closeChartItem(index);
+
+                    const chartDiv = document.createElement('div');
+                    chartDiv.id = `chart-item-${{index}}`;
+                    chartDiv.className = chartClass;
+
+                    chartItem.appendChild(closeBtn);
+                    chartItem.appendChild(chartDiv);
+                    container.appendChild(chartItem);
+
+                    setTimeout(() => {{
+                        if (item.type === 'fifo') {{
+                            renderFifoChart(item, `chart-item-${{index}}`);
+                        }} else if (item.type === 'tracker' && window.createTrackerChart) {{
+                            window.createTrackerChart(item.ipData, item.ipType, item.ipPos, `chart-item-${{index}}`, item.dieId);
+                        }}
+                    }}, 10);
+                }});
+            }}
+
+            function closeChartItem(index) {{
+                let queue = window.trackerQueue || window.chartQueue;
+                if (queue && index < queue.length) {{
+                    queue.splice(index, 1);
+                    window.updateAllCharts();
+                }}
+            }}
+
+            window.closeChartPanel = function() {{
+                const panel = document.getElementById('tracker-panel') || document.getElementById('chart-panel');
+                if (panel) panel.classList.remove('active');
+                if (window.trackerQueue) window.trackerQueue.length = 0;
+                if (window.chartQueue) window.chartQueue.length = 0;
+            }};
+
+            // 渲染FIFO深度曲线
+            function renderFifoChart(item, targetDivId) {{
+                const {{ times, depths, capacity, title }} = item;
+
+                const trace = {{
+                    x: times,
+                    y: depths,
+                    mode: 'lines',
+                    line: {{ shape: 'hv', color: '#2196F3', width: 1.5 }},
+                    name: '深度',
+                    fill: 'tozeroy',
+                    fillcolor: 'rgba(33, 150, 243, 0.2)',
+                    hovertemplate: '时间: %{{x:.2f}} ns<br>深度: %{{y}}<extra></extra>'
+                }};
+
+                const layout = {{
+                    title: false,
+                    xaxis: {{ title: '时间 (ns)', showgrid: true, gridcolor: '#eee' }},
+                    yaxis: {{
+                        title: 'FIFO深度',
+                        range: [0, Math.max(capacity * 1.1, Math.max(...depths) * 1.1, 1)],
+                        showgrid: true,
+                        gridcolor: '#eee',
+                        dtick: 1,
+                        tick0: 0
+                    }},
+                    shapes: [{{
+                        type: 'line',
+                        x0: times[0],
+                        x1: times[times.length - 1],
+                        y0: capacity,
+                        y1: capacity,
+                        line: {{ dash: 'dash', color: 'red', width: 2 }}
+                    }}],
+                    annotations: [{{
+                        x: times[times.length - 1],
+                        y: capacity,
+                        text: `容量: ${{capacity}}`,
+                        showarrow: false,
+                        xanchor: 'right',
+                        yanchor: 'bottom',
+                        font: {{ color: 'red', size: 12 }}
+                    }}],
+                    margin: {{ t: 10, b: 50, l: 60, r: 20 }},
+                    showlegend: false,
+                    hovermode: 'closest'
+                }};
+
+                Plotly.newPlot(targetDivId, [trace], layout, {{ responsive: true }});
+            }}
+
+            // 显示FIFO深度曲线（添加到共享面板）
+            function showFifoChart(dieId, nodePos, category, fifoType, networkType, chIdx) {{
+                const key = `${{dieId}}_${{nodePos}}_${{category}}_${{fifoType}}_${{networkType}}_${{chIdx}}`;
+                console.log('查找FIFO事件数据, key:', key);
+
+                const eventData = fifoEventsData[key];
+                const capacity = eventData ? (eventData.capacity || 1) : 1;
+
+                // 从事件构建时序数据
+                let times = [0];
+                let depths = [0];
+
+                if (eventData && eventData.events && eventData.events.length > 0) {{
+                    const events = eventData.events;
+                    let currentDepth = 0;
+
+                    for (const [cycle, delta] of events) {{
+                        currentDepth += delta;
+                        times.push(cycle / cyclesPerNs);  // 转换为ns
+                        depths.push(currentDepth);
+                    }}
+
+                    // 添加最后一个点（保持最后深度）
+                    if (times.length > 1) {{
+                        const lastTime = times[times.length - 1];
+                        times.push(lastTime + 1);
+                        depths.push(currentDepth);
+                    }}
+                }} else {{
+                    // 无事件数据时，画一条0横线
+                    times = [0, 100];
+                    depths = [0, 0];
+                }}
+
+                // 生成标题
+                const networkLabel = {{'req': 'REQ', 'rsp': 'RSP', 'data': 'DATA'}}[networkType] || networkType;
+                const title = `Die ${{dieId}} 节点${{nodePos}} - ${{category}}-${{fifoType}} (${{networkLabel}} Ch${{chIdx}})`;
+
+                // 使用全局队列（优先使用trackerQueue，否则使用chartQueue）
+                let queue = window.trackerQueue || window.chartQueue;
+                if (!queue) {{
+                    window.chartQueue = [];
+                    queue = window.chartQueue;
+                }}
+
+                const MAX_CHARTS = 4;
+
+                // 检查是否已存在相同的FIFO图表
+                const existingIndex = queue.findIndex(item => item.type === 'fifo' && item.key === key);
+                if (existingIndex >= 0) {{
+                    // 已存在，移除旧的
+                    queue.splice(existingIndex, 1);
+                }}
+
+                // 如果队列已满，移除最旧的
+                if (queue.length >= MAX_CHARTS) {{
+                    queue.shift();
+                }}
+
+                // 添加新的FIFO图表数据
+                queue.push({{
+                    type: 'fifo',
+                    key: key,
+                    times: times,
+                    depths: depths,
+                    capacity: capacity,
+                    title: title,
+                    dieId: dieId
+                }});
+
+                // 更新显示
+                window.updateAllCharts();
+            }}
+        }}, 500);
     }});
 </script>
 """
@@ -1609,8 +1982,11 @@ class FIFOHeatmapVisualizer:
         # 先生成基础HTML（使用本地内嵌Plotly，避免CDN加载失败）
         html_string = fig.to_html(include_plotlyjs=True)
 
+        # 获取cycles_per_ns配置
+        cycles_per_ns = self.config.CYCLES_PER_NS
+
         # 生成自定义JavaScript代码
-        js_code = self._generate_custom_javascript(fifo_options, num_dies)
+        js_code = self._generate_custom_javascript(fifo_options, num_dies, cycles_per_ns)
 
         # 在</body>之前注入JavaScript
         html_string = html_string.replace("</body>", js_code + "</body>")
@@ -1620,7 +1996,16 @@ class FIFOHeatmapVisualizer:
             f.write(html_string)
 
 
-def create_fifo_heatmap(dies: Dict, config, total_cycles: int, die_layout: Optional[Dict] = None, die_rotations: Optional[Dict] = None, save_path: Optional[str] = None, show_fig: bool = False, return_fig_and_js: bool = False):
+def create_fifo_heatmap(
+    dies: Dict,
+    config,
+    total_cycles: int,
+    die_layout: Optional[Dict] = None,
+    die_rotations: Optional[Dict] = None,
+    save_path: Optional[str] = None,
+    show_fig: bool = False,
+    return_fig_and_js: bool = False,
+):
     """
     便捷函数：一键创建FIFO使用率热力图
 

@@ -27,6 +27,7 @@ MAX_GLOBAL_WORKERS = 4
 
 class TaskStatus(str, Enum):
     """任务状态"""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -37,6 +38,7 @@ class TaskStatus(str, Enum):
 @dataclass
 class SimulationTask:
     """仿真任务"""
+
     task_id: str
     mode: str  # kcin or dcin
     topology: str
@@ -87,65 +89,63 @@ def _run_single_simulation(sim_params: Dict[str, Any]) -> Dict[str, Any]:
     """
     from .simulation_engine import SimulationEngine, SimulationMode
 
-    traffic_file = sim_params['traffic_file']
-    combination_index = sim_params.get('combination_index')
+    traffic_file = sim_params["traffic_file"]
+    combination_index = sim_params.get("combination_index")
     try:
         # 合并配置覆盖项: base config_overrides + combination_overrides
-        config_overrides = sim_params.get('config_overrides') or {}
-        combination_overrides = sim_params.get('combination_overrides') or {}
+        config_overrides = sim_params.get("config_overrides") or {}
+        combination_overrides = sim_params.get("combination_overrides") or {}
         merged_overrides = {**config_overrides, **combination_overrides}
 
         engine = SimulationEngine(
-            mode=SimulationMode(sim_params['mode']),
-            config_path=sim_params['config_path'],
-            topology=sim_params['topology'],
+            mode=SimulationMode(sim_params["mode"]),
+            config_path=sim_params["config_path"],
+            topology=sim_params["topology"],
             verbose=0,
             config_overrides=merged_overrides if merged_overrides else None,
-            die_config_path=sim_params.get('die_config_path'),
-            die_config_overrides=sim_params.get('die_config_overrides'),
+            die_config_path=sim_params.get("die_config_path"),
+            die_config_overrides=sim_params.get("die_config_overrides"),
         )
 
         engine.setup(
-            traffic_file_path=sim_params['traffic_file_path'],
+            traffic_file_path=sim_params["traffic_file_path"],
             traffic_files=[traffic_file],
-            show_result_analysis=sim_params.get('show_result', False),
+            show_result_analysis=sim_params.get("show_result", False),
         )
 
-        result = engine.run_sync(max_time=sim_params['max_time'])
-        result.results['traffic_file'] = traffic_file
+        result = engine.run_sync(max_time=sim_params["max_time"])
+        result.results["traffic_file"] = traffic_file
 
         # 保存到数据库（仅在成功时保存）
         experiment_id = None
         print(f"[TaskManager] save_to_db={sim_params.get('save_to_db')}, status={result.status.value}")
-        if sim_params.get('save_to_db') and result.status.value == 'completed':
-            exp_name = sim_params.get('experiment_name') or '仿真实验'
+        if sim_params.get("save_to_db") and result.status.value == "completed":
+            exp_name = sim_params.get("experiment_name") or "仿真实验"
             print(f"[TaskManager] 准备保存到数据库: {exp_name}")
-            experiment_id = engine.save_to_database(
-                experiment_name=exp_name,
-                description=sim_params.get('experiment_description')
-            )
+            experiment_id = engine.save_to_database(experiment_name=exp_name, description=sim_params.get("experiment_description"))
             print(f"[TaskManager] 保存结果: experiment_id={experiment_id}")
 
         return {
-            'traffic_file': traffic_file,
-            'combination_index': combination_index,
-            'status': result.status.value,
-            'duration': result.duration_seconds,
-            'error': result.error,
-            'experiment_id': experiment_id,
-            'success': True,
+            "traffic_file": traffic_file,
+            "combination_index": combination_index,
+            "status": result.status.value,
+            "duration": result.duration_seconds,
+            "error": result.error,
+            "experiment_id": experiment_id,
+            "success": True,
         }
 
     except Exception as e:
         import traceback
+
         return {
-            'traffic_file': traffic_file,
-            'combination_index': combination_index,
-            'status': 'failed',
-            'duration': 0,
-            'error': f"{str(e)}\n{traceback.format_exc()}",
-            'experiment_id': None,
-            'success': False,
+            "traffic_file": traffic_file,
+            "combination_index": combination_index,
+            "status": "failed",
+            "duration": 0,
+            "error": f"{str(e)}\n{traceback.format_exc()}",
+            "experiment_id": None,
+            "success": False,
         }
 
 
@@ -306,9 +306,9 @@ class TaskManager:
             self._save_history()
 
         # 通知订阅者（线程安全方式）
-        self._notify_subscribers_sync(task_id, task, level='task_level')
+        self._notify_subscribers_sync(task_id, task, level="task_level")
 
-    def _notify_subscribers_sync(self, task_id: str, task: SimulationTask, level: str = 'task_level'):
+    def _notify_subscribers_sync(self, task_id: str, task: SimulationTask, level: str = "task_level"):
         """
         线程安全的同步通知方法
         从普通线程中调用，自动调度到事件循环
@@ -320,14 +320,11 @@ class TaskManager:
         except RuntimeError:
             # 没有运行中的事件循环（在子线程中），使用保存的主事件循环
             if self._main_loop and self._main_loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._notify_subscribers(task_id, task, level),
-                    self._main_loop
-                )
+                asyncio.run_coroutine_threadsafe(self._notify_subscribers(task_id, task, level), self._main_loop)
             else:
                 logger.warning(f"无法通知订阅者（任务 {task_id}）: 主事件循环未设置或未运行")
 
-    async def _notify_subscribers(self, task_id: str, task: SimulationTask, level: str = 'task_level'):
+    async def _notify_subscribers(self, task_id: str, task: SimulationTask, level: str = "task_level"):
         """
         通知任务状态变更
 
@@ -344,15 +341,16 @@ class TaskManager:
                 await queue.put(task)
 
         # 只有任务级别更新才通知全局订阅者
-        if level == 'task_level' and self._global_subscribers:
+        if level == "task_level" and self._global_subscribers:
             global_update = {
-                'task_id': task.task_id,
-                'status': task.status.value,
-                'progress': task.progress,
-                'message': task.message,
-                'experiment_name': task.experiment_name,
-                'current_file': task.current_file,
-                'error': task.error,
+                "task_id": task.task_id,
+                "status": task.status.value,
+                "progress": task.progress,
+                "message": task.message,
+                "experiment_name": task.experiment_name,
+                "current_file": task.current_file,
+                "error": task.error,
+                "sim_details": task.sim_details,
             }
             for queue in self._global_subscribers:
                 await queue.put(global_update)
@@ -399,11 +397,13 @@ class TaskManager:
             execution_units = []
             for traffic_file in task.traffic_files:
                 for combo_idx, combo in enumerate(combinations):
-                    execution_units.append({
-                        'traffic_file': traffic_file,
-                        'combination': combo,
-                        'combination_index': combo_idx if task.sweep_combinations else None,
-                    })
+                    execution_units.append(
+                        {
+                            "traffic_file": traffic_file,
+                            "combination": combo,
+                            "combination_index": combo_idx if task.sweep_combinations else None,
+                        }
+                    )
 
             total_units = len(execution_units)
             results_list = []
@@ -437,21 +437,21 @@ class TaskManager:
             sim_params_list = []
             for unit in execution_units:
                 sim_params = {
-                    'mode': task.mode,
-                    'config_path': task.config_path,
-                    'topology': task.topology,
-                    'config_overrides': task.config_overrides,
-                    'combination_overrides': unit['combination'],
-                    'combination_index': unit['combination_index'],
-                    'die_config_path': task.die_config_path,
-                    'die_config_overrides': task.die_config_overrides,
-                    'traffic_file_path': task.traffic_file_path,
-                    'traffic_file': unit['traffic_file'],
-                    'max_time': task.max_time,
-                    'save_to_db': task.save_to_db,
-                    'experiment_name': task.experiment_name,
-                    'experiment_description': task.experiment_description,
-                    'show_result': not task.save_to_db,
+                    "mode": task.mode,
+                    "config_path": task.config_path,
+                    "topology": task.topology,
+                    "config_overrides": task.config_overrides,
+                    "combination_overrides": unit["combination"],
+                    "combination_index": unit["combination_index"],
+                    "die_config_path": task.die_config_path,
+                    "die_config_overrides": task.die_config_overrides,
+                    "traffic_file_path": task.traffic_file_path,
+                    "traffic_file": unit["traffic_file"],
+                    "max_time": task.max_time,
+                    "save_to_db": task.save_to_db,
+                    "experiment_name": task.experiment_name,
+                    "experiment_description": task.experiment_description,
+                    "show_result": not task.save_to_db,
                 }
                 sim_params_list.append(sim_params)
 
@@ -490,10 +490,7 @@ class TaskManager:
                     executor = ProcessPoolExecutor(max_workers=max_workers)
                     task._executor = executor  # 保存引用以便取消
 
-                    future_to_file = {
-                        executor.submit(_run_single_simulation, params): params['traffic_file']
-                        for params in sim_params_list
-                    }
+                    future_to_file = {executor.submit(_run_single_simulation, params): params["traffic_file"] for params in sim_params_list}
                     task._futures = list(future_to_file.keys())  # 保存 futures 引用
 
                     for future in as_completed(future_to_file, timeout=TASK_TIMEOUT):
@@ -510,37 +507,41 @@ class TaskManager:
                             completed_results.append(result)
                         except FuturesTimeoutError:
                             # 单个任务超时
-                            file_name = future_to_file.get(future, 'unknown')
+                            file_name = future_to_file.get(future, "unknown")
                             timed_out_files.append(file_name)
                             logger.warning(f"仿真任务超时: {file_name}")
-                            completed_results.append({
-                                'traffic_file': file_name,
-                                'status': 'failed',
-                                'duration': 0,
-                                'error': '任务执行超时',
-                                'experiment_id': None,
-                                'success': False,
-                            })
+                            completed_results.append(
+                                {
+                                    "traffic_file": file_name,
+                                    "status": "failed",
+                                    "duration": 0,
+                                    "error": "任务执行超时",
+                                    "experiment_id": None,
+                                    "success": False,
+                                }
+                            )
                         except Exception as e:
                             # 其他异常
-                            file_name = future_to_file.get(future, 'unknown')
+                            file_name = future_to_file.get(future, "unknown")
                             logger.error(f"仿真任务异常: {file_name} - {e}")
-                            completed_results.append({
-                                'traffic_file': file_name,
-                                'status': 'failed',
-                                'duration': 0,
-                                'error': str(e),
-                                'experiment_id': None,
-                                'success': False,
-                            })
+                            completed_results.append(
+                                {
+                                    "traffic_file": file_name,
+                                    "status": "failed",
+                                    "duration": 0,
+                                    "error": str(e),
+                                    "experiment_id": None,
+                                    "success": False,
+                                }
+                            )
 
                         # 更新进度
                         completed_count = len(completed_results)
                         task.progress = int((completed_count / total_units) * 100)
                         last_result = completed_results[-1] if completed_results else {}
                         # 构建当前文件显示（包含组合索引）
-                        current_display = last_result.get('traffic_file', '')
-                        if last_result.get('combination_index') is not None:
+                        current_display = last_result.get("traffic_file", "")
+                        if last_result.get("combination_index") is not None:
                             current_display = f"{current_display} [组合{last_result['combination_index']}]"
                         task.sim_details = {
                             "file_index": completed_count,
@@ -558,12 +559,12 @@ class TaskManager:
                         }
 
                         # 通知订阅者（包括全局订阅者）
-                        self._notify_subscribers_sync(task_id, task, level='task_level')
+                        self._notify_subscribers_sync(task_id, task, level="task_level")
 
                         # 保存最后一个experiment_id
-                        if last_result.get('experiment_id'):
+                        if last_result.get("experiment_id"):
                             nonlocal experiment_id
-                            experiment_id = last_result['experiment_id']
+                            experiment_id = last_result["experiment_id"]
                 except BrokenPipeError:
                     logger.warning(f"任务 {task.task_id} 进程池管道断开，可能是父进程被终止")
                 except BrokenExecutor:
@@ -582,17 +583,17 @@ class TaskManager:
 
             # 合并结果
             combined_results = {
-                'total_files': total_units,
-                'completed_files': len([r for r in results_list if r['status'] == 'completed']),
-                'failed_files': len([r for r in results_list if r['status'] == 'failed']),
-                'experiment_id': experiment_id,
-                'file_results': [
+                "total_files": total_units,
+                "completed_files": len([r for r in results_list if r["status"] == "completed"]),
+                "failed_files": len([r for r in results_list if r["status"] == "failed"]),
+                "experiment_id": experiment_id,
+                "file_results": [
                     {
-                        'file': r['traffic_file'],
-                        'combination_index': r.get('combination_index'),
-                        'status': r['status'],
-                        'duration': r['duration'],
-                        'error': r['error'],
+                        "file": r["traffic_file"],
+                        "combination_index": r.get("combination_index"),
+                        "status": r["status"],
+                        "duration": r["duration"],
+                        "error": r["error"],
                     }
                     for r in results_list
                 ],
@@ -601,7 +602,7 @@ class TaskManager:
             # 检查是否被取消
             if task.status == TaskStatus.CANCELLED:
                 completed_count = len(results_list)
-                combined_results['cancelled'] = True
+                combined_results["cancelled"] = True
                 self.update_task_status(
                     task_id,
                     TaskStatus.CANCELLED,
@@ -628,6 +629,7 @@ class TaskManager:
             )
         except Exception as e:
             import traceback
+
             error_msg = f"{str(e)}\n{traceback.format_exc()}"
             logger.error(f"仿真任务失败 [{task_id}]: {error_msg}")
             self.update_task_status(
@@ -648,9 +650,9 @@ class TaskManager:
         """
         from .simulation_engine import SimulationEngine, SimulationMode
 
-        traffic_file = execution_unit['traffic_file']
-        combination = execution_unit.get('combination', {})
-        combination_index = execution_unit.get('combination_index')
+        traffic_file = execution_unit["traffic_file"]
+        combination = execution_unit.get("combination", {})
+        combination_index = execution_unit.get("combination_index")
 
         # 构建显示名称
         display_name = traffic_file
@@ -698,14 +700,8 @@ class TaskManager:
                 # 计算总体进度
                 if data.get("max_time", 0) > 0:
                     task.progress = int((data.get("current_time", 0) / data["max_time"]) * 100)
-                # 通知 WebSocket 订阅者（线程安全方式）
-                # 使用 sim_level 级别，只通知单任务订阅者（不通知全局订阅者）
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(self._notify_subscribers(task_id, task, level='sim_level'))
-                except RuntimeError:
-                    # 没有运行中的事件循环，跳过通知（进度数据已更新到 task 对象）
-                    pass
+                # 通知 WebSocket 订阅者（线程安全方式，使用主事件循环）
+                self._notify_subscribers_sync(task_id, task, level="task_level")
 
             engine.set_progress_callback(on_progress)
             task._current_engine = engine
@@ -717,16 +713,13 @@ class TaskManager:
             )
 
             result = await engine.run_async(max_time=task.max_time)
-            result.results['traffic_file'] = traffic_file
+            result.results["traffic_file"] = traffic_file
 
             # 保存到数据库（仅在成功时保存）
             experiment_id = None
-            if task.save_to_db and result.status.value == 'completed':
-                exp_name = task.experiment_name or '仿真实验'
-                experiment_id = engine.save_to_database(
-                    experiment_name=exp_name,
-                    description=task.experiment_description
-                )
+            if task.save_to_db and result.status.value == "completed":
+                exp_name = task.experiment_name or "仿真实验"
+                experiment_id = engine.save_to_database(experiment_name=exp_name, description=task.experiment_description)
 
             # 检查是否被取消
             if task.status == TaskStatus.CANCELLED:
@@ -738,16 +731,18 @@ class TaskManager:
                 return
 
             combined_results = {
-                'total_files': 1,
-                'completed_files': 1 if result.status.value == 'completed' else 0,
-                'failed_files': 0 if result.status.value == 'completed' else 1,
-                'experiment_id': experiment_id,
-                'file_results': [{
-                    'file': traffic_file,
-                    'status': result.status.value,
-                    'duration': result.duration_seconds,
-                    'error': result.error,
-                }],
+                "total_files": 1,
+                "completed_files": 1 if result.status.value == "completed" else 0,
+                "failed_files": 0 if result.status.value == "completed" else 1,
+                "experiment_id": experiment_id,
+                "file_results": [
+                    {
+                        "file": traffic_file,
+                        "status": result.status.value,
+                        "duration": result.duration_seconds,
+                        "error": result.error,
+                    }
+                ],
             }
 
             self.update_task_status(
@@ -760,6 +755,7 @@ class TaskManager:
 
         except Exception as e:
             import traceback
+
             error_msg = f"{str(e)}\n{traceback.format_exc()}"
             logger.error(f"单文件仿真任务失败 [{task_id}]: {error_msg}")
             self.update_task_status(
@@ -834,18 +830,18 @@ class TaskManager:
             return
 
         try:
-            with open(self._history_file, 'r', encoding='utf-8') as f:
+            with open(self._history_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             for task_data in data:
                 # 转换状态枚举
-                task_data['status'] = TaskStatus(task_data['status'])
+                task_data["status"] = TaskStatus(task_data["status"])
                 # 转换时间字段
-                task_data['created_at'] = datetime.fromisoformat(task_data['created_at'])
-                if task_data.get('started_at'):
-                    task_data['started_at'] = datetime.fromisoformat(task_data['started_at'])
-                if task_data.get('completed_at'):
-                    task_data['completed_at'] = datetime.fromisoformat(task_data['completed_at'])
+                task_data["created_at"] = datetime.fromisoformat(task_data["created_at"])
+                if task_data.get("started_at"):
+                    task_data["started_at"] = datetime.fromisoformat(task_data["started_at"])
+                if task_data.get("completed_at"):
+                    task_data["completed_at"] = datetime.fromisoformat(task_data["completed_at"])
 
                 task = SimulationTask(**task_data)
                 self._tasks[task.task_id] = task
@@ -859,10 +855,7 @@ class TaskManager:
 
         try:
             # 只保存已完成的任务（最近100条）
-            completed_tasks = [
-                t for t in self._tasks.values()
-                if t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
-            ]
+            completed_tasks = [t for t in self._tasks.values() if t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)]
             completed_tasks.sort(key=lambda t: t.created_at, reverse=True)
             tasks_to_save = completed_tasks[:100]
 
@@ -870,28 +863,25 @@ class TaskManager:
             for task in tasks_to_save:
                 task_dict = asdict(task)
                 # 移除不可序列化的字段
-                task_dict.pop('_current_engine', None)
+                task_dict.pop("_current_engine", None)
                 # 转换枚举为字符串
-                task_dict['status'] = task.status.value
+                task_dict["status"] = task.status.value
                 # 转换时间为ISO字符串
-                task_dict['created_at'] = task.created_at.isoformat()
+                task_dict["created_at"] = task.created_at.isoformat()
                 if task.started_at:
-                    task_dict['started_at'] = task.started_at.isoformat()
+                    task_dict["started_at"] = task.started_at.isoformat()
                 if task.completed_at:
-                    task_dict['completed_at'] = task.completed_at.isoformat()
+                    task_dict["completed_at"] = task.completed_at.isoformat()
                 data.append(task_dict)
 
-            with open(self._history_file, 'w', encoding='utf-8') as f:
+            with open(self._history_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"保存任务历史失败: {e}")
 
     def clear_history(self):
         """清空历史任务（保留正在运行的任务）"""
-        running_tasks = {
-            tid: task for tid, task in self._tasks.items()
-            if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
-        }
+        running_tasks = {tid: task for tid, task in self._tasks.items() if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING)}
         self._tasks = running_tasks
         self._save_history()
 

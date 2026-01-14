@@ -2,7 +2,7 @@
  * 配置面板组件集合 - ConfigLabel, KCINConfigPanel, DCINConfigPanel
  */
 import React from 'react'
-import { Row, Col, InputNumber, Switch, Select, Input, Button, Typography, Collapse, Tooltip } from 'antd'
+import { Row, Col, InputNumber, Switch, Select, Input, Button, Typography, Collapse, Tooltip, Divider } from 'antd'
 import { CONFIG_TOOLTIPS } from '../helpers'
 
 const { Text } = Typography
@@ -117,8 +117,8 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
           label: 'KCIN Config',
           children: (
             <div>
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>KCIN Version</Text>
-              <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+              <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>Version</Divider>
+              <Row gutter={[16, 8]} style={{ marginBottom: 8 }}>
                 <Col span={8}>
                   <Select
                     value={configValues.KCIN_VERSION || 'v1'}
@@ -131,8 +131,8 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                 </Col>
               </Row>
 
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Slice Config</Text>
-              <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+              <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>Slice</Divider>
+              <Row gutter={[16, 8]} style={{ marginBottom: 8 }}>
                 {configValues.SLICE_PER_LINK_HORIZONTAL !== undefined && (
                   <Col span={8}>
                     <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_HORIZONTAL" /></div>
@@ -153,7 +153,7 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                 )}
               </Row>
 
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>FIFO Depth</Text>
+              <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>FIFO Depth</Divider>
               <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
                 {(configValues.KCIN_VERSION === 'v2'
                   ? ['RS_IN_CH_BUFFER', 'RS_OUT_CH_BUFFER', 'RS_IN_FIFO_DEPTH', 'RS_OUT_FIFO_DEPTH',
@@ -178,7 +178,7 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                 })}
               </Row>
 
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Latency</Text>
+              <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>Latency</Divider>
               <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
                 {['DDR_R_LATENCY', 'DDR_R_LATENCY_VAR', 'DDR_W_LATENCY', 'L2M_R_LATENCY', 'L2M_W_LATENCY',
                   'SN_TRACKER_RELEASE_LATENCY', 'SN_PROCESSING_LATENCY', 'RN_PROCESSING_LATENCY'].map(key =>
@@ -191,7 +191,7 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                 )}
               </Row>
 
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Bandwidth Limit (GB/s)</Text>
+              <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>Bandwidth Limit (GB/s)</Divider>
               <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
                 {['GDMA_BW_LIMIT', 'SDMA_BW_LIMIT', 'CDMA_BW_LIMIT', 'DDR_BW_LIMIT', 'L2M_BW_LIMIT'].map(key =>
                   configValues[key] !== undefined && (
@@ -203,7 +203,7 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                 )}
               </Row>
 
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>ETag Config</Text>
+              <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>ETag Config</Divider>
               <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
                 {['TL_Etag_T2_UE_MAX', 'TL_Etag_T1_UE_MAX', 'TR_Etag_T2_UE_MAX', 'TU_Etag_T2_UE_MAX',
                   'TU_Etag_T1_UE_MAX', 'TD_Etag_T2_UE_MAX'].map(key =>
@@ -216,7 +216,7 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                 )}
               </Row>
 
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>ITag Config</Text>
+              <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>ITag Config</Divider>
               <Row gutter={[16, 8]}>
                 {['ITag_TRIGGER_Th_H', 'ITag_TRIGGER_Th_V', 'ITag_MAX_Num_H', 'ITag_MAX_Num_V'].map(key =>
                   configValues[key] !== undefined && (
@@ -235,6 +235,8 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
           label: 'Feature Config',
           children: (
             <div>
+              {/* Tracker Config */}
+              <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>Tracker</Divider>
               {configValues.UNIFIED_RW_TRACKER !== undefined && (
                 <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
                   <Col span={10}><ConfigLabel name="UNIFIED_RW_TRACKER" /></Col>
@@ -243,6 +245,8 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                   </Col>
                 </Row>
               )}
+              {/* ETag Config */}
+              <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>ETag</Divider>
               {configValues.ETAG_T1_ENABLED !== undefined && (
                 <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
                   <Col span={10}><ConfigLabel name="ETAG_T1_ENABLED" /></Col>
@@ -259,6 +263,8 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                   </Col>
                 </Row>
               )}
+              {/* Ordering Config */}
+              <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>Ordering</Divider>
               {configValues.ORDERING_PRESERVATION_MODE !== undefined && (
                 <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
                   <Col span={10}><ConfigLabel name="ORDERING_PRESERVATION_MODE" /></Col>
@@ -313,6 +319,8 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                   )}
                 </>
               )}
+              {/* Flow Control */}
+              <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>Flow Control</Divider>
               {configValues.REVERSE_DIRECTION_ENABLED !== undefined && (
                 <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
                   <Col span={10}><ConfigLabel name="REVERSE_DIRECTION_ENABLED" /></Col>
@@ -340,7 +348,8 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                   </Col>
                 </Row>
               )}
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8, marginTop: 16 }}>Multi-Channel Config</Text>
+              {/* Multi-Channel Config */}
+              <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>Multi-Channel</Divider>
               <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
                 <Col span={10}><ConfigLabel name="REQ_NUM_CHANNELS" /></Col>
                 <Col span={14}>
@@ -399,18 +408,80 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                 <Col span={10}><ConfigLabel name="CHANNEL_SELECT_STRATEGY" /></Col>
                 <Col span={14}>
                   <Select
-                    value={configValues.CHANNEL_SELECT_STRATEGY ?? 'ip_id_based'}
-                    onChange={(v) => updateConfigValue('CHANNEL_SELECT_STRATEGY', v)}
+                    value={configValues.CHANNEL_SELECT_STRATEGY ?? 'ip_type_id_based'}
+                    onChange={(v) => {
+                      updateConfigValue('CHANNEL_SELECT_STRATEGY', v)
+                      // 根据策略设置默认参数
+                      const defaultParams: Record<string, any> = {
+                        coord_based: { basis: 'destination', dimension: 'x' },
+                        node_id_based: { basis: 'destination' },
+                        burst_interleave: {},
+                        ip_type_id_based: {},
+                        round_robin: { granularity: 'packet' },
+                      }
+                      updateConfigValue('CHANNEL_SELECT_PARAMS', defaultParams[v] || {})
+                    }}
                     style={{ width: 200 }}
                   >
-                    <Option value="ip_id_based">IP ID Based</Option>
-                    <Option value="target_node_based">Target Node Based</Option>
-                    <Option value="flit_id_based">Flit ID Based</Option>
+                    <Option value="coord_based">Coord Based (XID/YID)</Option>
+                    <Option value="node_id_based">Node ID Based</Option>
+                    <Option value="burst_interleave">Burst Interleave</Option>
+                    <Option value="ip_type_id_based">IP Type ID Based</Option>
+                    <Option value="round_robin">Round Robin</Option>
                   </Select>
                 </Col>
               </Row>
+              {/* 策略参数配置 */}
+              {(configValues.CHANNEL_SELECT_STRATEGY === 'coord_based' || configValues.CHANNEL_SELECT_STRATEGY === 'node_id_based') && (
+                <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                  <Col span={10}><ConfigLabel name="CHANNEL_SELECT_PARAMS" /> - basis</Col>
+                  <Col span={14}>
+                    <Select
+                      value={configValues.CHANNEL_SELECT_PARAMS?.basis ?? 'destination'}
+                      onChange={(v) => updateConfigValue('CHANNEL_SELECT_PARAMS', { ...configValues.CHANNEL_SELECT_PARAMS, basis: v })}
+                      style={{ width: 160 }}
+                    >
+                      <Option value="source">Source</Option>
+                      <Option value="destination">Destination</Option>
+                    </Select>
+                  </Col>
+                </Row>
+              )}
+              {configValues.CHANNEL_SELECT_STRATEGY === 'coord_based' && (
+                <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                  <Col span={10}><ConfigLabel name="CHANNEL_SELECT_PARAMS" /> - dimension</Col>
+                  <Col span={14}>
+                    <Select
+                      value={configValues.CHANNEL_SELECT_PARAMS?.dimension ?? 'x'}
+                      onChange={(v) => updateConfigValue('CHANNEL_SELECT_PARAMS', { ...configValues.CHANNEL_SELECT_PARAMS, dimension: v })}
+                      style={{ width: 160 }}
+                    >
+                      <Option value="x">X (Column)</Option>
+                      <Option value="y">Y (Row)</Option>
+                    </Select>
+                  </Col>
+                </Row>
+              )}
+              {configValues.CHANNEL_SELECT_STRATEGY === 'round_robin' && (
+                <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                  <Col span={10}><ConfigLabel name="CHANNEL_SELECT_PARAMS" /> - granularity</Col>
+                  <Col span={14}>
+                    <Select
+                      value={configValues.CHANNEL_SELECT_PARAMS?.granularity ?? 'packet'}
+                      onChange={(v) => updateConfigValue('CHANNEL_SELECT_PARAMS', { ...configValues.CHANNEL_SELECT_PARAMS, granularity: v })}
+                      style={{ width: 160 }}
+                    >
+                      <Option value="packet">Per Packet</Option>
+                      <Option value="flit">Per Flit</Option>
+                      <Option value="request">Per Request</Option>
+                    </Select>
+                  </Col>
+                </Row>
+              )}
+              {/* Arbitration Config */}
               {configValues.arbitration?.default?.type !== undefined && (
                 <>
+                  <Divider orientation="left" orientationMargin={0} style={{ margin: '8px 0', fontSize: 12 }}>Arbitration</Divider>
                   <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
                     <Col span={10}><ConfigLabel name="ARBITRATION_TYPE" /></Col>
                     <Col span={14}>
