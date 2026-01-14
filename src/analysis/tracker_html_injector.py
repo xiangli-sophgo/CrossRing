@@ -26,8 +26,8 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
     with open(tracker_data_path, "r", encoding="utf-8") as f:
         tracker_data = json.load(f)
 
-    # 检查是否已经注入过
-    if "tracker-panel" in html_content:
+    # 检查是否已经注入过（检查完整的div定义，而不是字符串引用）
+    if '<div class="tracker-section" id="tracker-panel">' in html_content:
         return html_path
 
     # 生成tracker面板HTML（动态创建，竖向优先布局）
@@ -113,14 +113,14 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
         .tracker-item {
             position: relative;
             background: #f5f5f5;
-            padding: 5px;
+            padding: 0;
             border-radius: 6px;
-            border: 1px solid #ddd;
+            border: 2px solid #1976d2;
             width: 440px;
             height: 320px;
             display: flex;
-            align-items: center;
-            justify-content: center;
+            flex-direction: column;
+            overflow: hidden;
         }
         .tracker-item-title {
             font-weight: bold;
@@ -131,8 +131,22 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
         }
         .tracker-chart {
             width: 430px;
-            height: 310px;
+            height: 285px;
             flex-shrink: 0;
+            margin: 5px auto;
+        }
+        .chart-item-header {
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+            text-align: center;
+        }
+        .chart-item-header.tracker {
+            background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+        }
+        .chart-item-header.fifo {
+            background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);
         }
         .close-item-btn {
             position: absolute;
@@ -452,12 +466,19 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
                 yaxis: {{
                     title: '使用个数',
                     range: [0, Math.max(Math.ceil(maxUsageCount * 1.1), 1)],
-                    dtick: 1,
+                    dtick: maxUsageCount <= 10 ? 1 : (maxUsageCount <= 20 ? 2 : Math.ceil(maxUsageCount / 10)),
                     tick0: 0
                 }},
                 margin: {{ l: 50, r: 15, t: 10, b: 40 }},
                 hovermode: 'closest',
-                legend: {{ orientation: 'h', y: 1.02, xanchor: 'center', x: 0.5 }}
+                legend: {{
+                    orientation: 'h',
+                    y: 1.0,
+                    yanchor: 'top',
+                    xanchor: 'center',
+                    x: 0.5
+                }},
+                showlegend: true
             }};
 
             // 渲染图表
@@ -504,8 +525,8 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
     # 解析tracker数据
     tracker_data = json.loads(tracker_json) if isinstance(tracker_json, str) else tracker_json
 
-    # 检查是否已经注入过
-    if "tracker-panel" in html_content:
+    # 检查是否已经注入过（检查完整的div定义，而不是字符串引用）
+    if '<div class="tracker-section" id="tracker-panel">' in html_content:
         return html_content
 
     # 生成tracker面板HTML（动态创建，竖向优先布局）
@@ -591,14 +612,14 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
         .tracker-item {
             position: relative;
             background: #f5f5f5;
-            padding: 5px;
+            padding: 0;
             border-radius: 6px;
-            border: 1px solid #ddd;
+            border: 2px solid #1976d2;
             width: 440px;
             height: 320px;
             display: flex;
-            align-items: center;
-            justify-content: center;
+            flex-direction: column;
+            overflow: hidden;
         }
         .tracker-item-title {
             font-weight: bold;
@@ -609,8 +630,22 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
         }
         .tracker-chart {
             width: 430px;
-            height: 310px;
+            height: 285px;
             flex-shrink: 0;
+            margin: 5px auto;
+        }
+        .chart-item-header {
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+            text-align: center;
+        }
+        .chart-item-header.tracker {
+            background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+        }
+        .chart-item-header.fifo {
+            background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);
         }
         .close-item-btn {
             position: absolute;
@@ -933,12 +968,19 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
                 yaxis: {{
                     title: '使用个数',
                     range: [0, Math.max(Math.ceil(maxUsageCount * 1.1), 1)],
-                    dtick: 1,
+                    dtick: maxUsageCount <= 10 ? 1 : (maxUsageCount <= 20 ? 2 : Math.ceil(maxUsageCount / 10)),
                     tick0: 0
                 }},
                 margin: {{ l: 50, r: 15, t: 10, b: 40 }},
                 hovermode: 'closest',
-                legend: {{ orientation: 'h', y: 1.02, xanchor: 'center', x: 0.5 }}
+                legend: {{
+                    orientation: 'h',
+                    y: 1.0,
+                    yanchor: 'top',
+                    xanchor: 'center',
+                    x: 0.5
+                }},
+                showlegend: true
             }};
 
             // 渲染图表

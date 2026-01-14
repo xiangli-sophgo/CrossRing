@@ -581,6 +581,13 @@ class TaskManager:
             # 在线程中运行并行任务
             results_list = await loop.run_in_executor(None, run_parallel)
 
+            # 更新状态为结果处理中
+            task.sim_details = {
+                **(task.sim_details or {}),
+                "processing_stage": "正在处理结果...",
+            }
+            self._notify_subscribers_sync(task_id, task, level="task_level")
+
             # 合并结果
             combined_results = {
                 "total_files": total_units,
@@ -714,6 +721,14 @@ class TaskManager:
 
             result = await engine.run_async(max_time=task.max_time)
             result.results["traffic_file"] = traffic_file
+
+            # 更新状态为结果处理中
+            task.progress = 100
+            task.sim_details = {
+                **(task.sim_details or {}),
+                "processing_stage": "正在处理结果...",
+            }
+            self._notify_subscribers_sync(task_id, task, level="task_level")
 
             # 保存到数据库（仅在成功时保存）
             experiment_id = None

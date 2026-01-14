@@ -413,6 +413,7 @@ class StatsMixin:
         rn_chart = None
         bandwidth_report = None
         latency_charts = []  # 延迟分布图列表
+        other_charts = []  # 其他图表（如延迟时序图）
 
         for title, fig, custom_js in all_charts:
             if "流量图" in title:
@@ -425,6 +426,9 @@ class StatsMixin:
                 rn_chart = (title, fig, custom_js)
             elif "延迟分布" in title:
                 latency_charts.append((title, fig, custom_js))
+            else:
+                # 其他图表（包括延迟时序图等）
+                other_charts.append((title, fig, custom_js))
 
         # 按顺序添加
         if flow_chart:
@@ -435,6 +439,8 @@ class StatsMixin:
             ordered_charts.append(rn_chart)
         # 添加所有延迟分布图
         ordered_charts.extend(latency_charts)
+        # 添加其他所有图表
+        ordered_charts.extend(other_charts)
         if bandwidth_report:
             ordered_charts.append(bandwidth_report)
 

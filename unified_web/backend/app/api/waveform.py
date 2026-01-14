@@ -446,6 +446,10 @@ async def get_waveform_data(
     t3 = time.time()
     filtered_requests = requests_df
 
+    # 按指定的packet_ids过滤
+    if selected_packet_ids:
+        filtered_requests = filtered_requests[filtered_requests["packet_id"].isin(selected_packet_ids)]
+
     # 时间范围过滤
     if time_start is not None:
         filtered_requests = filtered_requests[filtered_requests["end_time_ns"] >= time_start]

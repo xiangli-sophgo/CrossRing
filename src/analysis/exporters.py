@@ -1791,15 +1791,19 @@ class ParquetExporter:
             data["start_time_ns"].append(start_cycle / self.network_frequency)
             data["end_time_ns"].append(end_cycle / self.network_frequency)
 
-            # 计算延迟
-            cmd_entry = timestamps.get('cmd_entry_noc_from_cake0_cycle', float('inf'))
-            cmd_received = timestamps.get('cmd_received_by_cake0_cycle', float('inf'))
-            data_entry = timestamps.get('data_entry_noc_from_cake0_cycle', float('inf'))
-            data_received = timestamps.get('data_received_complete_cycle', float('inf'))
-
-            cmd_latency = (cmd_received - cmd_entry) / self.network_frequency if cmd_entry < float('inf') and cmd_received < float('inf') else -1
-            data_latency = (data_received - data_entry) / self.network_frequency if data_entry < float('inf') and data_received < float('inf') else -1
-            trans_latency = (end_cycle - start_cycle) / self.network_frequency
+            # 从flit读取已计算的延迟值（ip_interface.py中已计算）
+            first_flit = lifecycle.data_flits[0] if lifecycle.data_flits else None
+            if first_flit:
+                cmd_latency_cycle = getattr(first_flit, 'cmd_latency', float('inf'))
+                data_latency_cycle = getattr(first_flit, 'data_latency', float('inf'))
+                trans_latency_cycle = getattr(first_flit, 'transaction_latency', float('inf'))
+                cmd_latency = cmd_latency_cycle / self.network_frequency if cmd_latency_cycle < float('inf') else -1
+                data_latency = data_latency_cycle / self.network_frequency if data_latency_cycle < float('inf') else -1
+                trans_latency = trans_latency_cycle / self.network_frequency if trans_latency_cycle < float('inf') else (end_cycle - start_cycle) / self.network_frequency
+            else:
+                cmd_latency = -1
+                data_latency = -1
+                trans_latency = (end_cycle - start_cycle) / self.network_frequency
 
             data["cmd_latency_ns"].append(cmd_latency)
             data["data_latency_ns"].append(data_latency)

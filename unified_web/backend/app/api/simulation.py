@@ -446,13 +446,15 @@ async def get_history_grouped(limit: int = 50):
 def _parse_kcin_name(name: str) -> tuple:
     """
     解析拓扑名称为数字元组，用于排序
-    例如: "5x4" -> (5, 4), "10x8" -> (10, 8)
+    例如: "kcin_5x4" -> (5, 4), "kcin_10x8" -> (10, 8), "5x4" -> (5, 4)
     "default" 排在最前面
     """
-    if name.lower() == "default":
+    # 去掉 kcin_ 前缀再解析
+    parse_name = name.replace("kcin_", "")
+    if parse_name.lower() == "default":
         return (0, 0)  # default排在最前面
     try:
-        parts = name.lower().split("x")
+        parts = parse_name.lower().split("x")
         if len(parts) == 2:
             return (int(parts[0]), int(parts[1]))
     except (ValueError, IndexError):
@@ -472,7 +474,7 @@ async def list_configs():
         for f in TOPOLOGIES_DIR.glob("*.yaml"):
             name = f.stem
             if name.startswith("kcin_"):
-                kcin_configs.append(ConfigOption(name=name.replace("kcin_", ""), path=f.name))
+                kcin_configs.append(ConfigOption(name=name, path=f.name))
             elif name.startswith("dcin_"):
                 dcin_configs.append(ConfigOption(name=name, path=f.name))
 

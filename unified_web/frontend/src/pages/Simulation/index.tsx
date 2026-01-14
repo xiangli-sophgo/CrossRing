@@ -329,7 +329,10 @@ const Simulation: React.FC = () => {
     try {
       const data = await getConfigs()
       setConfigs(data)
-      const defaultConfig = data.kcin.find((c: ConfigOption) => c.name === '5x4')
+      // 优先使用上次选择的配置，否则使用默认的 5x4
+      const lastConfigPath = formValues.config_path
+      const lastConfig = lastConfigPath ? data.kcin.find((c: ConfigOption) => c.path === lastConfigPath) : null
+      const defaultConfig = lastConfig || data.kcin.find((c: ConfigOption) => c.name === '5x4')
       if (defaultConfig) {
         setTimeout(() => {
           form.setFieldsValue({ config_path: defaultConfig.path })
@@ -997,9 +1000,10 @@ const Simulation: React.FC = () => {
                 <Select
                   placeholder={mode === 'dcin' ? '请选择DCIN配置文件' : '请选择KCIN配置文件'}
                   onChange={loadConfigContent}
+                  popupMatchSelectWidth={false}
                 >
                   {(mode === 'kcin' ? configs.kcin : configs.dcin).map((c) => (
-                    <Option key={c.path} value={c.path}>{c.name}</Option>
+                    <Option key={c.path} value={c.path} title={c.name}>{c.name}</Option>
                   ))}
                 </Select>
               </Form.Item>
@@ -1042,7 +1046,7 @@ const Simulation: React.FC = () => {
                       size="small"
                       onClick={() => {
                         setSaveAsType('main')
-                        setSaveAsName('')
+                        setSaveAsName(mode === 'dcin' ? 'dcin_' : 'kcin_')
                         setSaveAsModalVisible(true)
                       }}
                     >
@@ -1067,9 +1071,9 @@ const Simulation: React.FC = () => {
                     label="KCIN配置文件 (单Die拓扑)"
                     rules={[{ required: true, message: '请选择KCIN配置文件' }]}
                   >
-                    <Select placeholder="请选择KCIN配置文件" onChange={loadDieConfigContent}>
+                    <Select placeholder="请选择KCIN配置文件" onChange={loadDieConfigContent} popupMatchSelectWidth={false}>
                       {configs.kcin.map((c) => (
-                        <Option key={c.path} value={c.path}>{c.name}</Option>
+                        <Option key={c.path} value={c.path} title={c.name}>{c.name}</Option>
                       ))}
                     </Select>
                   </Form.Item>
@@ -1104,7 +1108,7 @@ const Simulation: React.FC = () => {
                           size="small"
                           onClick={() => {
                             setSaveAsType('die')
-                            setSaveAsName('')
+                            setSaveAsName('kcin_')
                             setSaveAsModalVisible(true)
                           }}
                         >
@@ -1306,7 +1310,7 @@ const Simulation: React.FC = () => {
         <div style={{ marginBottom: 16 }}>
           <div style={{ marginBottom: 8 }}>新文件名 (不含扩展名)</div>
           <Input
-            placeholder={mode === 'dcin' && saveAsType === 'main' ? 'dcin_my_config' : 'topo_my_config'}
+            placeholder={mode === 'dcin' && saveAsType === 'main' ? 'dcin_my_config' : 'kcin_my_config'}
             value={saveAsName}
             onChange={(e) => setSaveAsName(e.target.value)}
             suffix=".yaml"

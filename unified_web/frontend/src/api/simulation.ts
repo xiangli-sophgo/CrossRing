@@ -41,6 +41,7 @@ export interface SimDetails {
   recv_flits: number
   total_flits: number
   trans_flits: number  // 网络在途flit数
+  processing_stage?: string  // 结果处理阶段提示
 }
 
 export interface TaskStatus {

@@ -17,6 +17,11 @@ export interface GlobalTaskUpdate {
     total_flits?: number
     received_flits?: number
     in_flight_flits?: number
+    file_index?: number
+    total_files?: number
+    current_file?: string
+    is_parallel?: boolean
+    processing_stage?: string
   } | null
 }
 

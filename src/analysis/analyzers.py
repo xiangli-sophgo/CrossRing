@@ -442,12 +442,14 @@ class SingleDieAnalyzer:
 
             latency_plotter = LatencyDistributionPlotter(latency_stats, title_prefix="NoC")
 
-            # 生成直方图+CDF组合图
-            hist_cdf_fig = latency_plotter.plot_histogram_with_cdf(return_fig=True)
-
-            # 添加到图表列表
-            charts_to_merge.append(("延迟分布", hist_cdf_fig, None))
-            # charts_to_merge.append(("NoC延迟分布-小提琴图", violin_fig, None))  # 暂时隐藏
+            # 生成延迟分布+时序组合图（左右排列：直方图+散点图）
+            try:
+                combined_fig = latency_plotter.plot_histogram_and_scatter_combined(rolling_window=200, return_fig=True)
+                charts_to_merge.append(("延迟分析", combined_fig, None))
+            except Exception as e:
+                print(f"[ERROR] 生成延迟组合图时出错: {e}")
+                import traceback
+                traceback.print_exc()
 
         # 绘制RN带宽曲线并计算Total_sum_BW
         rn_fig = None
@@ -897,12 +899,13 @@ class SingleDieAnalyzer:
         if not all_charts:
             return
 
-        # 确保顺序：流量图 → FIFO热力图 → RN带宽曲线
+        # 确保顺序：流量图 → FIFO热力图 → RN带宽曲线 → 其他图表
         # 重新排序图表
         ordered_charts = []
         flow_chart = None
         fifo_chart = None
         rn_chart = None
+        other_charts = []
 
         for title, fig, custom_js in all_charts:
             if "流量图" in title:
@@ -911,6 +914,9 @@ class SingleDieAnalyzer:
                 fifo_chart = (title, fig, custom_js)
             elif "RN" in title or "带宽" in title:
                 rn_chart = (title, fig, custom_js)
+            else:
+                # 其他图表（包括延迟分布、延迟时序等）
+                other_charts.append((title, fig, custom_js))
 
         # 按顺序添加
         if flow_chart:
@@ -919,6 +925,8 @@ class SingleDieAnalyzer:
             ordered_charts.append(fifo_chart)
         if rn_chart:
             ordered_charts.append(rn_chart)
+        # 添加其他所有图表
+        ordered_charts.extend(other_charts)
 
         # 如果没有图表，直接返回
         if not ordered_charts:

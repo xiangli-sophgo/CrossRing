@@ -255,12 +255,12 @@ class D2DAnalyzer:
 
             latency_plotter = LatencyDistributionPlotter(latency_stats, title_prefix="D2D")
 
-            # 生成直方图
-            hist_fig = latency_plotter.plot_histogram_with_cdf(return_fig=True)
+            # 生成延迟分布+时序组合图（左右排列：直方图+散点图）
+            combined_fig = latency_plotter.plot_histogram_and_scatter_combined(rolling_window=200, return_fig=True)
 
             # 添加到图表列表
             latency_distribution_figs = [
-                ("延迟分布", hist_fig),
+                ("延迟分析", combined_fig),
             ]
 
         return {
@@ -356,15 +356,19 @@ class D2DAnalyzer:
                     if hasattr(lifecycle, 'origin_die') and lifecycle.origin_die != die_id:
                         continue
 
-                    # 计算延迟
-                    timestamps = lifecycle.timestamps
-                    if not timestamps:
-                        timestamps = die_model.request_tracker.collect_timestamps_from_flits(packet_id)
-
-                    # 使用data_collectors的延迟计算方法
-                    from src.analysis.data_collectors import RequestCollector
-                    temp_collector = RequestCollector(network_frequency=self.network_frequency)
-                    cmd_latency, data_latency, transaction_latency = temp_collector._calculate_latencies(lifecycle, timestamps)
+                    # 从flit读取已计算的延迟值（ip_interface.py中已计算）
+                    first_flit = lifecycle.data_flits[0] if lifecycle.data_flits else None
+                    if first_flit:
+                        cmd_latency_cycle = getattr(first_flit, 'cmd_latency', None)
+                        data_latency_cycle = getattr(first_flit, 'data_latency', None)
+                        trans_latency_cycle = getattr(first_flit, 'transaction_latency', None)
+                        cmd_latency = cmd_latency_cycle / self.network_frequency if cmd_latency_cycle is not None else -1
+                        data_latency = data_latency_cycle / self.network_frequency if data_latency_cycle is not None else -1
+                        transaction_latency = trans_latency_cycle / self.network_frequency if trans_latency_cycle is not None else -1
+                    else:
+                        cmd_latency = -1
+                        data_latency = -1
+                        transaction_latency = (lifecycle.completed_cycle - lifecycle.created_cycle) / self.network_frequency if lifecycle.completed_cycle else -1
 
                     # 从data_flits收集绕环统计数据
                     data_eject_attempts_h_list = [f.eject_attempts_h for f in lifecycle.data_flits]

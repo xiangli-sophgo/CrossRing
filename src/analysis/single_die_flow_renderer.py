@@ -202,7 +202,7 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
                 annotation_ranges[(net_type, ch_idx)] = (annotation_start_idx, annotation_end_idx)
 
                 # 设置初始可见性：默认显示data网络的第一个通道
-                is_visible = (net_type == "data" and ch_idx == 0)
+                is_visible = net_type == "data" and ch_idx == 0
                 for i in range(trace_start_idx, trace_end_idx):
                     fig.data[i].visible = is_visible
 
@@ -231,18 +231,28 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
             if channel_counts[net_type] == 0:
                 continue
 
-            # 创建visibility数组：基础traces始终可见，只显示当前网络类型的第一个通道
-            visibility = [True] * num_base_traces
+            # 计算总trace数量（暂不包括legend/colorbar，稍后添加）
+            total_traces = num_base_traces
             for key in trace_ranges.keys():
                 s, e = trace_ranges[key]
-                # 只显示当前网络类型的第一个通道
-                is_visible = (key == (net_type, 0))
-                visibility.extend([is_visible] * (e - s))
+                total_traces = max(total_traces, e)
+
+            # 创建visibility数组：使用绝对索引
+            visibility = [False] * total_traces
+            # 基础traces始终可见
+            for i in range(num_base_traces):
+                visibility[i] = True
+            # 只显示当前网络类型的第一个通道
+            for key in trace_ranges.keys():
+                s, e = trace_ranges[key]
+                is_visible = key == (net_type, 0)
+                for i in range(s, e):
+                    visibility[i] = is_visible
 
             # 创建annotations visibility
             updated_annotations = []
             for i, ann in enumerate(fig.layout.annotations):
-                ann_dict = ann.to_plotly_json() if hasattr(ann, 'to_plotly_json') else dict(ann)
+                ann_dict = ann.to_plotly_json() if hasattr(ann, "to_plotly_json") else dict(ann)
                 if i < num_existing_anns:
                     # 原有annotations（IP信息等），始终可见
                     ann_dict["visible"] = True
@@ -258,21 +268,19 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
                     ann_dict["visible"] = (ann_key == (net_type, 0)) if ann_key else False
                 updated_annotations.append(ann_dict)
 
-            network_buttons.append(dict(
-                label=net_type.upper(),
-                method="update",
-                args=[{"visible": visibility}, {"annotations": updated_annotations}]
-            ))
+            network_buttons.append(dict(label=net_type.upper(), method="update", args=[{"visible": visibility}, {"annotations": updated_annotations}]))
 
         # 第二层：通道按钮（Ch0/Ch1/Ch2...）- 如果有多通道
         if max_channels > 1:
             for ch_idx in range(max_channels):
                 # 注意：这个按钮需要JavaScript动态处理，因为不同网络类型的通道数不同
                 # 这里先创建占位按钮，实际切换逻辑由JavaScript处理
-                channel_buttons.append(dict(
-                    label=f"Ch{ch_idx}",
-                    method="skip",  # 使用skip方法，由JavaScript处理
-                ))
+                channel_buttons.append(
+                    dict(
+                        label=f"Ch{ch_idx}",
+                        method="skip",  # 使用skip方法，由JavaScript处理
+                    )
+                )
 
         # 创建updatemenus
         updatemenus = [
@@ -282,7 +290,7 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
                 pad={"r": 10, "t": 10},
                 showactive=True,
                 active=2,  # 默认选中DATA
-                x=0.3,
+                x=0.5,
                 y=1.12,
                 xanchor="center",
                 yanchor="top",
@@ -295,21 +303,23 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
 
         # 如果有多通道，添加通道按钮组
         if max_channels > 1:
-            updatemenus.append(dict(
-                buttons=channel_buttons,
-                direction="left",
-                pad={"r": 10, "t": 10},
-                showactive=True,
-                active=0,  # 默认选中Ch0
-                x=0.7,
-                y=1.12,
-                xanchor="center",
-                yanchor="top",
-                bgcolor="#f0f0f0",
-                bordercolor="#ccc",
-                font=dict(size=12, color="#333"),
-                type="buttons",
-            ))
+            updatemenus.append(
+                dict(
+                    buttons=channel_buttons,
+                    direction="left",
+                    pad={"r": 10, "t": 10},
+                    showactive=True,
+                    active=0,  # 默认选中Ch0
+                    x=0.7,
+                    y=1.12,
+                    xanchor="center",
+                    yanchor="top",
+                    bgcolor="#f0f0f0",
+                    bordercolor="#ccc",
+                    font=dict(size=12, color="#333"),
+                    type="buttons",
+                )
+            )
 
         # 收集使用的IP类型(用于legend)
         used_ip_types = set()
@@ -337,7 +347,7 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
         if updatemenus:
             for button in updatemenus[0]["buttons"]:
                 # 在visibility数组末尾添加True，使legend/colorbar始终可见
-                button["args"][0]["visible"].extend([True] * num_legend_colorbar_traces)
+                button["args"][0]["visible"] = button["args"][0]["visible"] + [True] * num_legend_colorbar_traces
 
         # 设置布局
         layout_config = dict(
@@ -486,19 +496,43 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
             function switchToChannel(netType, chIdx) {{
                 if (!traceRanges[netType] || !traceRanges[netType][chIdx]) return;
 
-                const visibility = [];
-                for (let i = 0; i < numBaseTraces; i++) visibility.push(true);
+                // 计算链路traces的最大结束索引
+                let maxLinkTraceEnd = numBaseTraces;
+                for (let net of ['req', 'rsp', 'data']) {{
+                    if (!traceRanges[net]) continue;
+                    for (let ch in traceRanges[net]) {{
+                        const [start, end] = traceRanges[net][ch];
+                        maxLinkTraceEnd = Math.max(maxLinkTraceEnd, end);
+                    }}
+                }}
 
+                // 总trace数 = 链路traces结束位置 + legend/colorbar traces数量
+                const totalTraces = maxLinkTraceEnd + numLegendColorbarTraces;
+
+                // 初始化visibility数组，默认所有为false
+                const visibility = new Array(totalTraces).fill(false);
+
+                // 基础traces始终可见
+                for (let i = 0; i < numBaseTraces; i++) {{
+                    visibility[i] = true;
+                }}
+
+                // 设置当前通道的链路traces可见
                 for (let net of ['req', 'rsp', 'data']) {{
                     if (!traceRanges[net]) continue;
                     for (let ch in traceRanges[net]) {{
                         const [start, end] = traceRanges[net][ch];
                         const isVisible = (net === netType && parseInt(ch) === chIdx);
-                        for (let i = 0; i < (end - start); i++) visibility.push(isVisible);
+                        for (let i = start; i < end; i++) {{
+                            visibility[i] = isVisible;
+                        }}
                     }}
                 }}
 
-                for (let i = 0; i < numLegendColorbarTraces; i++) visibility.push(true);
+                // Legend和colorbar traces始终可见（在链路traces之后）
+                for (let i = maxLinkTraceEnd; i < totalTraces; i++) {{
+                    visibility[i] = true;
+                }}
 
                 const updatedAnnotations = [];
                 if (plotDiv.layout.annotations) {{
@@ -533,5 +567,3 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
 </script>
 """
         return js_code
-
-

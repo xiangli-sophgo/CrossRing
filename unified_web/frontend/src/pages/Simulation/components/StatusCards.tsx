@@ -99,12 +99,21 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
     >
       <Row gutter={[24, 16]}>
         <Col span={8}>
-          <Statistic
-            title="任务进度"
-            value={currentTask.progress}
-            suffix="%"
-            valueStyle={{ color: currentTask.status === 'failed' ? errorColor : primaryColor }}
-          />
+          {currentTask.progress === 100 && currentTask.status === 'running' ? (
+            <Statistic
+              title="任务进度"
+              value="结果处理中"
+              prefix={<SyncOutlined spin />}
+              valueStyle={{ color: primaryColor, fontSize: 24 }}
+            />
+          ) : (
+            <Statistic
+              title="任务进度"
+              value={currentTask.progress}
+              suffix="%"
+              valueStyle={{ color: currentTask.status === 'failed' ? errorColor : primaryColor }}
+            />
+          )}
         </Col>
         {currentTask.sim_details?.is_parallel && (
           <Col span={8}>
@@ -134,7 +143,7 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
         style={{ marginBottom: 12 }}
       />
 
-      {currentTask.sim_details?.current_file && (
+      {currentTask.sim_details?.current_file && !currentTask.sim_details?.processing_stage && (
         <div style={{ marginBottom: 12 }}>
           <Text type="secondary">当前文件: </Text>
           <Text strong>{currentTask.sim_details.current_file}</Text>

@@ -46,13 +46,16 @@ class FIFOWaveformResponse(BaseModel):
 # ==================== 辅助函数 ====================
 
 
-def extract_fifo_events_from_timestamps(position_timestamps_json: str, source_node: int, dest_node: int) -> List[Tuple[str, int, float, float]]:
+def extract_fifo_events_from_timestamps(position_timestamps_json: str, source_node: int, dest_node: int, cycle_time_ns: float = 0.5) -> List[Tuple[str, int, float, float]]:
     """从 position_timestamps JSON 提取 FIFO 事件
+
+    每个事件的持续时间为一个 cycle（触发是瞬时的）
 
     Args:
         position_timestamps_json: JSON字符串格式的位置时间戳
         source_node: 源节点ID
         dest_node: 目标节点ID
+        cycle_time_ns: 一个cycle的时间长度（ns），默认0.5ns对应2GHz
 
     Returns:
         List[(fifo_type, node_id, enter_ns, leave_ns)]
@@ -75,110 +78,49 @@ def extract_fifo_events_from_timestamps(position_timestamps_json: str, source_no
     # EQ: EQ_TU, EQ_TD, EQ_CH
 
     # ===== IP 发送端口事件（在源节点）=====
-    # IP_TX: 从 IP_TX 到 L2H（或第一个 IQ）
     if "IP_TX" in timestamps:
         enter_ns = timestamps["IP_TX"]
-        leave_ns = timestamps.get("L2H", -1)
-        # 如果没有 L2H，尝试 IQ 位置
-        if leave_ns < 0:
-            for iq_pos in ["IQ_CH", "IQ_TR", "IQ_TL", "IQ_TU", "IQ_TD"]:
-                if iq_pos in timestamps and timestamps[iq_pos] > enter_ns:
-                    leave_ns = timestamps[iq_pos]
-                    break
-        if enter_ns >= 0 and leave_ns >= 0 and leave_ns > enter_ns:
-            events.append(("IP_TX", source_node, enter_ns, leave_ns))
+        events.append(("IP_TX", source_node, enter_ns, enter_ns + cycle_time_ns))
 
-    # L2H: 从 L2H 到 IQ（发送端的 L2H 队列）
+    # L2H 事件
     if "L2H" in timestamps:
         enter_ns = timestamps["L2H"]
-        leave_ns = -1
-        for iq_pos in ["IQ_CH", "IQ_TR", "IQ_TL", "IQ_TU", "IQ_TD"]:
-            if iq_pos in timestamps and timestamps[iq_pos] > enter_ns:
-                leave_ns = timestamps[iq_pos]
-                break
-        if leave_ns < 0:
-            leave_ns = timestamps.get("Link", -1)
-        if enter_ns >= 0 and leave_ns >= 0 and leave_ns > enter_ns:
-            events.append(("L2H", source_node, enter_ns, leave_ns))
+        events.append(("L2H", source_node, enter_ns, enter_ns + cycle_time_ns))
 
     # ===== IQ 事件（在源节点）=====
     iq_positions = ["IQ_TR", "IQ_TL", "IQ_TU", "IQ_TD", "IQ_CH"]
     for iq_pos in iq_positions:
         if iq_pos in timestamps:
             enter_ns = timestamps[iq_pos]
-            leave_ns = timestamps.get("Link", -1)
-
-            # 如果没有 Link 时间戳，尝试使用后续位置
-            if leave_ns < 0 or leave_ns <= enter_ns:
-                for next_pos in ["RB_TR", "RB_TL", "RB_TU", "RB_TD", "EQ_TU", "EQ_TD", "EQ_CH"]:
-                    if next_pos in timestamps and timestamps[next_pos] > enter_ns:
-                        leave_ns = timestamps[next_pos]
-                        break
-
-            if enter_ns >= 0 and leave_ns >= 0 and leave_ns > enter_ns:
-                events.append((iq_pos, source_node, enter_ns, leave_ns))
+            events.append((iq_pos, source_node, enter_ns, enter_ns + cycle_time_ns))
 
     # ===== RB 事件（从位置名称中提取节点 ID）=====
-    # 新格式: RB_TR_N5 表示节点 5 的 RB_TR
     import re
-
     rb_pattern = re.compile(r"^(RB_(?:TR|TL|TU|TD|EQ))_N(\d+)$")
     for pos_name, enter_ns in timestamps.items():
         match = rb_pattern.match(pos_name)
         if match:
             rb_type = match.group(1)  # RB_TR, RB_TL 等
             rb_node_id = int(match.group(2))  # 节点 ID
-
-            leave_ns = -1
-            # RB 的下一跳：其他 RB、EQ 或 H2L
-            for next_pos, next_time in timestamps.items():
-                # 跳过同类型的 RB 位置
-                if next_pos.startswith("RB_"):
-                    continue
-                if next_pos in ["EQ_TU", "EQ_TD", "EQ_CH", "H2L_H", "H2L_L", "IP_RX", "Link"]:
-                    if next_time > enter_ns:
-                        if leave_ns < 0 or next_time < leave_ns:
-                            leave_ns = next_time
-
-            if enter_ns >= 0 and leave_ns >= 0 and leave_ns > enter_ns:
-                events.append((rb_type, rb_node_id, enter_ns, leave_ns))
+            events.append((rb_type, rb_node_id, enter_ns, enter_ns + cycle_time_ns))
 
     # ===== EQ 事件（在目标节点）=====
     eq_positions = ["EQ_TU", "EQ_TD", "EQ_CH"]
     for eq_pos in eq_positions:
         if eq_pos in timestamps:
             enter_ns = timestamps[eq_pos]
-            # 查找离开时间：H2L_H -> H2L_L -> IP_RX
-            leave_ns = -1
-            for next_pos in ["H2L_H", "H2L_L", "IP_RX"]:
-                if next_pos in timestamps and timestamps[next_pos] > enter_ns:
-                    leave_ns = timestamps[next_pos]
-                    break
-            if leave_ns < 0:
-                leave_ns = timestamps.get("IP_RX", -1)
-
-            if enter_ns >= 0 and leave_ns >= 0 and leave_ns > enter_ns:
-                events.append((eq_pos, dest_node, enter_ns, leave_ns))
+            events.append((eq_pos, dest_node, enter_ns, enter_ns + cycle_time_ns))
 
     # ===== IP 接收端口事件（在目标节点）=====
-    # H2L: 从 EQ 或 H2L_H 到 H2L_L（高层到低层的转换）
+    # H2L 事件
     if "H2L_H" in timestamps:
         enter_ns = timestamps["H2L_H"]
-        leave_ns = timestamps.get("H2L_L", timestamps.get("IP_RX", -1))
-        if enter_ns >= 0 and leave_ns >= 0 and leave_ns > enter_ns:
-            events.append(("H2L", dest_node, enter_ns, leave_ns))
+        events.append(("H2L", dest_node, enter_ns, enter_ns + cycle_time_ns))
 
-    # IP_RX: 从 H2L_L（或 EQ）到 IP_RX（接收端的最后阶段）
+    # IP_RX 事件
     if "IP_RX" in timestamps:
-        leave_ns = timestamps["IP_RX"]
-        # 查找进入时间：优先 H2L_L，其次 H2L_H，再次 EQ
-        enter_ns = -1
-        for prev_pos in ["H2L_L", "H2L_H", "EQ_CH", "EQ_TU", "EQ_TD"]:
-            if prev_pos in timestamps and timestamps[prev_pos] < leave_ns:
-                enter_ns = timestamps[prev_pos]
-                break
-        if enter_ns >= 0 and leave_ns >= 0 and leave_ns > enter_ns:
-            events.append(("IP_RX", dest_node, enter_ns, leave_ns))
+        enter_ns = timestamps["IP_RX"]
+        events.append(("IP_RX", dest_node, enter_ns, enter_ns + cycle_time_ns))
 
     return events
 

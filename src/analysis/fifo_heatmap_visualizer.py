@@ -10,6 +10,7 @@ from plotly.subplots import make_subplots
 from typing import Dict, List, Tuple, Optional
 from collections import defaultdict
 from src.utils.statistical_fifo import StatisticalFIFO
+from src.analysis.fifo_heatmap_js import generate_fifo_heatmap_javascript
 
 
 class FIFOUtilizationCollector:
@@ -171,7 +172,13 @@ class FIFOHeatmapVisualizer:
         self.fifo_data = fifo_data
 
     def create_interactive_heatmap(
-        self, dies: Dict, die_layout: Optional[Dict] = None, die_rotations: Optional[Dict] = None, save_path: Optional[str] = None, show_fig: bool = False, return_fig_and_js: bool = False
+        self,
+        dies: Dict,
+        die_layout: Optional[Dict] = None,
+        die_rotations: Optional[Dict] = None,
+        save_path: Optional[str] = None,
+        show_fig: bool = False,
+        return_fig_and_js: bool = False,
     ):
         """
         创建交互式FIFO使用率热力图
@@ -357,7 +364,7 @@ class FIFOHeatmapVisualizer:
 
         # 创建子图布局: 1行2列 (50% + 50%)
         subplot_titles = None if hide_subplot_titles else ("FIFO使用率热力图", "CrossRing架构图")
-        fig = make_subplots(rows=1, cols=2, column_widths=[0.3, 0.6], subplot_titles=subplot_titles, specs=[[{"type": "scatter"}, {"type": "scatter"}]], horizontal_spacing=0.0)
+        fig = make_subplots(rows=1, cols=2, column_widths=[0.4, 0.4], subplot_titles=subplot_titles, specs=[[{"type": "scatter"}, {"type": "scatter"}]], horizontal_spacing=0.001)
 
         # 计算画布范围（用于坐标轴设置）
         die_offsets, max_x, max_y = self._calculate_die_offsets_from_layout(die_layout, die_rotations, dies)
@@ -365,11 +372,11 @@ class FIFOHeatmapVisualizer:
         # 为每个FIFO类型和统计模式创建热力图trace
         traces_data = self._create_heatmap_traces(fifo_options, dies, die_layout, die_rotations)
 
-        # 将所有traces添加到左侧子图（初始时显示第一个data网络选项的平均模式）
-        # 查找第一个data网络的FIFO选项
+        # 将所有traces添加到左侧子图（初始时显示req网络Ch0的平均模式）
+        # 查找第一个 network_type=="req" 且 ch_idx==0 的FIFO选项
         default_option = fifo_options[0]  # 默认值
         for option in fifo_options:
-            if option[3] == "data":  # network_type是元组的第4个元素
+            if option[3] == "req" and option[4] == 0:  # network_type和ch_idx
                 default_option = option
                 break
         default_mode = "avg"
@@ -896,7 +903,7 @@ class FIFOHeatmapVisualizer:
                 pad={"r": 5, "t": 10},
                 showactive=True,
                 active=0,  # 初始高亮"平均使用率"
-                x=0.1,
+                x=0.3,
                 xanchor="center",
                 y=1.13,
                 yanchor="top",
@@ -911,8 +918,8 @@ class FIFOHeatmapVisualizer:
                 direction="left",
                 pad={"r": 5, "t": 10},
                 showactive=True,
-                active=2,  # 初始高亮"DATA"
-                x=0.3,
+                active=0,  # 初始高亮"REQ"
+                x=0.5,
                 xanchor="center",
                 y=1.13,
                 yanchor="top",
@@ -932,7 +939,7 @@ class FIFOHeatmapVisualizer:
                     pad={"r": 5, "t": 10},
                     showactive=True,
                     active=0,  # 初始高亮"Ch0"
-                    x=0.5,
+                    x=0.7,
                     xanchor="center",
                     y=1.13,
                     yanchor="top",
@@ -1148,7 +1155,9 @@ class FIFOHeatmapVisualizer:
         # 添加标题
         fig.add_annotation(x=x + w / 2, y=y + h + 0.3, text=title, showarrow=False, font=dict(size=14, color="black", family="Arial Black"), row=1, col=2)
 
-    def _draw_fifo_item(self, fig: go.Figure, x: float, y: float, w: float, h: float, label: str, fifo_info: Tuple[str, str], fifo_options: List[Tuple[str, str, str, str]], text_angle: int = 0):
+    def _draw_fifo_item(
+        self, fig: go.Figure, x: float, y: float, w: float, h: float, label: str, fifo_info: Tuple[str, str], fifo_options: List[Tuple[str, str, str, str]], text_angle: int = 0
+    ):
         """
         绘制单个FIFO项（可点击的矩形）
 
@@ -1168,7 +1177,9 @@ class FIFOHeatmapVisualizer:
             return
 
         # 先绘制矩形背景（使用shape）
-        fig.add_shape(type="rect", x0=x, y0=y, x1=x + w, y1=y + h, line=dict(color="black", width=1), fillcolor="lightgray", opacity=0.5, row=1, col=2, name=f"{category}_{fifo_type}")
+        fig.add_shape(
+            type="rect", x0=x, y0=y, x1=x + w, y1=y + h, line=dict(color="black", width=1), fillcolor="lightgray", opacity=0.5, row=1, col=2, name=f"{category}_{fifo_type}"
+        )
 
         # 添加文本标签（使用annotation支持旋转）
         fig.add_annotation(
@@ -1211,763 +1222,7 @@ class FIFOHeatmapVisualizer:
         Returns:
             str: JavaScript代码字符串
         """
-        # 创建FIFO选项映射 (用于JavaScript查找)
-        # key: "category_fifo_type_network_type_ch_idx" -> index
-        fifo_map = {}
-        for idx, (name, category, fifo_type, network_type, ch_idx) in enumerate(fifo_options):
-            key = f"{category}_{fifo_type}_{network_type}_{ch_idx}"
-            fifo_map[key] = idx
-
-        # 构建depth_events数据结构
-        # key: "die_node_category_fifo_type_network_type_ch_idx" -> {"events": [...], "capacity": N}
-        fifo_events_data = {}
-        total_events_count = 0
-        for die_id, networks_data in self.fifo_data.items():
-            for network_type, channels_data in networks_data.items():
-                for ch_idx, die_data in channels_data.items():
-                    for category in ["IQ", "RB", "EQ", "IQ_CH", "EQ_CH", "RS_IN", "RS_OUT"]:
-                        category_data = die_data.get(category, {})
-                        for node_pos, fifo_types in category_data.items():
-                            if isinstance(fifo_types, dict):
-                                for fifo_type, fifo_info in fifo_types.items():
-                                    if isinstance(fifo_info, dict) and "depth_events" in fifo_info:
-                                        events = fifo_info.get("depth_events", [])
-                                        capacity = fifo_info.get("capacity", 0)
-                                        # 只保存有事件的FIFO
-                                        if events:
-                                            key = f"{die_id}_{node_pos}_{category}_{fifo_type}_{network_type}_{ch_idx}"
-                                            fifo_events_data[key] = {"events": events, "capacity": capacity}
-                                            total_events_count += len(events)
-
-        # 检测每个网络类型有多少个通道
-        channel_counts = {"req": set(), "rsp": set(), "data": set()}
-        for _, _, _, network_type, ch_idx in fifo_options:
-            channel_counts[network_type].add(ch_idx)
-
-        # 转换为有序列表
-        channel_info = {net_type: sorted(list(channels)) for net_type, channels in channel_counts.items()}
-        max_channels = max(len(chs) for chs in channel_info.values()) if channel_info else 1
-
-        # 计算trace索引
-        num_heatmap_traces = len(fifo_options) * 3
-
-        # 创建FIFO选项的详细信息（用于JavaScript）
-        fifo_options_js = [[opt[0], opt[1], opt[2], opt[3], opt[4]] for opt in fifo_options]
-
-        # 序列化fifo_events_data为JSON
-        import json
-
-        fifo_events_json = json.dumps(fifo_events_data)
-
-        # 生成JavaScript代码
-        js_code = f"""
-<script>
-    console.log('[FIFO热力图] JavaScript开始执行');
-
-    // FIFO选项映射（包含网络类型和通道索引）
-    const fifoMap = {str(fifo_map).replace("'", '"')};
-    const fifoOptionsData = {str(fifo_options_js).replace("'", '"')};
-    const numFifoOptions = {len(fifo_options)};
-    const numDies = {num_dies};
-    const numHeatmapTraces = {num_heatmap_traces};
-    const channelInfo = {str(channel_info).replace("'", '"')};  // {{req: [0,1], rsp: [0], data: [0,1,2]}}
-    const maxChannels = {max_channels};
-
-    console.log('[FIFO热力图] 基础变量已初始化, numFifoOptions:', numFifoOptions);
-
-    // FIFO深度事件数据（用于曲线图）
-    const fifoEventsData = {fifo_events_json};
-    const cyclesPerNs = {cycles_per_ns};
-
-    console.log('[FIFO热力图] 事件数据已加载, FIFO数量:', Object.keys(fifoEventsData).length);
-
-    // 当前选中的状态
-    let currentFifoIndex = 0;  // 默认第一个FIFO
-    let currentMode = 'avg';  // 默认平均模式
-    let currentNetworkType = fifoOptionsData.length > 0 ? fifoOptionsData[0][3] : 'data';  // 从第一个选项获取网络类型
-    let currentCategory = fifoOptionsData.length > 0 ? fifoOptionsData[0][1] : null;  // 从第一个选项获取类别
-    let currentFifoType = fifoOptionsData.length > 0 ? fifoOptionsData[0][2] : null;  // 从第一个选项获取FIFO类型
-    let currentChannelIdx = fifoOptionsData.length > 0 ? fifoOptionsData[0][4] : 0;  // 从第一个选项获取通道索引
-
-    // 等待Plotly加载完成
-    document.addEventListener('DOMContentLoaded', function() {{
-        console.log('[FIFO热力图] DOMContentLoaded事件触发');
-        setTimeout(function() {{
-            console.log('[FIFO热力图] setTimeout回调执行');
-            const plotDiv = document.getElementsByClassName('plotly-graph-div')[0];
-            if (!plotDiv) return;
-
-            // 初始化图表面板（复用tracker-panel或创建新的）
-            initChartPanel();
-
-            // 初始化当前FIFO的category和type
-            updateCurrentFifoInfo();
-
-            // 监听热力图点击事件（显示曲线）
-            plotDiv.on('plotly_click', function(data) {{
-                const clickedPoint = data.points[0];
-                const traceIndex = clickedPoint.curveNumber;
-                console.log('点击trace索引:', traceIndex, '热力图trace数:', numHeatmapTraces);
-
-                // 点击热力图节点时显示曲线
-                if (traceIndex < numHeatmapTraces) {{
-                    const pointIndex = clickedPoint.pointIndex;
-                    const hoverText = clickedPoint.hovertext || '';
-                    // 解析hover文本获取节点信息
-                    const dieMatch = hoverText.match(/Die (\\d+)/);
-                    const nodeMatch = hoverText.match(/节点 (\\d+)/);
-                    if (dieMatch && nodeMatch) {{
-                        const dieId = parseInt(dieMatch[1]);
-                        const nodePos = parseInt(nodeMatch[1]);
-                        showFifoChart(dieId, nodePos, currentCategory, currentFifoType, currentNetworkType, currentChannelIdx);
-                    }}
-                    return;  // 不处理架构图切换
-                }}
-
-                if (traceIndex >= numHeatmapTraces) {{
-                    const customdata = clickedPoint.customdata;
-                    console.log('customdata:', customdata);
-                    if (customdata && customdata.length >= 2) {{
-                        const category = customdata[0];
-                        const fifoType = customdata[1];
-                        console.log('点击FIFO:', category, fifoType);
-
-                        // 使用当前选中的网络类型和通道索引
-                        const key = category + '_' + fifoType + '_' + currentNetworkType + '_' + currentChannelIdx;
-                        console.log('查找key:', key);
-
-                        let fifoIndex = fifoMap[key];
-                        if (fifoIndex === undefined) {{
-                            // 如果当前网络类型+通道不存在，尝试其他网络和通道
-                            let found = false;
-                            for (let net of ['data', 'req', 'rsp']) {{
-                                const channels = channelInfo[net] || [0];
-                                for (let ch of channels) {{
-                                    const tryKey = category + '_' + fifoType + '_' + net + '_' + ch;
-                                    if (fifoMap[tryKey] !== undefined) {{
-                                        fifoIndex = fifoMap[tryKey];
-                                        currentNetworkType = net;
-                                        currentChannelIdx = ch;
-                                        updateNetworkButtonHighlight();
-                                        updateChannelButtonHighlight();
-                                        console.log('在网络', net, '通道', ch, '找到FIFO, index:', fifoIndex);
-                                        found = true;
-                                        break;
-                                    }}
-                                }}
-                                if (found) break;
-                            }}
-                        }} else {{
-                            console.log('找到FIFO index:', fifoIndex);
-                        }}
-                        if (fifoIndex !== undefined) {{
-                            currentFifoIndex = fifoIndex;
-                            updateCurrentFifoInfo();
-                            updateHeatmapVisibility();
-                        }} else {{
-                            console.warn('未找到FIFO:', category, fifoType);
-                        }}
-                    }}
-                }}
-            }});
-
-            // 更新当前FIFO的信息
-            function updateCurrentFifoInfo() {{
-                if (currentFifoIndex >= 0 && currentFifoIndex < fifoOptionsData.length) {{
-                    const option = fifoOptionsData[currentFifoIndex];
-                    currentCategory = option[1];
-                    currentFifoType = option[2];
-                    currentNetworkType = option[3];
-                    currentChannelIdx = option[4];
-                }}
-            }}
-
-            // 更新热力图可见性和架构图高亮
-            function updateHeatmapVisibility() {{
-                const update = {{}};
-                const visibility = [];
-
-                // 计算哪些traces应该可见（每个FIFO选项+模式组合1个trace）
-                for (let i = 0; i < numFifoOptions; i++) {{
-                    for (let mode of ['avg', 'peak', 'flit_count']) {{
-                        const shouldShow = (i === currentFifoIndex && mode === currentMode);
-                        visibility.push(shouldShow);
-                    }}
-                }}
-
-                // 架构图的traces保持可见
-                for (let i = numHeatmapTraces; i < plotDiv.data.length; i++) {{
-                    visibility.push(true);
-                }}
-
-                update.visible = visibility;
-                console.log('更新trace可见性:', visibility.filter(v => v).length, '个可见,', 'currentFifoIndex:', currentFifoIndex, 'currentMode:', currentMode);
-                Plotly.restyle(plotDiv, update);
-
-                // 更新架构图高亮
-                updateArchitectureHighlight();
-            }}
-
-            // 更新架构图高亮
-            function updateArchitectureHighlight() {{
-                const shapes = plotDiv.layout.shapes || [];
-                const expectedName = currentCategory + '_' + currentFifoType;
-
-                const newShapes = shapes.map((shape, idx) => {{
-                    // 跳过没有name的shape（模块边框没有name属性）
-                    if (!shape.name) {{
-                        return shape;
-                    }}
-
-                    // 检查是否为当前选中的FIFO（只比较category和fifo_type）
-                    const shapeName = shape.name;
-                    const isSelected = (shapeName === expectedName);
-
-                    // 返回更新后的shape
-                    return {{
-                        ...shape,
-                        line: {{
-                            ...shape.line,
-                            color: isSelected ? 'red' : 'black',
-                            width: isSelected ? 3 : 1
-                        }}
-                    }};
-                }});
-
-                // 更新layout
-                Plotly.relayout(plotDiv, {{'shapes': newShapes}});
-            }}
-
-            // 等待按钮渲染完成后绑定事件
-            function setupButtonListeners() {{
-                const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
-                console.log('找到按钮数量:', allButtons.length);
-
-                // 计算预期按钮总数：3(模式) + 3(网络) + maxChannels(通道，如果>1)
-                const expectedButtons = maxChannels > 1 ? 6 + maxChannels : 6;
-                if (allButtons.length < expectedButtons) {{
-                    console.warn('按钮未完全渲染，重试...');
-                    setTimeout(setupButtonListeners, 200);
-                    return;
-                }}
-
-                // 第一组：模式按钮（平均/峰值/计数）- 前3个
-                const modeButtons = Array.from(allButtons).slice(0, 3);
-                // 第二组：网络类型按钮（REQ/RSP/DATA）- 接下来3个
-                const networkButtons = Array.from(allButtons).slice(3, 6);
-                // 第三组：通道按钮（Ch0/Ch1/...）- 剩余的（如果有多通道）
-                const channelButtons = maxChannels > 1 ? Array.from(allButtons).slice(6, 6 + maxChannels) : [];
-                console.log('模式按钮数量:', modeButtons.length, '网络按钮数量:', networkButtons.length, '通道按钮数量:', channelButtons.length);
-
-                // 监听平均/峰值/Flit计数按钮点击
-                modeButtons.forEach((btn, idx) => {{
-                    btn.addEventListener('click', function(e) {{
-                        const modeNames = ['avg', 'peak', 'flit_count'];
-                        console.log('点击模式按钮:', modeNames[idx]);
-                        setTimeout(() => {{
-                            // 移除同组按钮的active类
-                            modeButtons.forEach(b => b.classList.remove('active'));
-                            // 添加到当前按钮
-                            this.classList.add('active');
-
-                            currentMode = modeNames[idx];
-                            updateHeatmapVisibility();
-                        }}, 10);
-                    }});
-                }});
-
-                // 监听网络类型按钮点击
-                networkButtons.forEach((btn, idx) => {{
-                    btn.addEventListener('click', function(e) {{
-                        const networks = ['req', 'rsp', 'data'];
-                        console.log('点击网络按钮:', networks[idx]);
-                        setTimeout(() => {{
-                            // 移除同组按钮的active类
-                            networkButtons.forEach(b => b.classList.remove('active'));
-                            // 添加到当前按钮
-                            this.classList.add('active');
-
-                            currentNetworkType = networks[idx];
-
-                            // 更新通道按钮的可见性（根据当前网络类型的通道数）
-                            updateChannelButtonsVisibility();
-
-                            // 切换到当前FIFO在新网络中的对应项（保持当前通道，如果不存在则切换到第一个通道）
-                            switchToNetwork(currentNetworkType);
-                        }}, 10);
-                    }});
-                }});
-
-                // 监听通道按钮点击（如果有多通道）
-                if (channelButtons.length > 0) {{
-                    channelButtons.forEach((btn, idx) => {{
-                        btn.addEventListener('click', function(e) {{
-                            console.log('点击通道按钮: Ch', idx);
-                            setTimeout(() => {{
-                                // 移除同组按钮的active类
-                                channelButtons.forEach(b => b.classList.remove('active'));
-                                // 添加到当前按钮
-                                this.classList.add('active');
-
-                                // 切换到新通道
-                                switchToChannel(idx);
-                            }}, 10);
-                        }});
-                    }});
-                }}
-
-                // 初始化按钮高亮状态
-                if (modeButtons.length > 0) {{
-                    modeButtons[0].classList.add('active');  // 平均
-                }}
-                if (networkButtons.length > 0) {{
-                    // 根据第一个FIFO的网络类型初始化
-                    const networks = ['req', 'rsp', 'data'];
-                    const netIdx = networks.indexOf(currentNetworkType);
-                    if (netIdx >= 0 && netIdx < networkButtons.length) {{
-                        networkButtons[netIdx].classList.add('active');
-                    }}
-                }}
-                if (channelButtons.length > 0) {{
-                    // 根据第一个FIFO的通道索引初始化
-                    if (currentChannelIdx < channelButtons.length) {{
-                        channelButtons[currentChannelIdx].classList.add('active');
-                    }}
-                }}
-
-                // 初始化通道按钮可见性
-                updateChannelButtonsVisibility();
-            }}
-
-            // 启动按钮监听器设置
-            setupButtonListeners();
-
-            // 切换到指定网络类型（保持当前通道，如果不存在则切换到第一个通道）
-            function switchToNetwork(networkType) {{
-                if (!currentCategory || !currentFifoType) return;
-
-                const channels = channelInfo[networkType] || [0];
-
-                // 尝试保持当前通道索引
-                let targetChannel = currentChannelIdx;
-                if (!channels.includes(currentChannelIdx)) {{
-                    // 如果当前通道在新网络中不存在，切换到第一个通道
-                    targetChannel = channels[0];
-                    currentChannelIdx = targetChannel;
-                    updateChannelButtonHighlight();
-                }}
-
-                const key = currentCategory + '_' + currentFifoType + '_' + networkType + '_' + targetChannel;
-                const fifoIndex = fifoMap[key];
-
-                if (fifoIndex !== undefined) {{
-                    currentFifoIndex = fifoIndex;
-                    updateCurrentFifoInfo();
-                    updateHeatmapVisibility();
-                }} else {{
-                    console.warn('FIFO not found for network:', networkType, 'channel:', targetChannel);
-                }}
-            }}
-
-            // 切换到指定通道
-            function switchToChannel(channelIdx) {{
-                if (!currentCategory || !currentFifoType) return;
-
-                const key = currentCategory + '_' + currentFifoType + '_' + currentNetworkType + '_' + channelIdx;
-                const fifoIndex = fifoMap[key];
-
-                console.log('切换通道:', {{
-                    category: currentCategory,
-                    fifoType: currentFifoType,
-                    networkType: currentNetworkType,
-                    channelIdx: channelIdx,
-                    key: key,
-                    foundIndex: fifoIndex,
-                    oldIndex: currentFifoIndex
-                }});
-
-                if (fifoIndex !== undefined) {{
-                    currentFifoIndex = fifoIndex;
-                    currentChannelIdx = channelIdx;
-                    updateCurrentFifoInfo();
-                    updateHeatmapVisibility();
-                    console.log('成功切换到FIFO索引:', fifoIndex, '通道:', channelIdx);
-                }} else {{
-                    console.warn('FIFO not found for channel:', channelIdx, 'key:', key);
-                    console.log('可用的keys:', Object.keys(fifoMap));
-                }}
-            }}
-
-            // 更新网络按钮高亮
-            function updateNetworkButtonHighlight() {{
-                const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
-                const networkButtons = Array.from(allButtons).slice(3, 6);  // 网络按钮是第4-6个(索引3-5)
-                networkButtons.forEach(b => b.classList.remove('active'));
-                const networks = ['req', 'rsp', 'data'];
-                const netIdx = networks.indexOf(currentNetworkType);
-                if (netIdx >= 0 && netIdx < networkButtons.length) {{
-                    networkButtons[netIdx].classList.add('active');
-                }}
-            }}
-
-            // 更新通道按钮高亮
-            function updateChannelButtonHighlight() {{
-                if (maxChannels <= 1) return;  // 单通道时无需更新
-
-                const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
-                const channelButtons = Array.from(allButtons).slice(6, 6 + maxChannels);
-                channelButtons.forEach(b => b.classList.remove('active'));
-
-                if (currentChannelIdx < channelButtons.length) {{
-                    channelButtons[currentChannelIdx].classList.add('active');
-                }}
-            }}
-
-            // 更新通道按钮的可见性（根据当前网络类型的通道数）
-            function updateChannelButtonsVisibility() {{
-                if (maxChannels <= 1) return;  // 单通道时无需更新
-
-                const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
-                const channelButtons = Array.from(allButtons).slice(6, 6 + maxChannels);
-                const currentChannels = channelInfo[currentNetworkType] || [0];
-
-                channelButtons.forEach((btn, idx) => {{
-                    if (currentChannels.includes(idx)) {{
-                        btn.style.display = '';  // 显示
-                    }} else {{
-                        btn.style.display = 'none';  // 隐藏
-                    }}
-                }});
-            }}
-
-            // 初始化图表面板（复用tracker-panel或创建新的）
-            function initChartPanel() {{
-                // 检查是否已存在tracker-panel（由tracker_html_injector创建）
-                if (document.getElementById('tracker-panel')) {{
-                    console.log('[FIFO] 复用已存在的tracker-panel');
-                    return;
-                }}
-
-                // 如果没有tracker-panel，创建一个新的chart-panel
-                if (document.getElementById('chart-panel')) return;
-
-                // 添加样式
-                const style = document.createElement('style');
-                style.textContent = `
-                    .chart-section {{
-                        position: fixed;
-                        right: 10px;
-                        top: 10px;
-                        width: 920px;
-                        max-width: 95vw;
-                        max-height: 95vh;
-                        background: white;
-                        padding: 15px;
-                        border-radius: 8px;
-                        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                        display: none;
-                        overflow: auto;
-                        z-index: 10000;
-                        transition: width 0.3s ease;
-                    }}
-                    .chart-section.narrow {{ width: 480px; }}
-                    .chart-section.active {{ display: block; }}
-                    .chart-grid {{
-                        display: grid;
-                        grid-template-columns: repeat(2, 440px);
-                        grid-auto-rows: 320px;
-                        grid-auto-flow: row;
-                        gap: 10px;
-                        margin-top: 5px;
-                        max-height: calc(95vh - 50px);
-                        justify-content: start;
-                    }}
-                    .chart-grid[data-count="1"] {{ grid-template-columns: 440px; justify-content: center; }}
-                    .chart-grid[data-count="2"] {{ grid-template-columns: repeat(2, 440px); justify-content: center; }}
-                    .chart-item {{
-                        position: relative;
-                        background: #f5f5f5;
-                        padding: 5px;
-                        border-radius: 6px;
-                        border: 1px solid #ddd;
-                        width: 440px;
-                        height: 320px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                    }}
-                    .chart-item-chart {{ width: 430px; height: 310px; flex-shrink: 0; }}
-                    .close-chart-btn {{
-                        position: absolute;
-                        top: 5px;
-                        right: 5px;
-                        cursor: pointer;
-                        background: #ff9800;
-                        color: white;
-                        border: none;
-                        width: 24px;
-                        height: 24px;
-                        border-radius: 50%;
-                        font-size: 16px;
-                        line-height: 1;
-                        padding: 0;
-                        z-index: 1;
-                    }}
-                    .close-chart-btn:hover {{ background: #f57c00; }}
-                    .close-all-btn {{
-                        position: absolute;
-                        top: 8px;
-                        right: 8px;
-                        cursor: pointer;
-                        background: #f44336;
-                        color: white;
-                        border: none;
-                        width: 28px;
-                        height: 28px;
-                        border-radius: 50%;
-                        font-size: 18px;
-                        line-height: 1;
-                        padding: 0;
-                    }}
-                    .close-all-btn:hover {{ background: #d32f2f; }}
-                `;
-                document.head.appendChild(style);
-
-                // 创建面板（使用安全的DOM方法）
-                const panel = document.createElement('div');
-                panel.className = 'chart-section';
-                panel.id = 'chart-panel';
-
-                const closeAllBtn = document.createElement('button');
-                closeAllBtn.className = 'close-all-btn';
-                closeAllBtn.textContent = '×';
-                closeAllBtn.title = '关闭全部';
-                closeAllBtn.onclick = function() {{ window.closeChartPanel(); }};
-
-                const container = document.createElement('div');
-                container.className = 'chart-grid';
-                container.id = 'chart-container';
-
-                panel.appendChild(closeAllBtn);
-                panel.appendChild(container);
-                document.body.appendChild(panel);
-
-                // 初始化全局队列
-                if (!window.chartQueue) {{
-                    window.chartQueue = [];
-                }}
-            }}
-
-            // 更新所有图表（全局函数，供tracker也能调用）
-            window.updateAllCharts = function() {{
-                // 优先使用tracker-panel（如果存在）
-                let panel = document.getElementById('tracker-panel');
-                let container = document.getElementById('tracker-container');
-                let queue = window.trackerQueue;
-                let itemClass = 'tracker-item';
-                let chartClass = 'tracker-chart';
-
-                // 如果没有tracker-panel，使用chart-panel
-                if (!panel) {{
-                    panel = document.getElementById('chart-panel');
-                    container = document.getElementById('chart-container');
-                    queue = window.chartQueue;
-                    itemClass = 'chart-item';
-                    chartClass = 'chart-item-chart';
-                }}
-
-                if (!panel || !container || !queue) return;
-
-                if (queue.length === 0) {{
-                    panel.classList.remove('active');
-                    return;
-                }}
-
-                panel.classList.add('active');
-                if (queue.length === 1) {{
-                    panel.classList.add('narrow');
-                }} else {{
-                    panel.classList.remove('narrow');
-                }}
-
-                // 清空容器
-                while (container.firstChild) {{
-                    container.removeChild(container.firstChild);
-                }}
-                container.setAttribute('data-count', queue.length);
-
-                // 动态创建chart-item
-                queue.forEach((item, index) => {{
-                    const chartItem = document.createElement('div');
-                    chartItem.className = itemClass;
-
-                    const closeBtn = document.createElement('button');
-                    closeBtn.className = panel.id === 'tracker-panel' ? 'close-item-btn' : 'close-chart-btn';
-                    closeBtn.textContent = '×';
-                    closeBtn.onclick = () => closeChartItem(index);
-
-                    const chartDiv = document.createElement('div');
-                    chartDiv.id = `chart-item-${{index}}`;
-                    chartDiv.className = chartClass;
-
-                    chartItem.appendChild(closeBtn);
-                    chartItem.appendChild(chartDiv);
-                    container.appendChild(chartItem);
-
-                    setTimeout(() => {{
-                        if (item.type === 'fifo') {{
-                            renderFifoChart(item, `chart-item-${{index}}`);
-                        }} else if (item.type === 'tracker' && window.createTrackerChart) {{
-                            window.createTrackerChart(item.ipData, item.ipType, item.ipPos, `chart-item-${{index}}`, item.dieId);
-                        }}
-                    }}, 10);
-                }});
-            }}
-
-            function closeChartItem(index) {{
-                let queue = window.trackerQueue || window.chartQueue;
-                if (queue && index < queue.length) {{
-                    queue.splice(index, 1);
-                    window.updateAllCharts();
-                }}
-            }}
-
-            window.closeChartPanel = function() {{
-                const panel = document.getElementById('tracker-panel') || document.getElementById('chart-panel');
-                if (panel) panel.classList.remove('active');
-                if (window.trackerQueue) window.trackerQueue.length = 0;
-                if (window.chartQueue) window.chartQueue.length = 0;
-            }};
-
-            // 渲染FIFO深度曲线
-            function renderFifoChart(item, targetDivId) {{
-                const {{ times, depths, capacity, title }} = item;
-
-                const trace = {{
-                    x: times,
-                    y: depths,
-                    mode: 'lines',
-                    line: {{ shape: 'hv', color: '#2196F3', width: 1.5 }},
-                    name: '深度',
-                    fill: 'tozeroy',
-                    fillcolor: 'rgba(33, 150, 243, 0.2)',
-                    hovertemplate: '时间: %{{x:.2f}} ns<br>深度: %{{y}}<extra></extra>'
-                }};
-
-                const layout = {{
-                    title: false,
-                    xaxis: {{ title: '时间 (ns)', showgrid: true, gridcolor: '#eee' }},
-                    yaxis: {{
-                        title: 'FIFO深度',
-                        range: [0, Math.max(capacity * 1.1, Math.max(...depths) * 1.1, 1)],
-                        showgrid: true,
-                        gridcolor: '#eee',
-                        dtick: 1,
-                        tick0: 0
-                    }},
-                    shapes: [{{
-                        type: 'line',
-                        x0: times[0],
-                        x1: times[times.length - 1],
-                        y0: capacity,
-                        y1: capacity,
-                        line: {{ dash: 'dash', color: 'red', width: 2 }}
-                    }}],
-                    annotations: [{{
-                        x: times[times.length - 1],
-                        y: capacity,
-                        text: `容量: ${{capacity}}`,
-                        showarrow: false,
-                        xanchor: 'right',
-                        yanchor: 'bottom',
-                        font: {{ color: 'red', size: 12 }}
-                    }}],
-                    margin: {{ t: 10, b: 50, l: 60, r: 20 }},
-                    showlegend: false,
-                    hovermode: 'closest'
-                }};
-
-                Plotly.newPlot(targetDivId, [trace], layout, {{ responsive: true }});
-            }}
-
-            // 显示FIFO深度曲线（添加到共享面板）
-            function showFifoChart(dieId, nodePos, category, fifoType, networkType, chIdx) {{
-                const key = `${{dieId}}_${{nodePos}}_${{category}}_${{fifoType}}_${{networkType}}_${{chIdx}}`;
-                console.log('查找FIFO事件数据, key:', key);
-
-                const eventData = fifoEventsData[key];
-                const capacity = eventData ? (eventData.capacity || 1) : 1;
-
-                // 从事件构建时序数据
-                let times = [0];
-                let depths = [0];
-
-                if (eventData && eventData.events && eventData.events.length > 0) {{
-                    const events = eventData.events;
-                    let currentDepth = 0;
-
-                    for (const [cycle, delta] of events) {{
-                        currentDepth += delta;
-                        times.push(cycle / cyclesPerNs);  // 转换为ns
-                        depths.push(currentDepth);
-                    }}
-
-                    // 添加最后一个点（保持最后深度）
-                    if (times.length > 1) {{
-                        const lastTime = times[times.length - 1];
-                        times.push(lastTime + 1);
-                        depths.push(currentDepth);
-                    }}
-                }} else {{
-                    // 无事件数据时，画一条0横线
-                    times = [0, 100];
-                    depths = [0, 0];
-                }}
-
-                // 生成标题
-                const networkLabel = {{'req': 'REQ', 'rsp': 'RSP', 'data': 'DATA'}}[networkType] || networkType;
-                const title = `Die ${{dieId}} 节点${{nodePos}} - ${{category}}-${{fifoType}} (${{networkLabel}} Ch${{chIdx}})`;
-
-                // 使用全局队列（优先使用trackerQueue，否则使用chartQueue）
-                let queue = window.trackerQueue || window.chartQueue;
-                if (!queue) {{
-                    window.chartQueue = [];
-                    queue = window.chartQueue;
-                }}
-
-                const MAX_CHARTS = 4;
-
-                // 检查是否已存在相同的FIFO图表
-                const existingIndex = queue.findIndex(item => item.type === 'fifo' && item.key === key);
-                if (existingIndex >= 0) {{
-                    // 已存在，移除旧的
-                    queue.splice(existingIndex, 1);
-                }}
-
-                // 如果队列已满，移除最旧的
-                if (queue.length >= MAX_CHARTS) {{
-                    queue.shift();
-                }}
-
-                // 添加新的FIFO图表数据
-                queue.push({{
-                    type: 'fifo',
-                    key: key,
-                    times: times,
-                    depths: depths,
-                    capacity: capacity,
-                    title: title,
-                    dieId: dieId
-                }});
-
-                // 更新显示
-                window.updateAllCharts();
-            }}
-        }}, 500);
-    }});
-</script>
-"""
-        return js_code
+        return generate_fifo_heatmap_javascript(self.fifo_data, fifo_options, num_dies, cycles_per_ns)
 
     def _save_html_with_click_events(self, fig: go.Figure, save_path: str, fifo_options: List[Tuple[str, str, str, str, int]], num_dies: int):
         """

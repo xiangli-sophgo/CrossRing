@@ -8,6 +8,22 @@
 - **仿真执行**: KCIN/DCIN仿真、实时进度、批量执行 (新增)
 - **实验管理**: 结果查询、数据分析、导出 (来自 result_db_web)
 
+## 安装依赖
+
+### Backend (Python)
+
+```bash
+cd unified_web/backend
+pip install -r requirements.txt
+```
+
+### Frontend (Node.js)
+
+```bash
+cd unified_web/frontend
+pnpm install
+```
+
 ## 快速启动
 
 ### Windows
@@ -92,3 +108,21 @@ unified_web/
 - `/api/results` - 结果查询
 - `/api/analysis` - 数据分析
 - `/api/export` - 导出功能
+
+## 常见问题
+
+### Vite 启动报错 ENOENT node_modules
+
+如果出现类似以下错误：
+
+```
+Error: ENOENT: no such file or directory, open '.../node_modules/.pnpm/xxx/dist/index.js'
+```
+
+这是 node_modules 缓存问题，清理后重新安装即可：
+
+```bash
+cd unified_web/frontend
+rm -rf node_modules
+pnpm install
+```

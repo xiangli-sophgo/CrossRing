@@ -107,8 +107,10 @@ class RequestCollector:
             src_dest_order_id = getattr(first_flit, "src_dest_order_id", -1) if first_flit else -1
             packet_category = getattr(first_flit, "packet_category", "") if first_flit else ""
 
-            # 计算延迟
-            cmd_latency, data_latency, transaction_latency = self._calculate_latencies(lifecycle, timestamps)
+            # 从flit读取已计算的延迟值（ip_interface.py中已计算）
+            cmd_latency = self._get_latency_value(first_flit, "cmd_latency") if first_flit else -1
+            data_latency = self._get_latency_value(first_flit, "data_latency") if first_flit else -1
+            transaction_latency = self._get_latency_value(first_flit, "transaction_latency") if first_flit else -1
 
             request_info = RequestInfo(
                 packet_id=packet_id,
@@ -154,63 +156,6 @@ class RequestCollector:
         self.requests.sort(key=lambda x: x.start_time)
 
         return self.requests
-
-    def _calculate_latencies(self, lifecycle, timestamps):
-        """计算延迟指标"""
-
-        # 判断是否跨Die
-        source_die = getattr(lifecycle, 'source_die', 0)
-        target_die = getattr(lifecycle, 'target_die', 0)
-        is_cross_die = (source_die != target_die)
-
-        if lifecycle.op_type == "read":
-            # 读请求延迟计算
-            cmd_entry = timestamps.get('cmd_entry_noc_from_cake0_cycle', float('inf'))
-
-            if is_cross_die:  # D2D读请求
-                cmd_received = timestamps.get('cmd_received_by_cake1_cycle', float('inf'))
-                data_entry = timestamps.get('data_entry_noc_from_cake1_cycle', float('inf'))
-            else:  # NoC读请求
-                cmd_received = timestamps.get('cmd_received_by_cake0_cycle', float('inf'))
-                data_entry = timestamps.get('data_entry_noc_from_cake0_cycle', float('inf'))
-
-            data_received = timestamps.get('data_received_complete_cycle', float('inf'))
-
-            if cmd_entry < float('inf') and cmd_received < float('inf'):
-                cmd_latency = round((cmd_received - cmd_entry) / self.network_frequency)
-            else:
-                cmd_latency = -1
-
-            if data_entry < float('inf') and data_received < float('inf'):
-                data_latency = round((data_received - data_entry) / self.network_frequency)
-            else:
-                data_latency = -1
-        else:  # write
-            # 写请求延迟计算
-            cmd_entry = timestamps.get('cmd_entry_noc_from_cake0_cycle', float('inf'))
-            cmd_received = timestamps.get('cmd_received_by_cake0_cycle', float('inf'))
-            data_entry = timestamps.get('data_entry_noc_from_cake0_cycle', float('inf'))
-            data_received = timestamps.get('data_received_complete_cycle', float('inf'))
-
-            if cmd_entry < float('inf') and cmd_received < float('inf'):
-                cmd_latency = round((cmd_received - cmd_entry) / self.network_frequency)
-            else:
-                cmd_latency = -1
-
-            if data_entry < float('inf') and data_received < float('inf'):
-                data_latency = round((data_received - data_entry) / self.network_frequency)
-            else:
-                data_latency = -1
-
-        # 事务延迟
-        start_cycle = timestamps.get('cmd_entry_cake0_cycle', float('inf'))
-        end_cycle = lifecycle.completed_cycle
-        if start_cycle < float('inf') and end_cycle < float('inf'):
-            transaction_latency = round((end_cycle - start_cycle) / self.network_frequency)
-        else:
-            transaction_latency = -1
-
-        return cmd_latency, data_latency, transaction_latency
 
     def _calculate_d2d_latencies(self, lifecycle, timestamps):
         """计算D2D请求的延迟指标"""
@@ -615,14 +560,34 @@ class LatencyStatsCollector:
     def _init_latency_stats_structure() -> Dict:
         """初始化延迟统计数据结构"""
         return {
-            "cmd": {"read": {"sum": 0, "max": 0, "count": 0, "values": []}, "write": {"sum": 0, "max": 0, "count": 0, "values": []}, "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}},
-            "data": {"read": {"sum": 0, "max": 0, "count": 0, "values": []}, "write": {"sum": 0, "max": 0, "count": 0, "values": []}, "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}},
-            "trans": {"read": {"sum": 0, "max": 0, "count": 0, "values": []}, "write": {"sum": 0, "max": 0, "count": 0, "values": []}, "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}},
+            "cmd": {
+                "read": {"sum": 0, "max": 0, "count": 0, "values": [], "time_value_pairs": []},
+                "write": {"sum": 0, "max": 0, "count": 0, "values": [], "time_value_pairs": []},
+                "mixed": {"sum": 0, "max": 0, "count": 0, "values": [], "time_value_pairs": []},
+            },
+            "data": {
+                "read": {"sum": 0, "max": 0, "count": 0, "values": [], "time_value_pairs": []},
+                "write": {"sum": 0, "max": 0, "count": 0, "values": [], "time_value_pairs": []},
+                "mixed": {"sum": 0, "max": 0, "count": 0, "values": [], "time_value_pairs": []},
+            },
+            "trans": {
+                "read": {"sum": 0, "max": 0, "count": 0, "values": [], "time_value_pairs": []},
+                "write": {"sum": 0, "max": 0, "count": 0, "values": [], "time_value_pairs": []},
+                "mixed": {"sum": 0, "max": 0, "count": 0, "values": [], "time_value_pairs": []},
+            },
         }
 
     @staticmethod
-    def _update_latency_stats(stats: Dict, category: str, req_type: str, latency_value: float):
-        """更新延迟统计数据"""
+    def _update_latency_stats(stats: Dict, category: str, req_type: str, latency_value: float, completion_time: float = None):
+        """更新延迟统计数据
+
+        Args:
+            stats: 统计数据字典
+            category: 延迟类型 ('cmd', 'data', 'trans')
+            req_type: 请求类型 ('read', 'write')
+            latency_value: 延迟值 (ns)
+            completion_time: 完成时间 (ns)，用于时序图
+        """
         if not math.isfinite(latency_value):
             return
 
@@ -632,11 +597,19 @@ class LatencyStatsCollector:
         group["max"] = max(group["max"], latency_value)
         group["values"].append(latency_value)
 
+        # 添加时间-延迟配对数据
+        if completion_time is not None and math.isfinite(completion_time):
+            group["time_value_pairs"].append((completion_time, latency_value))
+
         mixed = stats[category]["mixed"]
         mixed["sum"] += latency_value
         mixed["count"] += 1
         mixed["max"] = max(mixed["max"], latency_value)
         mixed["values"].append(latency_value)
+
+        # 添加时间-延迟配对数据到mixed
+        if completion_time is not None and math.isfinite(completion_time):
+            mixed["time_value_pairs"].append((completion_time, latency_value))
 
     @staticmethod
     def _finalize_latency_stats(stats: Dict, keep_raw_values: bool = True) -> Dict:
@@ -672,9 +645,16 @@ class LatencyStatsCollector:
         stats = self._init_latency_stats_structure()
 
         for r in requests:
-            self._update_latency_stats(stats, "cmd", r.req_type, r.cmd_latency)
-            self._update_latency_stats(stats, "data", r.req_type, r.data_latency)
-            self._update_latency_stats(stats, "trans", r.req_type, r.transaction_latency)
+            # 传入end_time作为completion_time
+            self._update_latency_stats(stats, "cmd", r.req_type, r.cmd_latency, r.end_time)
+            self._update_latency_stats(stats, "data", r.req_type, r.data_latency, r.end_time)
+            self._update_latency_stats(stats, "trans", r.req_type, r.transaction_latency, r.end_time)
+
+        # 调试：检查time_value_pairs数据
+        for cat in ["cmd", "data", "trans"]:
+            tvp_count = len(stats[cat]["mixed"]["time_value_pairs"])
+            if tvp_count > 0:
+                sample = stats[cat]["mixed"]["time_value_pairs"][:3]
 
         return self._finalize_latency_stats(stats)
 
@@ -696,7 +676,8 @@ class LatencyStatsCollector:
         for req in d2d_requests:
             for category, field_name in latency_fields:
                 latency_ns = getattr(req, field_name, float("inf"))
-                self._update_latency_stats(stats, category, req.req_type, latency_ns)
+                # 传入end_time_ns作为completion_time
+                self._update_latency_stats(stats, category, req.req_type, latency_ns, req.end_time_ns)
 
         return self._finalize_latency_stats(stats)
 
