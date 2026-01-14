@@ -505,6 +505,9 @@ class D2DFlowRenderer(BaseFlowRenderer):
                         xanchor="center",
                         y=1.05,  # 从1.15降到1.05，减小按钮与图表间距
                         yanchor="top",
+                        bgcolor="#f0f0f0",
+                        active=0,
+                        font=dict(size=12),
                     )
                 ]
             )

@@ -506,20 +506,40 @@ class SingleDieAnalyzer:
                 if hasattr(self.sim_model, "static_link_bandwidth") and self.sim_model.static_link_bandwidth:
                     static_bandwidth = self.sim_model.static_link_bandwidth
 
-                flow_fig = self.interactive_flow_visualizer.draw_flow_graph(
-                    network=self.sim_model.data_network,
+                # 检测架构版本并构造networks字典
+                if hasattr(self.sim_model, "req_networks"):
+                    # v2多通道架构
+                    networks = {
+                        "req": self.sim_model.req_networks,
+                        "rsp": self.sim_model.rsp_networks,
+                        "data": self.sim_model.data_networks,
+                    }
+                else:
+                    # v1单通道架构
+                    networks = {
+                        "req": [self.sim_model.req_network],
+                        "rsp": [self.sim_model.rsp_network],
+                        "data": [self.sim_model.data_network],
+                    }
+
+                result = self.interactive_flow_visualizer.draw_flow_graph(
+                    networks=networks,
                     ip_bandwidth_data=self.ip_bandwidth_data,
                     config=self.config,
                     mode="total",
                     save_path=None,  # 不保存独立文件
                     show_fig=False,  # 不显示
-                    return_fig=True,  # 返回Figure对象
-                    req_network=self.sim_model.req_network,  # 传入请求网络
-                    rsp_network=self.sim_model.rsp_network,  # 传入响应网络
+                    return_fig=True,  # 返回Figure对象或(Figure, JavaScript)元组
                     static_bandwidth=static_bandwidth,  # 传入静态带宽数据
                 )
+                # 处理返回值：可能是fig或(fig, js_code)
+                if isinstance(result, tuple):
+                    flow_fig, flow_js = result
+                else:
+                    flow_fig = result
+                    flow_js = None
                 # 流量图放在最前面（按用户要求顺序）
-                charts_to_merge.insert(0, ("流量图", flow_fig, None))
+                charts_to_merge.insert(0, ("流量图", flow_fig, flow_js))
 
         # 将收集的图表保存到result_processor中，供base_model后续合并
         if self.sim_model and hasattr(self.sim_model, "result_processor"):

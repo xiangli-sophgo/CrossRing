@@ -25,185 +25,97 @@ class FIFOUtilizationCollector:
         self.config = config
         self.fifo_utilization_data = {}
 
-    def collect_from_network(self, network, die_id: int, total_cycles: int, network_type: str) -> Dict:
-        """
-        从单个Network对象收集FIFO使用率数据
-
-        使用 StatisticalFIFO 获取统计数据
-
-        Args:
-            network: Network对象
-            die_id: Die ID
-            total_cycles: 仿真总周期数
-            network_type: 网络类型 ('req', 'rsp', 'data')
-
-        Returns:
-            Dict: FIFO使用率数据
-        """
-        die_data = {"IQ": {}, "RB": {}, "EQ": {}, "IQ_CH": {}, "EQ_CH": {},
-                    "RS_IN": {}, "RS_OUT": {}}  # v2 新增类别
-
-        if total_cycles <= 0:
-            print(f"警告: Die {die_id} 总周期数无效: {total_cycles}")
-            return die_data
-
-        # 从 StatisticalFIFO 获取数据
-        all_fifos = StatisticalFIFO.get_all_fifos()
-
-        # FIFO名称后缀映射 (用于过滤当前网络的FIFO)
-        # 注意: 后缀是从 network.name 提取的前3字母，如 "Response Network" -> "res"
-        network_suffix = {"req": "_req", "rsp": "_res", "data": "_dat"}
-        suffix = network_suffix.get(network_type, "")
-
-        for name, fifo in all_fifos.items():
-            # 过滤只属于当前网络的FIFO (名称以_req/_res/_dat结尾)
-            if suffix and not name.endswith(suffix):
-                continue
-
-            node_pos = fifo.node_pos
-            category = fifo.category
-            fifo_type = fifo.fifo_type
-            ip_type = fifo.ip_type
-
-            # 计算统计数据
-            capacity = fifo.maxlen
-            avg_depth = fifo.get_avg_depth()
-            peak_depth = fifo.max_depth
-            flit_count = fifo.flit_count
-
-            avg_util = (avg_depth / capacity * 100) if capacity > 0 else 0
-            peak_util = (peak_depth / capacity * 100) if capacity > 0 else 0
-
-            stat_data = {
-                "avg": avg_util,
-                "peak": peak_util,
-                "flit_count": flit_count,
-                "capacity": capacity,
-                "avg_depth": avg_depth,
-                "peak_depth": peak_depth,
-                "itag_cumulative_count": 0,
-                "itag_rate": 0.0,
-                "etag_t0_cumulative": 0,
-                "etag_t1_cumulative": 0,
-                "etag_t2_cumulative": 0,
-                "etag_t0_rate": 0.0,
-                "etag_t1_rate": 0.0,
-                "etag_t2_rate": 0.0,
-                "reverse_inject_count": 0,
-                "reverse_inject_rate": 0.0,
-            }
-
-            # 分类存储
-            if category in ["IQ", "RB", "EQ"]:
-                # v1 方向 FIFO
-                if fifo_type in ["TL", "TR", "TU", "TD", "EQ"]:
-                    if node_pos not in die_data[category]:
-                        die_data[category][node_pos] = {}
-                    die_data[category][node_pos][fifo_type] = stat_data
-                # v1 CH buffer
-                elif fifo_type == "CH" and ip_type:
-                    ch_key = f"{category}_CH"
-                    if node_pos not in die_data[ch_key]:
-                        die_data[ch_key][node_pos] = {}
-                    die_data[ch_key][node_pos][ip_type] = stat_data
-
-            elif category in ["RS_IN", "RS_OUT"]:
-                # v2 RingStation FIFO
-                if node_pos not in die_data[category]:
-                    die_data[category][node_pos] = {}
-                key = ip_type if ip_type else fifo_type
-                die_data[category][node_pos][key] = stat_data
-
-        # 附加 ITag/ETag 统计 (从 network 获取)
-        self._collect_itag_etag_stats(network, die_data, total_cycles)
-
-        return die_data
-
-    def _collect_itag_etag_stats(self, network, die_data: Dict, total_cycles: int):
-        """收集 ITag/ETag 统计数据"""
-        # IQ ITag统计 (TR/TL横向注入)
-        for direction in ["TR", "TL"]:
-            if hasattr(network, "fifo_itag_cumulative_count"):
-                for node_pos in die_data.get("IQ", {}):
-                    if direction in die_data["IQ"].get(node_pos, {}):
-                        itag_cumulative = network.fifo_itag_cumulative_count.get("IQ", {}).get(direction, {}).get(node_pos, 0)
-                        flit_count = die_data["IQ"][node_pos][direction].get("flit_count", 0)
-                        itag_rate = (itag_cumulative / (total_cycles * flit_count) * 100) if flit_count > 0 and total_cycles > 0 else 0
-                        die_data["IQ"][node_pos][direction]["itag_cumulative_count"] = itag_cumulative
-                        die_data["IQ"][node_pos][direction]["itag_rate"] = itag_rate
-
-        # RB ITag统计 (TU/TD纵向转向)
-        for direction in ["TU", "TD"]:
-            if hasattr(network, "fifo_itag_cumulative_count"):
-                for node_pos in die_data.get("RB", {}):
-                    if direction in die_data["RB"].get(node_pos, {}):
-                        itag_cumulative = network.fifo_itag_cumulative_count.get("RB", {}).get(direction, {}).get(node_pos, 0)
-                        flit_count = die_data["RB"][node_pos][direction].get("flit_count", 0)
-                        itag_rate = (itag_cumulative / (total_cycles * flit_count) * 100) if flit_count > 0 and total_cycles > 0 else 0
-                        die_data["RB"][node_pos][direction]["itag_cumulative_count"] = itag_cumulative
-                        die_data["RB"][node_pos][direction]["itag_rate"] = itag_rate
-
-        # RB ETag统计 (TL/TR横向下环)
-        for direction in ["TL", "TR"]:
-            if hasattr(network, "fifo_etag_entry_count"):
-                for node_pos in die_data.get("RB", {}):
-                    if direction in die_data["RB"].get(node_pos, {}):
-                        etag_dist = network.fifo_etag_entry_count.get("RB", {}).get(direction, {}).get(node_pos, {})
-                        if etag_dist:
-                            t0, t1, t2 = etag_dist.get("T0", 0), etag_dist.get("T1", 0), etag_dist.get("T2", 0)
-                            total_etag = t0 + t1 + t2
-                            die_data["RB"][node_pos][direction]["etag_t0_cumulative"] = t0
-                            die_data["RB"][node_pos][direction]["etag_t1_cumulative"] = t1
-                            die_data["RB"][node_pos][direction]["etag_t2_cumulative"] = t2
-                            if total_etag > 0:
-                                die_data["RB"][node_pos][direction]["etag_t0_rate"] = t0 / total_etag * 100
-                                die_data["RB"][node_pos][direction]["etag_t1_rate"] = t1 / total_etag * 100
-                                die_data["RB"][node_pos][direction]["etag_t2_rate"] = t2 / total_etag * 100
-
-        # EQ ETag统计 (TU/TD纵向下环)
-        for direction in ["TU", "TD"]:
-            if hasattr(network, "fifo_etag_entry_count"):
-                for node_pos in die_data.get("EQ", {}):
-                    if direction in die_data["EQ"].get(node_pos, {}):
-                        etag_dist = network.fifo_etag_entry_count.get("EQ", {}).get(direction, {}).get(node_pos, {})
-                        if etag_dist:
-                            t0, t1, t2 = etag_dist.get("T0", 0), etag_dist.get("T1", 0), etag_dist.get("T2", 0)
-                            total_etag = t0 + t1 + t2
-                            die_data["EQ"][node_pos][direction]["etag_t0_cumulative"] = t0
-                            die_data["EQ"][node_pos][direction]["etag_t1_cumulative"] = t1
-                            die_data["EQ"][node_pos][direction]["etag_t2_cumulative"] = t2
-                            if total_etag > 0:
-                                die_data["EQ"][node_pos][direction]["etag_t0_rate"] = t0 / total_etag * 100
-                                die_data["EQ"][node_pos][direction]["etag_t1_rate"] = t1 / total_etag * 100
-                                die_data["EQ"][node_pos][direction]["etag_t2_rate"] = t2 / total_etag * 100
-
     def collect_from_dies(self, dies: Dict, total_cycles: int) -> Dict:
         """
-        从所有Die收集FIFO使用率数据（支持三个网络）
+        从所有Die收集FIFO使用率数据（支持多通道，使用统一数据收集接口）
 
         Args:
             dies: Die字典 {die_id: die_model}
             total_cycles: 仿真总周期数
 
         Returns:
-            Dict: {die_id: {network_type: die_data}}
+            Dict: {die_id: {network_type: {ch_idx: die_data}}}
         """
+        from src.analysis.data_collectors import CircuitStatsCollector
+
         self.fifo_utilization_data = {}
 
         for die_id, die_model in dies.items():
-            self.fifo_utilization_data[die_id] = {}
+            # 使用统一的数据收集接口
+            collector = CircuitStatsCollector()
+            fifo_stats = collector.process_fifo_usage_statistics(die_model)
 
-            # 收集三个网络的数据
-            network_types = [("req", "req_network"), ("rsp", "rsp_network"), ("data", "data_network")]
-
-            for network_type, network_attr in network_types:
-                if hasattr(die_model, network_attr):
-                    network = getattr(die_model, network_attr)
-                    self.fifo_utilization_data[die_id][network_type] = self.collect_from_network(network, die_id, total_cycles, network_type)
-                else:
-                    print(f"警告: Die {die_id} 没有{network_attr}属性")
+            # 转换数据格式为热力图需要的格式
+            self.fifo_utilization_data[die_id] = self._convert_stats_to_heatmap_format(
+                fifo_stats, die_model, total_cycles
+            )
 
         return self.fifo_utilization_data
+
+    def _convert_stats_to_heatmap_format(self, fifo_stats: Dict, die_model, total_cycles: int) -> Dict:
+        """
+        将 process_fifo_usage_statistics() 返回的数据转换为热力图需要的格式
+
+        Args:
+            fifo_stats: {network_type: {ch_idx: {category: {fifo_type: {pos: stats}}}}}
+            die_model: Die模型对象
+            total_cycles: 总周期数
+
+        Returns:
+            Dict: {network_type: {ch_idx: die_data}}
+        """
+        result = {}
+
+        for network_type, channels in fifo_stats.items():
+            result[network_type] = {}
+
+            for ch_idx, categories in channels.items():
+                die_data = {"IQ": {}, "RB": {}, "EQ": {}, "IQ_CH": {}, "EQ_CH": {}}
+
+                for category, fifo_types in categories.items():
+                    for fifo_type, positions in fifo_types.items():
+                        for pos, stats in positions.items():
+                            # 转换为热力图需要的stat_data格式
+                            stat_data = {
+                                "avg": stats["avg_utilization"],
+                                "peak": stats["max_utilization"],
+                                "flit_count": stats["flit_count"],
+                                "capacity": stats.get("capacity", 0),
+                                "avg_depth": stats["avg_depth"],
+                                "peak_depth": stats["max_depth"],
+                                "itag_cumulative_count": stats.get("itag_cumulative_count", 0),
+                                "itag_rate": stats.get("itag_rate", 0.0),
+                                "etag_t0_cumulative": stats.get("etag_t0_cumulative", 0),
+                                "etag_t1_cumulative": stats.get("etag_t1_cumulative", 0),
+                                "etag_t2_cumulative": stats.get("etag_t2_cumulative", 0),
+                                "etag_t0_rate": stats.get("etag_t0_rate", 0.0),
+                                "etag_t1_rate": stats.get("etag_t1_rate", 0.0),
+                                "etag_t2_rate": stats.get("etag_t2_rate", 0.0),
+                                "reverse_inject_count": 0,
+                                "reverse_inject_rate": 0.0,
+                            }
+
+                            # CH buffer特殊处理
+                            if fifo_type == "CH":
+                                # pos格式为 "node_ip_type"，如 "0_ddr_0"
+                                if isinstance(pos, str) and "_" in pos:
+                                    parts = pos.split("_", 1)
+                                    node_pos = int(parts[0])
+                                    ip_type = parts[1]
+
+                                    ch_key = f"{category}_CH"
+                                    if node_pos not in die_data[ch_key]:
+                                        die_data[ch_key][node_pos] = {}
+                                    die_data[ch_key][node_pos][ip_type] = stat_data
+                            else:
+                                # 普通FIFO（方向类型）
+                                if pos not in die_data[category]:
+                                    die_data[category][pos] = {}
+                                die_data[category][pos][fifo_type] = stat_data
+
+                result[network_type][ch_idx] = die_data
+
+        return result
 
     def _get_fifo_capacity(self, fifo_category: str, fifo_type: str, node_pos: int) -> int:
         """
@@ -288,26 +200,10 @@ class FIFOHeatmapVisualizer:
         # 创建图形
         fig = self._create_plotly_figure(dies, die_layout, die_rotations, fifo_options, return_fig_and_js)
 
-        # 生成多通道按钮（如果是多通道情况）
-        buttons_html = None
-        buttons_js_extra = None
-
-        # 检查是否是多通道
-        num_channels = self._count_channels(dies)
-        if num_channels > 1:
-            buttons_html, buttons_js_extra = self._generate_fifo_multichannel_buttons(dies, num_channels)
-
         # 如果只返回Figure和JavaScript
         if return_fig_and_js:
             js_code = self._generate_custom_javascript(fifo_options, len(dies))
-            # 如果有多通道按钮，添加到JavaScript
-            if buttons_js_extra:
-                js_code += "\n" + buttons_js_extra
-            # 返回(fig, buttons_html, buttons_js)元组
-            if buttons_html:
-                return fig, buttons_html, js_code
-            else:
-                return fig, None, js_code
+            return fig, js_code
 
         # 保存或显示
         if save_path:
@@ -323,15 +219,15 @@ class FIFOHeatmapVisualizer:
             fig.show()
             return None
 
-    def _get_available_fifo_types(self, dies: Dict) -> List[Tuple[str, str, str, str]]:
+    def _get_available_fifo_types(self, dies: Dict) -> List[Tuple[str, str, str, str, int]]:
         """
-        获取所有可用的FIFO类型（支持三网络）
+        获取所有可用的FIFO类型（支持多通道）
 
         Args:
             dies: Die字典
 
         Returns:
-            List[Tuple]: [(显示名称, fifo_category, fifo_type, network_type), ...]
+            List[Tuple]: [(显示名称, fifo_category, fifo_type, network_type, ch_idx), ...]
         """
         options = []
         network_display = {"req": "请求", "rsp": "响应", "data": "数据"}
@@ -344,87 +240,92 @@ class FIFOHeatmapVisualizer:
                 ch_name_list = first_die.config.CH_NAME_LIST
 
         for die_id, networks_data in self.fifo_data.items():
-            for network_type, die_data in networks_data.items():
+            for network_type, channels_data in networks_data.items():
                 net_label = network_display.get(network_type, network_type)
 
-                # IQ方向队列
-                for node_pos, directions in die_data.get("IQ", {}).items():
-                    for direction in directions.keys():
-                        option_name = f"IQ-{direction} ({net_label})"
-                        option_tuple = (option_name, "IQ", direction, network_type)
-                        if option_tuple not in options:
-                            options.append(option_tuple)
+                # 遍历所有通道
+                for ch_idx, die_data in channels_data.items():
+                    # 通道标签（多通道时显示Ch0/Ch1，单通道时不显示）
+                    ch_label = f" Ch{ch_idx}" if len(channels_data) > 1 else ""
 
-                # IQ通道缓冲 - 使用配置中的CH_NAME_LIST
-                if ch_name_list:
-                    for ip_type in ch_name_list:
-                        option_name = f"IQ_CH-{ip_type} ({net_label})"
-                        option_tuple = (option_name, "IQ_CH", ip_type, network_type)
-                        if option_tuple not in options:
-                            options.append(option_tuple)
-                else:
-                    # 降级方案：从已收集的数据获取
-                    for node_pos, ip_types in die_data.get("IQ_CH", {}).items():
-                        for ip_type in ip_types.keys():
-                            option_name = f"IQ_CH-{ip_type} ({net_label})"
-                            option_tuple = (option_name, "IQ_CH", ip_type, network_type)
+                    # IQ方向队列
+                    for node_pos, directions in die_data.get("IQ", {}).items():
+                        for direction in directions.keys():
+                            option_name = f"IQ-{direction} ({net_label}{ch_label})"
+                            option_tuple = (option_name, "IQ", direction, network_type, ch_idx)
                             if option_tuple not in options:
                                 options.append(option_tuple)
 
-                # RB
-                for node_pos, directions in die_data.get("RB", {}).items():
-                    for direction in directions.keys():
-                        option_name = f"RB-{direction} ({net_label})"
-                        option_tuple = (option_name, "RB", direction, network_type)
-                        if option_tuple not in options:
-                            options.append(option_tuple)
+                    # IQ通道缓冲 - 使用配置中的CH_NAME_LIST
+                    if ch_name_list:
+                        for ip_type in ch_name_list:
+                            option_name = f"IQ_CH-{ip_type} ({net_label}{ch_label})"
+                            option_tuple = (option_name, "IQ_CH", ip_type, network_type, ch_idx)
+                            if option_tuple not in options:
+                                options.append(option_tuple)
+                    else:
+                        # 降级方案：从已收集的数据获取
+                        for node_pos, ip_types in die_data.get("IQ_CH", {}).items():
+                            for ip_type in ip_types.keys():
+                                option_name = f"IQ_CH-{ip_type} ({net_label}{ch_label})"
+                                option_tuple = (option_name, "IQ_CH", ip_type, network_type, ch_idx)
+                                if option_tuple not in options:
+                                    options.append(option_tuple)
 
-                # EQ下环队列
-                for node_pos, directions in die_data.get("EQ", {}).items():
-                    for direction in directions.keys():
-                        option_name = f"EQ-{direction} ({net_label})"
-                        option_tuple = (option_name, "EQ", direction, network_type)
-                        if option_tuple not in options:
-                            options.append(option_tuple)
-
-                # EQ通道缓冲 - 使用配置中的CH_NAME_LIST
-                if ch_name_list:
-                    for ip_type in ch_name_list:
-                        option_name = f"EQ_CH-{ip_type} ({net_label})"
-                        option_tuple = (option_name, "EQ_CH", ip_type, network_type)
-                        if option_tuple not in options:
-                            options.append(option_tuple)
-                else:
-                    # 降级方案：从已收集的数据获取
-                    for node_pos, ip_types in die_data.get("EQ_CH", {}).items():
-                        for ip_type in ip_types.keys():
-                            option_name = f"EQ_CH-{ip_type} ({net_label})"
-                            option_tuple = (option_name, "EQ_CH", ip_type, network_type)
+                    # RB
+                    for node_pos, directions in die_data.get("RB", {}).items():
+                        for direction in directions.keys():
+                            option_name = f"RB-{direction} ({net_label}{ch_label})"
+                            option_tuple = (option_name, "RB", direction, network_type, ch_idx)
                             if option_tuple not in options:
                                 options.append(option_tuple)
 
-                # RS_IN (v2 RingStation 输入端)
-                for node_pos, fifo_types in die_data.get("RS_IN", {}).items():
-                    for fifo_key in fifo_types.keys():
-                        option_name = f"RS_IN-{fifo_key} ({net_label})"
-                        option_tuple = (option_name, "RS_IN", fifo_key, network_type)
-                        if option_tuple not in options:
-                            options.append(option_tuple)
+                    # EQ下环队列
+                    for node_pos, directions in die_data.get("EQ", {}).items():
+                        for direction in directions.keys():
+                            option_name = f"EQ-{direction} ({net_label}{ch_label})"
+                            option_tuple = (option_name, "EQ", direction, network_type, ch_idx)
+                            if option_tuple not in options:
+                                options.append(option_tuple)
 
-                # RS_OUT (v2 RingStation 输出端)
-                for node_pos, fifo_types in die_data.get("RS_OUT", {}).items():
-                    for fifo_key in fifo_types.keys():
-                        option_name = f"RS_OUT-{fifo_key} ({net_label})"
-                        option_tuple = (option_name, "RS_OUT", fifo_key, network_type)
-                        if option_tuple not in options:
-                            options.append(option_tuple)
+                    # EQ通道缓冲 - 使用配置中的CH_NAME_LIST
+                    if ch_name_list:
+                        for ip_type in ch_name_list:
+                            option_name = f"EQ_CH-{ip_type} ({net_label}{ch_label})"
+                            option_tuple = (option_name, "EQ_CH", ip_type, network_type, ch_idx)
+                            if option_tuple not in options:
+                                options.append(option_tuple)
+                    else:
+                        # 降级方案：从已收集的数据获取
+                        for node_pos, ip_types in die_data.get("EQ_CH", {}).items():
+                            for ip_type in ip_types.keys():
+                                option_name = f"EQ_CH-{ip_type} ({net_label}{ch_label})"
+                                option_tuple = (option_name, "EQ_CH", ip_type, network_type, ch_idx)
+                                if option_tuple not in options:
+                                    options.append(option_tuple)
 
-        # 排序：先按category，再按network_type，最后按名称
+                    # RS_IN (v2 RingStation 输入端)
+                    for node_pos, fifo_types in die_data.get("RS_IN", {}).items():
+                        for fifo_key in fifo_types.keys():
+                            option_name = f"RS_IN-{fifo_key} ({net_label}{ch_label})"
+                            option_tuple = (option_name, "RS_IN", fifo_key, network_type, ch_idx)
+                            if option_tuple not in options:
+                                options.append(option_tuple)
+
+                    # RS_OUT (v2 RingStation 输出端)
+                    for node_pos, fifo_types in die_data.get("RS_OUT", {}).items():
+                        for fifo_key in fifo_types.keys():
+                            option_name = f"RS_OUT-{fifo_key} ({net_label}{ch_label})"
+                            option_tuple = (option_name, "RS_OUT", fifo_key, network_type, ch_idx)
+                            if option_tuple not in options:
+                                options.append(option_tuple)
+
+        # 排序：先按category，再按network_type，再按ch_idx，最后按名称
         def sort_key(item):
-            name, category, _, network_type = item
+            name, category, _, network_type, ch_idx = item
             category_order = {"IQ": 0, "RB": 1, "EQ": 2, "IQ_CH": 3, "EQ_CH": 4, "RS_IN": 5, "RS_OUT": 6}
             network_order = {"req": 0, "rsp": 1, "data": 2}
-            return (category_order.get(category, 999), network_order.get(network_type, 999), name)
+            return (category_order.get(category, 999), network_order.get(network_type, 999), ch_idx, name)
 
         options.sort(key=sort_key)
         return options
@@ -492,7 +393,7 @@ class FIFOHeatmapVisualizer:
         self._add_architecture_diagram(fig, fifo_options, dies)
 
         # 添加平均/峰值按钮
-        self._add_mode_buttons(fig, fifo_options, traces_data)
+        self._add_mode_buttons(fig, fifo_options, traces_data, dies)
 
         # 设置布局
         fig.update_layout(
@@ -695,9 +596,9 @@ class FIFOHeatmapVisualizer:
             # 未知旋转角度，不应用旋转
             return orig_row, orig_col
 
-    def _create_heatmap_traces(self, fifo_options: List[Tuple[str, str, str, str]], dies: Dict, die_layout: Dict, die_rotations: Dict) -> Dict:
+    def _create_heatmap_traces(self, fifo_options: List[Tuple[str, str, str, str, int]], dies: Dict, die_layout: Dict, die_rotations: Dict) -> Dict:
         """
-        为所有FIFO选项和统计模式创建热力图traces（使用Scatter支持多Die布局）
+        为所有FIFO选项和统计模式创建热力图traces（使用Scatter支持多Die布局和多通道）
 
         Returns:
             Dict: {(option_tuple, mode): trace}
@@ -718,10 +619,11 @@ class FIFOHeatmapVisualizer:
         # 预扫描：计算所有FIFO的flit_count全局最大值（用于统一颜色范围）
         global_max_flit_count = 0
         for option in fifo_options:
-            option_name, fifo_category, fifo_type, network_type = option
+            option_name, fifo_category, fifo_type, network_type, ch_idx = option
             for die_id in sorted(self.fifo_data.keys()):
                 networks_data = self.fifo_data[die_id]
-                die_data = networks_data.get(network_type, {})
+                channels_data = networks_data.get(network_type, {})
+                die_data = channels_data.get(ch_idx, {})
                 category_data = die_data.get(fifo_category, {})
 
                 for node_data in category_data.values():
@@ -736,7 +638,7 @@ class FIFOHeatmapVisualizer:
             global_max_flit_count = 1
 
         for option in fifo_options:
-            option_name, fifo_category, fifo_type, network_type = option
+            option_name, fifo_category, fifo_type, network_type, ch_idx = option
 
             for mode in ["avg", "peak", "flit_count"]:
                 # 收集所有Die的所有节点数据
@@ -756,7 +658,8 @@ class FIFOHeatmapVisualizer:
                     offset_x, offset_y = die_offsets[die_id]
 
                     networks_data = self.fifo_data[die_id]
-                    die_data = networks_data.get(network_type, {})
+                    channels_data = networks_data.get(network_type, {})
+                    die_data = channels_data.get(ch_idx, {})
                     category_data = die_data.get(fifo_category, {})
 
                     # === 先遍历一遍，记录本die所有节点旋转后的new_row最大值，用于底对齐 ===
@@ -945,10 +848,22 @@ class FIFOHeatmapVisualizer:
                 die_width = (cols - 1) * node_spacing
                 die_height = (rows - 1) * node_spacing
 
-    def _add_mode_buttons(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str]], traces_data: Dict):
-        """添加平均/峰值切换按钮和网络类型切换按钮"""
+    def _add_mode_buttons(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str, int]], traces_data: Dict, dies: Dict):
+        """添加三层按钮：模式/网络类型/通道"""
 
-        # 创建平均/峰值/Flit计数按钮
+        # 检测每个网络类型的通道数
+        channel_counts = {"req": set(), "rsp": set(), "data": set()}
+        for option in fifo_options:
+            _, _, _, network_type, ch_idx = option
+            channel_counts[network_type].add(ch_idx)
+
+        # 转换为有序列表并获取最大通道数
+        for net_type in channel_counts:
+            channel_counts[net_type] = sorted(list(channel_counts[net_type]))
+
+        max_channels = max(len(chs) for chs in channel_counts.values())
+
+        # 第一组：模式按钮（平均/峰值/Flit计数）
         mode_buttons = []
         for target_mode in ["avg", "peak", "flit_count"]:
             if target_mode == "avg":
@@ -960,50 +875,77 @@ class FIFOHeatmapVisualizer:
             button = dict(label=mode_label, method="skip")
             mode_buttons.append(button)
 
-        # 创建网络类型切换按钮
+        # 第二组：网络类型按钮（REQ/RSP/DATA）
         network_buttons = []
         for network_type in ["req", "rsp", "data"]:
-            network_label = {"req": "请求", "rsp": "响应", "data": "数据"}[network_type]
+            network_label = {"req": "REQ", "rsp": "RSP", "data": "DATA"}[network_type]
             button = dict(label=network_label, method="skip")
             network_buttons.append(button)
 
-        # 添加两组按钮
-        fig.update_layout(
-            updatemenus=[
-                # 第一组：平均/峰值按钮（左侧）
+        # 第三组：通道按钮（Ch0/Ch1/Ch2...）
+        # 生成最大通道数的按钮（JavaScript会根据网络类型动态显示/隐藏）
+        channel_buttons = []
+        for ch_idx in range(max_channels):
+            button = dict(label=f"Ch{ch_idx}", method="skip")
+            channel_buttons.append(button)
+
+        # 组装updatemenus（同一排，分组显示）
+        updatemenus = [
+            # 第一组：模式按钮
+            dict(
+                buttons=mode_buttons,
+                direction="left",
+                pad={"r": 5, "t": 10},
+                showactive=True,
+                active=0,  # 初始高亮"平均使用率"
+                x=0.1,
+                xanchor="center",
+                y=1.13,
+                yanchor="top",
+                bgcolor="lightgray",
+                bordercolor="gray",
+                font=dict(size=11),
+                type="buttons",
+            ),
+            # 第二组：网络类型按钮
+            dict(
+                buttons=network_buttons,
+                direction="left",
+                pad={"r": 5, "t": 10},
+                showactive=True,
+                active=2,  # 初始高亮"DATA"
+                x=0.3,
+                xanchor="center",
+                y=1.13,
+                yanchor="top",
+                bgcolor="lightgray",
+                bordercolor="gray",
+                font=dict(size=11),
+                type="buttons",
+            ),
+        ]
+
+        # 只有多通道时才添加通道按钮组
+        if max_channels > 1:
+            updatemenus.append(
                 dict(
-                    buttons=mode_buttons,
+                    buttons=channel_buttons,
                     direction="left",
-                    pad={"r": 10, "t": 10},
+                    pad={"r": 5, "t": 10},
                     showactive=True,
-                    active=0,  # 初始高亮平均使用率
-                    x=0.3,
+                    active=0,  # 初始高亮"Ch0"
+                    x=0.5,
                     xanchor="center",
-                    y=1.12,  # 提高位置避免与标题重叠
+                    y=1.13,
                     yanchor="top",
-                    bgcolor="lightblue",
-                    bordercolor="blue",
-                    font=dict(size=12),
+                    bgcolor="lightgray",
+                    bordercolor="gray",
+                    font=dict(size=11),
                     type="buttons",
-                ),
-                # 第二组：网络类型按钮（右侧）
-                dict(
-                    buttons=network_buttons,
-                    direction="left",
-                    pad={"r": 10, "t": 10},
-                    showactive=True,
-                    active=2,  # 初始高亮数据
-                    x=0.7,
-                    xanchor="center",
-                    y=1.12,  # 提高位置避免与标题重叠
-                    yanchor="top",
-                    bgcolor="lightblue",  # 改为蓝色
-                    bordercolor="blue",
-                    font=dict(size=12),
-                    type="buttons",
-                ),
-            ]
-        )
+                )
+            )
+
+        fig.update_layout(updatemenus=updatemenus)
 
     def _short_name(self, name: str) -> str:
         """将IP名称缩写: gdma_0 -> G0, ddr_0 -> D0"""
@@ -1013,7 +955,7 @@ class FIFOHeatmapVisualizer:
             return f"{short}{idx}"
         return name
 
-    def _add_architecture_diagram(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str]], dies: Dict):
+    def _add_architecture_diagram(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str, int]], dies: Dict):
         """
         在右侧子图添加CrossRing架构示意图
         根据KCIN版本自动选择v1或v2布局
@@ -1029,7 +971,7 @@ class FIFOHeatmapVisualizer:
         else:
             self._add_architecture_diagram_v1(fig, fifo_options, dies)
 
-    def _add_architecture_diagram_v1(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str]], dies: Dict):
+    def _add_architecture_diagram_v1(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str, int]], dies: Dict):
         """
         v1架构示意图（IQ/RB/EQ三模块布局）
 
@@ -1122,7 +1064,7 @@ class FIFOHeatmapVisualizer:
         fig.update_xaxes(range=[-1, 26], row=1, col=2)
         fig.update_yaxes(range=[-1, 22], row=1, col=2)
 
-    def _add_architecture_diagram_v2(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str]], dies: Dict):
+    def _add_architecture_diagram_v2(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str, int]], dies: Dict):
         """
         v2架构示意图（RingStation单框布局）
 
@@ -1259,51 +1201,53 @@ class FIFOHeatmapVisualizer:
             col=2,
         )
 
-    def _generate_custom_javascript(self, fifo_options: List[Tuple[str, str, str, str]], num_dies: int) -> str:
+    def _generate_custom_javascript(self, fifo_options: List[Tuple[str, str, str, str, int]], num_dies: int) -> str:
         """
         生成FIFO热力图的自定义JavaScript代码
 
         Args:
-            fifo_options: FIFO选项列表（四元组）
+            fifo_options: FIFO选项列表（5元组：name, category, fifo_type, network_type, ch_idx）
             num_dies: Die数量
 
         Returns:
             str: JavaScript代码字符串
         """
         # 创建FIFO选项映射 (用于JavaScript查找)
-        # key: "category_fifo_type_network_type" -> index
+        # key: "category_fifo_type_network_type_ch_idx" -> index
         fifo_map = {}
-        for idx, (name, category, fifo_type, network_type) in enumerate(fifo_options):
-            key = f"{category}_{fifo_type}_{network_type}"
+        for idx, (name, category, fifo_type, network_type, ch_idx) in enumerate(fifo_options):
+            key = f"{category}_{fifo_type}_{network_type}_{ch_idx}"
             fifo_map[key] = idx
+
+        # 检测每个网络类型有多少个通道
+        channel_counts = {"req": set(), "rsp": set(), "data": set()}
+        for _, _, _, network_type, ch_idx in fifo_options:
+            channel_counts[network_type].add(ch_idx)
+
+        # 转换为有序列表
+        channel_info = {
+            net_type: sorted(list(channels))
+            for net_type, channels in channel_counts.items()
+        }
+        max_channels = max(len(chs) for chs in channel_info.values()) if channel_info else 1
 
         # 计算trace索引
         num_heatmap_traces = len(fifo_options) * 3
 
         # 创建FIFO选项的详细信息（用于JavaScript）
-        fifo_options_js = [[opt[0], opt[1], opt[2], opt[3]] for opt in fifo_options]
+        fifo_options_js = [[opt[0], opt[1], opt[2], opt[3], opt[4]] for opt in fifo_options]
 
-        # 生成JavaScript代码（包含CSS样式）
+        # 生成JavaScript代码
         js_code = f"""
-<style>
-    /* 自定义按钮样式 */
-    .updatemenu-button.active {{
-        background-color: #3b82f6 !important;
-        color: white !important;
-        border: 2px solid #1d4ed8 !important;
-        font-weight: bold !important;
-    }}
-    .updatemenu-button {{
-        transition: all 0.2s ease !important;
-    }}
-</style>
 <script>
-    // FIFO选项映射（包含网络类型）
+    // FIFO选项映射（包含网络类型和通道索引）
     const fifoMap = {str(fifo_map).replace("'", '"')};
     const fifoOptionsData = {str(fifo_options_js).replace("'", '"')};
     const numFifoOptions = {len(fifo_options)};
     const numDies = {num_dies};
     const numHeatmapTraces = {num_heatmap_traces};
+    const channelInfo = {str(channel_info).replace("'", '"')};  // {{req: [0,1], rsp: [0], data: [0,1,2]}}
+    const maxChannels = {max_channels};
 
     // 当前选中的状态
     let currentFifoIndex = 0;  // 默认第一个FIFO
@@ -1311,6 +1255,7 @@ class FIFOHeatmapVisualizer:
     let currentNetworkType = fifoOptionsData.length > 0 ? fifoOptionsData[0][3] : 'data';  // 从第一个选项获取网络类型
     let currentCategory = fifoOptionsData.length > 0 ? fifoOptionsData[0][1] : null;  // 从第一个选项获取类别
     let currentFifoType = fifoOptionsData.length > 0 ? fifoOptionsData[0][2] : null;  // 从第一个选项获取FIFO类型
+    let currentChannelIdx = fifoOptionsData.length > 0 ? fifoOptionsData[0][4] : 0;  // 从第一个选项获取通道索引
 
     // 等待Plotly加载完成
     document.addEventListener('DOMContentLoaded', function() {{
@@ -1335,22 +1280,30 @@ class FIFOHeatmapVisualizer:
                         const fifoType = customdata[1];
                         console.log('点击FIFO:', category, fifoType);
 
-                        // 使用当前选中的网络类型
-                        const key = category + '_' + fifoType + '_' + currentNetworkType;
+                        // 使用当前选中的网络类型和通道索引
+                        const key = category + '_' + fifoType + '_' + currentNetworkType + '_' + currentChannelIdx;
                         console.log('查找key:', key);
 
                         let fifoIndex = fifoMap[key];
                         if (fifoIndex === undefined) {{
-                            // 如果当前网络类型不存在，尝试其他网络
+                            // 如果当前网络类型+通道不存在，尝试其他网络和通道
+                            let found = false;
                             for (let net of ['data', 'req', 'rsp']) {{
-                                const tryKey = category + '_' + fifoType + '_' + net;
-                                if (fifoMap[tryKey] !== undefined) {{
-                                    fifoIndex = fifoMap[tryKey];
-                                    currentNetworkType = net;
-                                    updateNetworkButtonHighlight();
-                                    console.log('在网络', net, '找到FIFO, index:', fifoIndex);
-                                    break;
+                                const channels = channelInfo[net] || [0];
+                                for (let ch of channels) {{
+                                    const tryKey = category + '_' + fifoType + '_' + net + '_' + ch;
+                                    if (fifoMap[tryKey] !== undefined) {{
+                                        fifoIndex = fifoMap[tryKey];
+                                        currentNetworkType = net;
+                                        currentChannelIdx = ch;
+                                        updateNetworkButtonHighlight();
+                                        updateChannelButtonHighlight();
+                                        console.log('在网络', net, '通道', ch, '找到FIFO, index:', fifoIndex);
+                                        found = true;
+                                        break;
+                                    }}
                                 }}
+                                if (found) break;
                             }}
                         }} else {{
                             console.log('找到FIFO index:', fifoIndex);
@@ -1373,6 +1326,7 @@ class FIFOHeatmapVisualizer:
                     currentCategory = option[1];
                     currentFifoType = option[2];
                     currentNetworkType = option[3];
+                    currentChannelIdx = option[4];
                 }}
             }}
 
@@ -1437,17 +1391,21 @@ class FIFOHeatmapVisualizer:
                 const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
                 console.log('找到按钮数量:', allButtons.length);
 
-                if (allButtons.length < 6) {{
+                // 计算预期按钮总数：3(模式) + 3(网络) + maxChannels(通道，如果>1)
+                const expectedButtons = maxChannels > 1 ? 6 + maxChannels : 6;
+                if (allButtons.length < expectedButtons) {{
                     console.warn('按钮未完全渲染，重试...');
                     setTimeout(setupButtonListeners, 200);
                     return;
                 }}
 
-                // 第一组：平均/峰值/Flit计数按钮（前3个）
+                // 第一组：模式按钮（平均/峰值/计数）- 前3个
                 const modeButtons = Array.from(allButtons).slice(0, 3);
-                // 第二组：网络类型按钮（后3个）
+                // 第二组：网络类型按钮（REQ/RSP/DATA）- 接下来3个
                 const networkButtons = Array.from(allButtons).slice(3, 6);
-                console.log('模式按钮数量:', modeButtons.length, '网络按钮数量:', networkButtons.length);
+                // 第三组：通道按钮（Ch0/Ch1/...）- 剩余的（如果有多通道）
+                const channelButtons = maxChannels > 1 ? Array.from(allButtons).slice(6, 6 + maxChannels) : [];
+                console.log('模式按钮数量:', modeButtons.length, '网络按钮数量:', networkButtons.length, '通道按钮数量:', channelButtons.length);
 
                 // 监听平均/峰值/Flit计数按钮点击
                 modeButtons.forEach((btn, idx) => {{
@@ -1479,29 +1437,75 @@ class FIFOHeatmapVisualizer:
 
                             currentNetworkType = networks[idx];
 
-                            // 切换到当前FIFO在新网络中的对应项
+                            // 更新通道按钮的可见性（根据当前网络类型的通道数）
+                            updateChannelButtonsVisibility();
+
+                            // 切换到当前FIFO在新网络中的对应项（保持当前通道，如果不存在则切换到第一个通道）
                             switchToNetwork(currentNetworkType);
                         }}, 10);
                     }});
                 }});
+
+                // 监听通道按钮点击（如果有多通道）
+                if (channelButtons.length > 0) {{
+                    channelButtons.forEach((btn, idx) => {{
+                        btn.addEventListener('click', function(e) {{
+                            console.log('点击通道按钮: Ch', idx);
+                            setTimeout(() => {{
+                                // 移除同组按钮的active类
+                                channelButtons.forEach(b => b.classList.remove('active'));
+                                // 添加到当前按钮
+                                this.classList.add('active');
+
+                                // 切换到新通道
+                                switchToChannel(idx);
+                            }}, 10);
+                        }});
+                    }});
+                }}
 
                 // 初始化按钮高亮状态
                 if (modeButtons.length > 0) {{
                     modeButtons[0].classList.add('active');  // 平均
                 }}
                 if (networkButtons.length > 0) {{
-                    networkButtons[2].classList.add('active');  // Data
+                    // 根据第一个FIFO的网络类型初始化
+                    const networks = ['req', 'rsp', 'data'];
+                    const netIdx = networks.indexOf(currentNetworkType);
+                    if (netIdx >= 0 && netIdx < networkButtons.length) {{
+                        networkButtons[netIdx].classList.add('active');
+                    }}
                 }}
+                if (channelButtons.length > 0) {{
+                    // 根据第一个FIFO的通道索引初始化
+                    if (currentChannelIdx < channelButtons.length) {{
+                        channelButtons[currentChannelIdx].classList.add('active');
+                    }}
+                }}
+
+                // 初始化通道按钮可见性
+                updateChannelButtonsVisibility();
             }}
 
             // 启动按钮监听器设置
             setupButtonListeners();
 
-            // 切换到指定网络类型
+            // 切换到指定网络类型（保持当前通道，如果不存在则切换到第一个通道）
             function switchToNetwork(networkType) {{
                 if (!currentCategory || !currentFifoType) return;
 
-                const key = currentCategory + '_' + currentFifoType + '_' + networkType;
+                const channels = channelInfo[networkType] || [0];
+
+                // 尝试保持当前通道索引
+                let targetChannel = currentChannelIdx;
+                if (!channels.includes(currentChannelIdx)) {{
+                    // 如果当前通道在新网络中不存在，切换到第一个通道
+                    targetChannel = channels[0];
+                    currentChannelIdx = targetChannel;
+                    updateChannelButtonHighlight();
+                }}
+
+                const key = currentCategory + '_' + currentFifoType + '_' + networkType + '_' + targetChannel;
                 const fifoIndex = fifoMap[key];
 
                 if (fifoIndex !== undefined) {{
@@ -1509,7 +1513,36 @@ class FIFOHeatmapVisualizer:
                     updateCurrentFifoInfo();
                     updateHeatmapVisibility();
                 }} else {{
-                    console.warn('FIFO not found for network:', networkType);
+                    console.warn('FIFO not found for network:', networkType, 'channel:', targetChannel);
+                }}
+            }}
+
+            // 切换到指定通道
+            function switchToChannel(channelIdx) {{
+                if (!currentCategory || !currentFifoType) return;
+
+                const key = currentCategory + '_' + currentFifoType + '_' + currentNetworkType + '_' + channelIdx;
+                const fifoIndex = fifoMap[key];
+
+                console.log('切换通道:', {{
+                    category: currentCategory,
+                    fifoType: currentFifoType,
+                    networkType: currentNetworkType,
+                    channelIdx: channelIdx,
+                    key: key,
+                    foundIndex: fifoIndex,
+                    oldIndex: currentFifoIndex
+                }});
+
+                if (fifoIndex !== undefined) {{
+                    currentFifoIndex = fifoIndex;
+                    currentChannelIdx = channelIdx;
+                    updateCurrentFifoInfo();
+                    updateHeatmapVisibility();
+                    console.log('成功切换到FIFO索引:', fifoIndex, '通道:', channelIdx);
+                }} else {{
+                    console.warn('FIFO not found for channel:', channelIdx, 'key:', key);
+                    console.log('可用的keys:', Object.keys(fifoMap));
                 }}
             }}
 
@@ -1525,6 +1558,36 @@ class FIFOHeatmapVisualizer:
                 }}
             }}
 
+            // 更新通道按钮高亮
+            function updateChannelButtonHighlight() {{
+                if (maxChannels <= 1) return;  // 单通道时无需更新
+
+                const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
+                const channelButtons = Array.from(allButtons).slice(6, 6 + maxChannels);
+                channelButtons.forEach(b => b.classList.remove('active'));
+
+                if (currentChannelIdx < channelButtons.length) {{
+                    channelButtons[currentChannelIdx].classList.add('active');
+                }}
+            }}
+
+            // 更新通道按钮的可见性（根据当前网络类型的通道数）
+            function updateChannelButtonsVisibility() {{
+                if (maxChannels <= 1) return;  // 单通道时无需更新
+
+                const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
+                const channelButtons = Array.from(allButtons).slice(6, 6 + maxChannels);
+                const currentChannels = channelInfo[currentNetworkType] || [0];
+
+                channelButtons.forEach((btn, idx) => {{
+                    if (currentChannels.includes(idx)) {{
+                        btn.style.display = '';  // 显示
+                    }} else {{
+                        btn.style.display = 'none';  // 隐藏
+                    }}
+                }});
+            }}
+
             // 初始化时高亮默认FIFO
             updateArchitectureHighlight();
         }}, 500);  // 延迟500ms确保Plotly完全加载
@@ -1533,14 +1596,14 @@ class FIFOHeatmapVisualizer:
 """
         return js_code
 
-    def _save_html_with_click_events(self, fig: go.Figure, save_path: str, fifo_options: List[Tuple[str, str, str, str]], num_dies: int):
+    def _save_html_with_click_events(self, fig: go.Figure, save_path: str, fifo_options: List[Tuple[str, str, str, str, int]], num_dies: int):
         """
         保存HTML文件并注入JavaScript代码来处理FIFO点击事件
 
         Args:
             fig: Plotly图形对象
             save_path: 保存路径
-            fifo_options: FIFO选项列表（四元组）
+            fifo_options: FIFO选项列表（5元组：name, category, fifo_type, network_type, ch_idx）
             num_dies: Die数量
         """
         # 先生成基础HTML（使用本地内嵌Plotly，避免CDN加载失败）

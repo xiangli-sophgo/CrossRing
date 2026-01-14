@@ -12,19 +12,18 @@ class IntegratedVisualizer:
     """集成多个Plotly图表到单一HTML文件"""
 
     def __init__(self):
-        self.charts = []  # [(title, fig, custom_html, custom_js), ...]
+        self.charts = []  # [(title, fig, custom_js), ...]
 
-    def add_chart(self, title: str, fig: Optional[go.Figure], custom_html: Optional[str] = None, custom_js: Optional[str] = None):
+    def add_chart(self, title: str, fig: Optional[go.Figure], custom_js: Optional[str] = None):
         """
         添加图表到集成可视化
 
         Args:
             title: 图表章节标题
             fig: Plotly Figure对象,或None表示纯HTML内容
-            custom_html: 可选的自定义HTML（如按钮控件，插入在图表前）
             custom_js: 可选的自定义JavaScript代码(fig=None时为HTML内容)
         """
-        self.charts.append((title, fig, custom_html, custom_js))
+        self.charts.append((title, fig, custom_js))
 
     def generate_html(self, save_path: str = None, show_fig: bool = False, return_content: bool = False):
         """
@@ -78,6 +77,7 @@ class IntegratedVisualizer:
 
         # 添加图表容器
         for idx, (title, fig, custom_js) in enumerate(self.charts):
+
             section_id = f"section-{idx}"
             chart_id = f"chart-{idx}"
 
@@ -178,15 +178,26 @@ class IntegratedVisualizer:
             width: 100%;
             height: auto;
         }
-        /* FIFO热力图按钮样式 */
+        /* Plotly按钮统一样式（流量图、FIFO热力图等） */
+        .updatemenu-button {
+            background-color: #f0f0f0 !important;
+            color: #333 !important;
+            border: 1px solid #ccc !important;
+            border-radius: 4px !important;
+            padding: 6px 12px !important;
+            font-size: 12px !important;
+            transition: all 0.2s ease !important;
+            cursor: pointer !important;
+        }
+        .updatemenu-button:hover {
+            background-color: #e0e0e0 !important;
+            border-color: #999 !important;
+        }
         .updatemenu-button.active {
             background-color: #3b82f6 !important;
             color: white !important;
             border: 2px solid #1d4ed8 !important;
             font-weight: bold !important;
-        }
-        .updatemenu-button {
-            transition: all 0.2s ease !important;
         }
         /* 报告内容样式 */
         .report-content {

@@ -79,8 +79,7 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
 
     def draw_flow_graph(
         self,
-        networks: Dict = None,
-        network=None,  # 向后兼容参数
+        networks: Dict,
         ip_bandwidth_data: Dict = None,
         config=None,
         mode: str = "utilization",
@@ -88,16 +87,14 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
         save_path: str = None,
         show_fig: bool = False,
         return_fig: bool = False,
-        req_network=None,  # 向后兼容参数
-        rsp_network=None,  # 向后兼容参数
         static_bandwidth=None,
     ):
         """
-        绘制单Die网络流量图(交互式版本)
+        绘制单Die网络流量图(交互式版本，支持多通道)
 
         Args:
             networks: 多通道networks字典 {"req": [...], "rsp": [...], "data": [...]}
-            network: Network对象（data_network，用于向后兼容，在networks为None时使用）
+                     每个值是一个列表，包含该网络类型的所有通道
             ip_bandwidth_data: IP带宽数据字典
             config: 配置对象
             mode: 可视化模式
@@ -105,18 +102,20 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
             save_path: 保存路径（如果为None则返回fig对象）
             show_fig: 是否在浏览器中显示图像
             return_fig: 是否返回Figure对象而不是保存文件
-            req_network: 请求网络对象（可选，用于向后兼容）
-            rsp_network: 响应网络对象（可选，用于向后兼容）
             static_bandwidth: 静态带宽数据字典
 
         Returns:
-            str or Figure or (Figure, buttons_html, buttons_js): Figure对象或包含按钮信息的元组
+            Figure对象
         """
         import time
 
-        # 如果没有传入config，尝试从network获取
-        if config is None and hasattr(network, "config"):
-            config = network.config
+        # 从第一个可用的网络获取config
+        if config is None:
+            for net_type in ["data", "req", "rsp"]:
+                if net_type in networks and len(networks[net_type]) > 0:
+                    if hasattr(networks[net_type][0], "config"):
+                        config = networks[net_type][0].config
+                        break
 
         # 计算全局IP带宽范围（用于透明度归一化）
         max_ip_bandwidth = None
@@ -135,42 +134,55 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
         # 创建图形
         fig = go.Figure()
 
-        # 判断是否启用三通道分离显示
-        enable_channel_switch = req_network is not None and rsp_network is not None
+        # 检测每个网络类型的通道数
+        channel_counts = {}
+        for net_type in ["req", "rsp", "data"]:
+            if net_type in networks:
+                channel_counts[net_type] = len(networks[net_type])
+            else:
+                channel_counts[net_type] = 0
 
-        if enable_channel_switch:
-            # 初始化通道管理器
-            channel_manager = ChannelSwitchManager()
-            networks_dict = channel_manager.setup_channels(req_network, rsp_network, network)
+        max_channels = max(channel_counts.values()) if channel_counts else 0
 
-            # 三通道模式：先用data_network绘制基础结构（nodes、annotations等）
-            base_trace_count = len(fig.data)
+        # 使用data网络的第一个通道绘制基础结构（nodes和IP信息）
+        base_trace_count = len(fig.data)
+        base_network = networks["data"][0] if "data" in networks and len(networks["data"]) > 0 else None
 
-            # 使用data_network绘制基础结构（nodes和IP信息）
-            pos = self.draw_single_die_flow(
-                fig=fig,
-                network=network,
-                config=config,
-                ip_bandwidth_data=ip_bandwidth_data,
-                mode=mode,
-                node_size=node_size,
-                max_ip_bandwidth=max_ip_bandwidth,
-                min_ip_bandwidth=min_ip_bandwidth,
-                draw_links=False,  # 不绘制links，只绘制nodes
-            )
+        pos = self.draw_single_die_flow(
+            fig=fig,
+            network=base_network,
+            config=config,
+            ip_bandwidth_data=ip_bandwidth_data,
+            mode=mode,
+            node_size=node_size,
+            max_ip_bandwidth=max_ip_bandwidth,
+            min_ip_bandwidth=min_ip_bandwidth,
+            draw_links=False,  # 不绘制links，只绘制nodes
+        )
 
-            # 基础traces（nodes等）的数量
-            num_base_traces = len(fig.data) - base_trace_count
+        # 基础traces（nodes等）的数量
+        num_base_traces = len(fig.data) - base_trace_count
 
-            # 为三个通道分别绘制links
-            for channel_name, net in networks_dict.items():
+        # 记录所有traces和annotations的范围
+        # trace_ranges: {(net_type, ch_idx): (start, end)}
+        # annotation_ranges: {(net_type, ch_idx): (start, end)}
+        trace_ranges = {}
+        annotation_ranges = {}
+        all_annotations = []
+
+        # 为所有网络类型的所有通道绘制links
+        for net_type in ["req", "rsp", "data"]:
+            if net_type not in networks or len(networks[net_type]) == 0:
+                continue
+
+            for ch_idx, network in enumerate(networks[net_type]):
                 trace_start_idx = len(fig.data)
-                annotation_start_idx = len(channel_manager.all_annotations)
+                annotation_start_idx = len(all_annotations)
 
                 # 只绘制该通道的links，返回annotations而不是直接添加
                 channel_anns = self._draw_channel_links_only(
                     fig=fig,
-                    network=net,
+                    network=network,
                     config=config,
                     pos=pos,
                     mode=mode,
@@ -179,110 +191,125 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
                     static_bandwidth=static_bandwidth,
                 )
 
-                # 收集annotations到管理器
-                channel_manager.add_annotations(channel_anns)
+                # 收集annotations
+                all_annotations.extend(channel_anns)
 
                 trace_end_idx = len(fig.data)
-                annotation_end_idx = len(channel_manager.all_annotations)
+                annotation_end_idx = len(all_annotations)
 
-                # 记录通道的trace和annotation范围
-                channel_manager.record_trace_range(channel_name, trace_start_idx, trace_end_idx)
-                channel_manager.record_annotation_range(channel_name, annotation_start_idx, annotation_end_idx)
+                # 记录trace和annotation范围
+                trace_ranges[(net_type, ch_idx)] = (trace_start_idx, trace_end_idx)
+                annotation_ranges[(net_type, ch_idx)] = (annotation_start_idx, annotation_end_idx)
 
-                # 设置初始可见性：默认显示数据通道
+                # 设置初始可见性：默认显示data网络的第一个通道
+                is_visible = (net_type == "data" and ch_idx == 0)
                 for i in range(trace_start_idx, trace_end_idx):
-                    fig.data[i].visible = channel_name == "数据"
+                    fig.data[i].visible = is_visible
 
-            # 一次性添加所有annotations
-            existing_anns = list(fig.layout.annotations) if fig.layout.annotations else []
+        # 一次性添加所有annotations
+        existing_anns = list(fig.layout.annotations) if fig.layout.annotations else []
 
-            # 设置初始可见性
-            for i, ann in enumerate(channel_manager.all_annotations):
-                ann_channel = None
-                for ch_name in ChannelSwitchManager.CHANNEL_NAMES:
-                    if ch_name not in channel_manager.annotation_indices:
-                        continue
-                    ann_start, ann_end = channel_manager.annotation_indices[ch_name]
-                    if ann_start <= i < ann_end:
-                        ann_channel = ch_name
-                        break
-                ann["visible"] = ann_channel == "数据"
+        # 设置初始可见性：默认显示data网络的第一个通道
+        for i, ann in enumerate(all_annotations):
+            ann_key = None
+            for key, (ann_start, ann_end) in annotation_ranges.items():
+                if ann_start <= i < ann_end:
+                    ann_key = key
+                    break
+            ann["visible"] = (ann_key == ("data", 0)) if ann_key else False
 
-            fig.layout.annotations = existing_anns + channel_manager.all_annotations
+        fig.layout.annotations = existing_anns + all_annotations
 
-            # 创建通道切换按钮（自动处理visibility逻辑）
-            buttons = []
-            for channel_name in ChannelSwitchManager.CHANNEL_NAMES:
-                if channel_name not in channel_manager.trace_indices:
-                    continue
+        # 创建两层按钮：网络类型 + 通道
+        network_buttons = []
+        channel_buttons = []
 
-                # 创建visibility数组：基础traces始终可见，只切换link traces
-                visibility = [True] * num_base_traces
-                for ch_name in ChannelSwitchManager.CHANNEL_NAMES:
-                    if ch_name not in channel_manager.trace_indices:
-                        continue
-                    s, e = channel_manager.trace_indices[ch_name]
-                    visibility.extend([ch_name == channel_name] * (e - s))
+        num_existing_anns = len(existing_anns)
 
-                # 使用管理器创建annotation visibility（但需要手动调整因为有existing_anns）
-                num_existing_anns = len(existing_anns)
-                updated_annotations = []
-                if fig.layout.annotations:
-                    for i, ann in enumerate(fig.layout.annotations):
-                        ann_dict = ann.to_plotly_json() if hasattr(ann, 'to_plotly_json') else dict(ann)
-                        if i < num_existing_anns:
-                            # 原有annotations（如IP信息），始终可见
-                            ann_dict["visible"] = True
-                        else:
-                            # 新添加的channel annotations
-                            channel_ann_idx = i - num_existing_anns
-                            ann_channel = None
-                            for ch_name in ChannelSwitchManager.CHANNEL_NAMES:
-                                if ch_name not in channel_manager.annotation_indices:
-                                    continue
-                                ann_start, ann_end = channel_manager.annotation_indices[ch_name]
-                                if ann_start <= channel_ann_idx < ann_end:
-                                    ann_channel = ch_name
-                                    break
-                            ann_dict["visible"] = ann_channel == channel_name
-                        updated_annotations.append(ann_dict)
+        # 第一层：网络类型按钮（REQ/RSP/DATA）
+        for net_type in ["req", "rsp", "data"]:
+            if channel_counts[net_type] == 0:
+                continue
 
-                buttons.append(dict(
-                    label=channel_name,
-                    method="update",
-                    args=[{"visible": visibility}, {"annotations": updated_annotations}]
+            # 创建visibility数组：基础traces始终可见，只显示当前网络类型的第一个通道
+            visibility = [True] * num_base_traces
+            for key in trace_ranges.keys():
+                s, e = trace_ranges[key]
+                # 只显示当前网络类型的第一个通道
+                is_visible = (key == (net_type, 0))
+                visibility.extend([is_visible] * (e - s))
+
+            # 创建annotations visibility
+            updated_annotations = []
+            for i, ann in enumerate(fig.layout.annotations):
+                ann_dict = ann.to_plotly_json() if hasattr(ann, 'to_plotly_json') else dict(ann)
+                if i < num_existing_anns:
+                    # 原有annotations（IP信息等），始终可见
+                    ann_dict["visible"] = True
+                else:
+                    # 新添加的channel annotations
+                    channel_ann_idx = i - num_existing_anns
+                    ann_key = None
+                    for key, (ann_start, ann_end) in annotation_ranges.items():
+                        if ann_start <= channel_ann_idx < ann_end:
+                            ann_key = key
+                            break
+                    # 只显示当前网络类型的第一个通道
+                    ann_dict["visible"] = (ann_key == (net_type, 0)) if ann_key else False
+                updated_annotations.append(ann_dict)
+
+            network_buttons.append(dict(
+                label=net_type.upper(),
+                method="update",
+                args=[{"visible": visibility}, {"annotations": updated_annotations}]
+            ))
+
+        # 第二层：通道按钮（Ch0/Ch1/Ch2...）- 如果有多通道
+        if max_channels > 1:
+            for ch_idx in range(max_channels):
+                # 注意：这个按钮需要JavaScript动态处理，因为不同网络类型的通道数不同
+                # 这里先创建占位按钮，实际切换逻辑由JavaScript处理
+                channel_buttons.append(dict(
+                    label=f"Ch{ch_idx}",
+                    method="skip",  # 使用skip方法，由JavaScript处理
                 ))
 
-            updatemenus = [
-                dict(
-                    buttons=buttons,
-                    direction="left",
-                    pad={"r": 10, "t": 10},
-                    showactive=True,
-                    active=2,  # 默认选中"数据"通道
-                    x=0.5,
-                    y=1.12,
-                    xanchor="center",
-                    yanchor="top",
-                    bgcolor="lightblue",
-                    bordercolor="blue",
-                    font=dict(size=12),
-                    type="buttons",
-                )
-            ]
-        else:
-            # 单通道模式（向后兼容）
-            self.draw_single_die_flow(
-                fig=fig,
-                network=network,
-                config=config,
-                ip_bandwidth_data=ip_bandwidth_data,
-                mode=mode,
-                node_size=node_size,
-                max_ip_bandwidth=max_ip_bandwidth,
-                min_ip_bandwidth=min_ip_bandwidth,
+        # 创建updatemenus
+        updatemenus = [
+            dict(
+                buttons=network_buttons,
+                direction="left",
+                pad={"r": 10, "t": 10},
+                showactive=True,
+                active=2,  # 默认选中DATA
+                x=0.3,
+                y=1.12,
+                xanchor="center",
+                yanchor="top",
+                bgcolor="lightgreen",
+                bordercolor="green",
+                font=dict(size=12),
+                type="buttons",
             )
-            updatemenus = None
+        ]
+
+        # 如果有多通道，添加通道按钮组
+        if max_channels > 1:
+            updatemenus.append(dict(
+                buttons=channel_buttons,
+                direction="left",
+                pad={"r": 10, "t": 10},
+                showactive=True,
+                active=0,  # 默认选中Ch0
+                x=0.7,
+                y=1.12,
+                xanchor="center",
+                yanchor="top",
+                bgcolor="lightyellow",
+                bordercolor="orange",
+                font=dict(size=12),
+                type="buttons",
+            ))
 
         # 收集使用的IP类型(用于legend)
         used_ip_types = set()
@@ -306,8 +333,8 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
         # 记录legend/colorbar的trace数量
         num_legend_colorbar_traces = len(fig.data) - num_traces_before_legend
 
-        # 修正三通道模式的visibility数组，确保legend/colorbar始终可见
-        if enable_channel_switch and updatemenus:
+        # 修正网络类型按钮的visibility数组，确保legend/colorbar始终可见
+        if updatemenus:
             for button in updatemenus[0]["buttons"]:
                 # 在visibility数组末尾添加True，使legend/colorbar始终可见
                 button["args"][0]["visible"].extend([True] * num_legend_colorbar_traces)
@@ -325,13 +352,28 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
             autosize=True,
         )
 
-        # 添加通道切换按钮
-        if enable_channel_switch and updatemenus:
+        # 添加网络类型和通道切换按钮
+        if updatemenus:
             layout_config["updatemenus"] = updatemenus
 
         fig.update_layout(**layout_config)
 
+        # 生成JavaScript代码（如果有多通道）
+        js_code = None
+        if max_channels > 1:
+            js_code = self._generate_flow_chart_javascript(
+                trace_ranges=trace_ranges,
+                annotation_ranges=annotation_ranges,
+                channel_counts=channel_counts,
+                num_base_traces=num_base_traces,
+                num_existing_anns=num_existing_anns,
+                num_legend_colorbar_traces=num_legend_colorbar_traces,
+            )
+
         if return_fig:
+            # 返回Figure对象和JavaScript代码（如果有多通道）
+            if js_code:
+                return fig, js_code
             return fig
 
         if save_path:
@@ -339,7 +381,15 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
             if not save_path.endswith(".html"):
                 save_path = save_path.replace(".png", ".html").replace(".jpg", ".html")
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            fig.write_html(save_path, include_plotlyjs="cdn", config={"displayModeBar": True})
+
+            if js_code:
+                # 注入JavaScript到HTML
+                html_string = fig.to_html(include_plotlyjs="cdn", config={"displayModeBar": True})
+                html_string = html_string.replace("</body>", js_code + "</body>")
+                with open(save_path, "w", encoding="utf-8") as f:
+                    f.write(html_string)
+            else:
+                fig.write_html(save_path, include_plotlyjs="cdn", config={"displayModeBar": True})
 
         if show_fig:
             fig.show()
@@ -348,5 +398,140 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
             return save_path
         else:
             return fig
+
+    def _generate_flow_chart_javascript(
+        self,
+        trace_ranges: Dict,
+        annotation_ranges: Dict,
+        channel_counts: Dict,
+        num_base_traces: int,
+        num_existing_anns: int,
+        num_legend_colorbar_traces: int,
+    ) -> str:
+        """生成流量图的JavaScript代码，处理通道切换逻辑"""
+
+        # 将trace_ranges转换为JavaScript可用的格式
+        # trace_ranges_js: {net_type: {ch_idx: [start, end]}}
+        trace_ranges_js = {}
+        for (net_type, ch_idx), (start, end) in trace_ranges.items():
+            if net_type not in trace_ranges_js:
+                trace_ranges_js[net_type] = {}
+            trace_ranges_js[net_type][ch_idx] = [start, end]
+
+        annotation_ranges_js = {}
+        for (net_type, ch_idx), (start, end) in annotation_ranges.items():
+            if net_type not in annotation_ranges_js:
+                annotation_ranges_js[net_type] = {}
+            annotation_ranges_js[net_type][ch_idx] = [start, end]
+
+        js_code = f"""
+<script>
+    // 流量图多通道切换逻辑
+    const traceRanges = {str(trace_ranges_js).replace("'", '"')};
+    const annotationRanges = {str(annotation_ranges_js).replace("'", '"')};
+    const channelCounts = {str(channel_counts).replace("'", '"')};
+    const numBaseTraces = {num_base_traces};
+    const numExistingAnns = {num_existing_anns};
+    const numLegendColorbarTraces = {num_legend_colorbar_traces};
+
+    let currentNetworkType = "data";
+    let currentChannelIdx = 0;
+
+    document.addEventListener('DOMContentLoaded', function() {{
+        setTimeout(function() {{
+            const plotDiv = document.getElementsByClassName('plotly-graph-div')[0];
+            if (!plotDiv) return;
+
+            const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
+            const networkButtons = Array.from(allButtons).slice(0, 3);
+            const maxChannels = Math.max(...Object.values(channelCounts));
+            const channelButtons = Array.from(allButtons).slice(3, 3 + maxChannels);
+
+            // 监听通道按钮点击
+            channelButtons.forEach((btn, idx) => {{
+                btn.addEventListener('click', function(e) {{
+                    setTimeout(() => {{
+                        currentChannelIdx = idx;
+                        switchToChannel(currentNetworkType, currentChannelIdx);
+                        channelButtons.forEach(b => b.classList.remove('active'));
+                        this.classList.add('active');
+                    }}, 10);
+                }});
+            }});
+
+            // 监听网络类型按钮点击
+            networkButtons.forEach((btn, idx) => {{
+                btn.addEventListener('click', function(e) {{
+                    const networks = ['req', 'rsp', 'data'];
+                    setTimeout(() => {{
+                        currentNetworkType = networks[idx];
+                        updateChannelButtonsVisibility();
+
+                        // 检查新网络类型是否有当前选择的通道
+                        let targetChannel = currentChannelIdx;
+                        if (!traceRanges[currentNetworkType] || !traceRanges[currentNetworkType][targetChannel]) {{
+                            // 如果当前通道不存在，切换到Ch0
+                            targetChannel = 0;
+                            currentChannelIdx = 0;
+                            channelButtons.forEach(b => b.classList.remove('active'));
+                            if (channelButtons[0]) channelButtons[0].classList.add('active');
+                        }}
+
+                        // 主动切换到目标通道（覆盖Plotly的默认行为）
+                        switchToChannel(currentNetworkType, targetChannel);
+                    }}, 100);
+                }});
+            }});
+
+            function switchToChannel(netType, chIdx) {{
+                if (!traceRanges[netType] || !traceRanges[netType][chIdx]) return;
+
+                const visibility = [];
+                for (let i = 0; i < numBaseTraces; i++) visibility.push(true);
+
+                for (let net of ['req', 'rsp', 'data']) {{
+                    if (!traceRanges[net]) continue;
+                    for (let ch in traceRanges[net]) {{
+                        const [start, end] = traceRanges[net][ch];
+                        const isVisible = (net === netType && parseInt(ch) === chIdx);
+                        for (let i = 0; i < (end - start); i++) visibility.push(isVisible);
+                    }}
+                }}
+
+                for (let i = 0; i < numLegendColorbarTraces; i++) visibility.push(true);
+
+                const updatedAnnotations = [];
+                if (plotDiv.layout.annotations) {{
+                    for (let i = 0; i < plotDiv.layout.annotations.length; i++) {{
+                        const ann = plotDiv.layout.annotations[i];
+                        let annVisible = true;
+                        if (i >= numExistingAnns) {{
+                            const channelAnnIdx = i - numExistingAnns;
+                            annVisible = false;
+                            if (annotationRanges[netType] && annotationRanges[netType][chIdx]) {{
+                                const [start, end] = annotationRanges[netType][chIdx];
+                                if (channelAnnIdx >= start && channelAnnIdx < end) annVisible = true;
+                            }}
+                        }}
+                        updatedAnnotations.push({{...ann, visible: annVisible}});
+                    }}
+                }}
+
+                Plotly.update(plotDiv, {{visible: visibility}}, {{annotations: updatedAnnotations}});
+            }}
+
+            function updateChannelButtonsVisibility() {{
+                const currentChannels = channelCounts[currentNetworkType] || 1;
+                channelButtons.forEach((btn, idx) => {{
+                    btn.style.display = (idx < currentChannels) ? '' : 'none';
+                }});
+            }}
+
+            updateChannelButtonsVisibility();
+        }}, 500);
+    }});
+</script>
+"""
+        return js_code
 
 

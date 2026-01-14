@@ -349,12 +349,18 @@ class StatsMixin:
         self.trans_mixed_p99_latency_stat = latency_stats["trans"]["mixed"]["p99"]
 
         # FIFO使用率热力图 - 收集到结果处理器中
-        if getattr(self, "fifo_utilization_heatmap", False):
+        fifo_enabled = getattr(self, "fifo_utilization_heatmap", False)
+        if self.verbose:
+            print(f"FIFO热力图配置: fifo_utilization_heatmap={fifo_enabled}")
+
+        if fifo_enabled:
             try:
                 from src.analysis.fifo_heatmap_visualizer import create_fifo_heatmap
 
                 # 计算总周期数(使用物理周期数,因为depth_sum在每个物理周期累加)
                 total_cycles = self.cycle
+                if self.verbose:
+                    print(f"开始生成FIFO热力图，总周期数: {total_cycles}")
 
                 # 构造dies字典（单Die情况）
                 dies = {0: self}
@@ -363,6 +369,9 @@ class StatsMixin:
                 fifo_fig, fifo_js = create_fifo_heatmap(
                     dies=dies, config=self.config, total_cycles=total_cycles, die_layout=None, die_rotations=None, save_path=None, show_fig=False, return_fig_and_js=True
                 )
+
+                if self.verbose:
+                    print(f"FIFO热力图生成成功，fig={fifo_fig is not None}, js={fifo_js is not None}")
 
                 # 将FIFO图表添加到结果处理器的图表列表中
                 if not hasattr(self.result_processor, "charts_to_merge"):
@@ -373,9 +382,13 @@ class StatsMixin:
                 else:
                     self.result_processor.charts_to_merge.append(("FIFO使用率热力图", fifo_fig, fifo_js))
 
-            except Exception as e:
                 if self.verbose:
-                    print(f"警告: FIFO使用率热力图生成失败: {e}")
+                    print(f"FIFO热力图已添加到charts_to_merge，当前图表数量: {len(self.result_processor.charts_to_merge)}")
+
+            except Exception as e:
+                import traceback
+                print(f"错误: FIFO使用率热力图生成失败: {e}")
+                traceback.print_exc()
 
         # 生成集成HTML（所有图表收集完毕后，始终收集到内存）
         self._generate_integrated_visualization(save_to_db_only=True)

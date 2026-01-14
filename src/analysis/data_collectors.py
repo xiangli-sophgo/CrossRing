@@ -876,15 +876,22 @@ class CircuitStatsCollector:
 
     def process_fifo_usage_statistics(self, model) -> Dict:
         """
-        处理FIFO使用率统计
+        处理FIFO使用率统计（支持多通道，从StatisticalFIFO注册表获取）
 
         Args:
             model: 仿真模型对象
 
         Returns:
-            FIFO统计字典
+            FIFO统计字典: {network_type: {ch_idx: {category: {fifo_type: {pos: stats}}}}}
         """
-        networks = {"req": model.req_network, "rsp": model.rsp_network, "data": model.data_network}
+        from src.utils.statistical_fifo import StatisticalFIFO
+
+        # 多通道架构
+        networks = {
+            "req": model.req_networks,
+            "rsp": model.rsp_networks,
+            "data": model.data_networks,
+        }
 
         total_cycles = model.cycle  # 使用总周期数
         results = {}
@@ -894,118 +901,142 @@ class CircuitStatsCollector:
         if config is None:
             raise ValueError("模型对象缺少config属性")
 
-        for net_name, network in networks.items():
+        # 获取FIFO容量配置
+        iq_ch = getattr(config, 'RS_IN_CH_BUFFER', getattr(config, 'IQ_CH_FIFO_DEPTH', 4))
+        iq_out_h = getattr(config, 'RS_OUT_FIFO_DEPTH', getattr(config, 'IQ_OUT_FIFO_DEPTH_HORIZONTAL', 4))
+        iq_out_v = getattr(config, 'RS_OUT_FIFO_DEPTH', getattr(config, 'IQ_OUT_FIFO_DEPTH_VERTICAL', 4))
+        iq_out_eq = getattr(config, 'RS_OUT_CH_BUFFER', getattr(config, 'IQ_OUT_FIFO_DEPTH_EQ', 4))
+        rb_in = getattr(config, 'RS_IN_FIFO_DEPTH', getattr(config, 'RB_IN_FIFO_DEPTH', 4))
+        rb_out = getattr(config, 'RS_OUT_FIFO_DEPTH', getattr(config, 'RB_OUT_FIFO_DEPTH', 4))
+        eq_in = getattr(config, 'RS_IN_FIFO_DEPTH', getattr(config, 'EQ_IN_FIFO_DEPTH', 4))
+        eq_ch = getattr(config, 'RS_OUT_CH_BUFFER', getattr(config, 'EQ_CH_FIFO_DEPTH', 4))
+        capacities = {
+            "IQ": {
+                "CH": iq_ch,
+                "TR": iq_out_h,
+                "TL": iq_out_h,
+                "TU": iq_out_v,
+                "TD": iq_out_v,
+                "EQ": iq_out_eq,
+            },
+            "RB": {
+                "TR": rb_in,
+                "TL": rb_in,
+                "TU": rb_out,
+                "TD": rb_out,
+                "EQ": rb_out,
+            },
+            "EQ": {"TU": eq_in, "TD": eq_in, "CH": eq_ch},
+        }
+
+        # 遍历每个网络类型和通道，从network对象的FIFO中提取数据
+        for net_name, network_list in networks.items():
             results[net_name] = {}
 
-            # 获取FIFO容量配置（兼容 v1/v2 参数名）
-            # v2: RS_IN_CH_BUFFER, RS_IN_FIFO_DEPTH, RS_OUT_CH_BUFFER, RS_OUT_FIFO_DEPTH
-            # v1: IQ_CH_FIFO_DEPTH, IQ_OUT_FIFO_DEPTH_*, RB_IN_FIFO_DEPTH, RB_OUT_FIFO_DEPTH, EQ_IN_FIFO_DEPTH, EQ_CH_FIFO_DEPTH
-            iq_ch = getattr(config, 'RS_IN_CH_BUFFER', getattr(config, 'IQ_CH_FIFO_DEPTH', 4))
-            iq_out_h = getattr(config, 'RS_OUT_FIFO_DEPTH', getattr(config, 'IQ_OUT_FIFO_DEPTH_HORIZONTAL', 4))
-            iq_out_v = getattr(config, 'RS_OUT_FIFO_DEPTH', getattr(config, 'IQ_OUT_FIFO_DEPTH_VERTICAL', 4))
-            iq_out_eq = getattr(config, 'RS_OUT_CH_BUFFER', getattr(config, 'IQ_OUT_FIFO_DEPTH_EQ', 4))
-            rb_in = getattr(config, 'RS_IN_FIFO_DEPTH', getattr(config, 'RB_IN_FIFO_DEPTH', 4))
-            rb_out = getattr(config, 'RS_OUT_FIFO_DEPTH', getattr(config, 'RB_OUT_FIFO_DEPTH', 4))
-            eq_in = getattr(config, 'RS_IN_FIFO_DEPTH', getattr(config, 'EQ_IN_FIFO_DEPTH', 4))
-            eq_ch = getattr(config, 'RS_OUT_CH_BUFFER', getattr(config, 'EQ_CH_FIFO_DEPTH', 4))
-            capacities = {
-                "IQ": {
-                    "CH_buffer": iq_ch,
-                    "TR": iq_out_h,
-                    "TL": iq_out_h,
-                    "TU": iq_out_v,
-                    "TD": iq_out_v,
-                    "EQ": iq_out_eq,
-                },
-                "RB": {
-                    "TR": rb_in,
-                    "TL": rb_in,
-                    "TU": rb_out,
-                    "TD": rb_out,
-                    "EQ": rb_out,
-                },
-                "EQ": {"TU": eq_in, "TD": eq_in, "CH_buffer": eq_ch},
-            }
+            for ch_idx, network in enumerate(network_list):
+                results[net_name][ch_idx] = {}
 
-            # 计算平均深度和使用率
-            for category in network.fifo_depth_sum:
-                results[net_name][category] = {}
-                for fifo_type in network.fifo_depth_sum[category]:
-                    results[net_name][category][fifo_type] = {}
+                # 收集IQ的FIFO
+                for direction in ["TR", "TL", "TU", "TD", "EQ"]:
+                    if direction in network.inject_queues:
+                        for pos, fifo in network.inject_queues[direction].items():
+                            if "IQ" not in results[net_name][ch_idx]:
+                                results[net_name][ch_idx]["IQ"] = {}
+                            if direction not in results[net_name][ch_idx]["IQ"]:
+                                results[net_name][ch_idx]["IQ"][direction] = {}
 
-                    if fifo_type == "CH_buffer":
-                        # CH_buffer需要特殊处理，因为它按ip_type分组
-                        for pos, ip_types_data in network.fifo_depth_sum[category][fifo_type].items():
-                            if isinstance(ip_types_data, dict):
-                                for ip_type, sum_depth in ip_types_data.items():
-                                    max_depth = network.fifo_max_depth[category][fifo_type][pos][ip_type]
-                                    capacity = capacities[category][fifo_type]
-                                    flit_count = 0
-                                    if pos in network.fifo_flit_count[category][fifo_type]:
-                                        if ip_type in network.fifo_flit_count[category][fifo_type][pos]:
-                                            flit_count = network.fifo_flit_count[category][fifo_type][pos][ip_type]
+                            capacity = capacities["IQ"][direction]
+                            base_stats = self._calculate_fifo_stats(
+                                fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles
+                            )
 
-                                    key = f"{pos}_{ip_type}"
-                                    base_stats = self._calculate_fifo_stats(sum_depth, max_depth, capacity, flit_count, total_cycles)
-                                    # CH_buffer不统计Tag，补充空字段
-                                    results[net_name][category][fifo_type][key] = {
-                                        **base_stats,
-                                        "itag_cumulative_count": 0,
-                                        "itag_rate": 0.0,
-                                        "etag_t0_cumulative": 0,
-                                        "etag_t1_cumulative": 0,
-                                        "etag_t2_cumulative": 0,
-                                        "etag_t0_rate": 0.0,
-                                        "etag_t1_rate": 0.0,
-                                        "etag_t2_rate": 0.0,
-                                    }
-                    else:
-                        # 其他FIFO类型
-                        for pos, sum_depth in network.fifo_depth_sum[category][fifo_type].items():
-                            max_depth = network.fifo_max_depth[category][fifo_type][pos]
-                            capacity = capacities[category][fifo_type]
-                            flit_count = 0
-                            if pos in network.fifo_flit_count[category][fifo_type]:
-                                flit_count = network.fifo_flit_count[category][fifo_type][pos]
-
-                            # 基础统计
-                            base_stats = self._calculate_fifo_stats(sum_depth, max_depth, capacity, flit_count, total_cycles)
-
-                            # === ITag统计 ===
+                            # ITag统计 (仅TR/TL横向注入)
                             itag_cumulative = 0
                             itag_rate = 0.0
-                            if category in network.fifo_itag_cumulative_count:
-                                if fifo_type in network.fifo_itag_cumulative_count[category]:
-                                    if pos in network.fifo_itag_cumulative_count[category][fifo_type]:
-                                        itag_cumulative = network.fifo_itag_cumulative_count[category][fifo_type][pos]
-                                        # ITag率 = ITag累计次数 / (总周期数 × 累计flit数) × 100%
-                                        if flit_count > 0 and total_cycles > 0:
-                                            itag_rate = itag_cumulative / (total_cycles * flit_count) * 100
+                            if direction in ["TR", "TL"] and hasattr(network, "fifo_itag_cumulative_count"):
+                                itag_cumulative = network.fifo_itag_cumulative_count.get("IQ", {}).get(direction, {}).get(pos, 0)
+                                flit_count = fifo.flit_count
+                                itag_rate = (itag_cumulative / (total_cycles * flit_count) * 100) if flit_count > 0 and total_cycles > 0 else 0.0
 
-                            # === ETag统计 ===
+                            results[net_name][ch_idx]["IQ"][direction][pos] = {
+                                **base_stats,
+                                "itag_cumulative_count": itag_cumulative,
+                                "itag_rate": itag_rate,
+                                "etag_t0_cumulative": 0,
+                                "etag_t1_cumulative": 0,
+                                "etag_t2_cumulative": 0,
+                                "etag_t0_rate": 0.0,
+                                "etag_t1_rate": 0.0,
+                                "etag_t2_rate": 0.0,
+                            }
+
+                # 收集IQ CH_buffer
+                for ip_type in network.IQ_channel_buffer:
+                    for pos, fifo in network.IQ_channel_buffer[ip_type].items():
+                        if "IQ" not in results[net_name][ch_idx]:
+                            results[net_name][ch_idx]["IQ"] = {}
+                        if "CH" not in results[net_name][ch_idx]["IQ"]:
+                            results[net_name][ch_idx]["IQ"]["CH"] = {}
+
+                        pos_key = f"{pos}_{ip_type}"
+                        capacity = capacities["IQ"]["CH"]
+                        base_stats = self._calculate_fifo_stats(
+                            fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles
+                        )
+                        results[net_name][ch_idx]["IQ"]["CH"][pos_key] = {
+                            **base_stats,
+                            "itag_cumulative_count": 0,
+                            "itag_rate": 0.0,
+                            "etag_t0_cumulative": 0,
+                            "etag_t1_cumulative": 0,
+                            "etag_t2_cumulative": 0,
+                            "etag_t0_rate": 0.0,
+                            "etag_t1_rate": 0.0,
+                            "etag_t2_rate": 0.0,
+                        }
+
+                # 收集RB的FIFO
+                for direction in ["TR", "TL", "TU", "TD", "EQ"]:
+                    if direction in network.ring_bridge:
+                        for pos, fifo in network.ring_bridge[direction].items():
+                            if "RB" not in results[net_name][ch_idx]:
+                                results[net_name][ch_idx]["RB"] = {}
+                            if direction not in results[net_name][ch_idx]["RB"]:
+                                results[net_name][ch_idx]["RB"][direction] = {}
+
+                            capacity = capacities["RB"][direction]
+                            base_stats = self._calculate_fifo_stats(
+                                fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles
+                            )
+
+                            # ITag统计 (仅TU/TD纵向转向)
+                            itag_cumulative = 0
+                            itag_rate = 0.0
+                            if direction in ["TU", "TD"] and hasattr(network, "fifo_itag_cumulative_count"):
+                                itag_cumulative = network.fifo_itag_cumulative_count.get("RB", {}).get(direction, {}).get(pos, 0)
+                                flit_count = fifo.flit_count
+                                itag_rate = (itag_cumulative / (total_cycles * flit_count) * 100) if flit_count > 0 and total_cycles > 0 else 0.0
+
+                            # ETag统计 (所有方向)
                             etag_t0_cumulative = 0
                             etag_t1_cumulative = 0
                             etag_t2_cumulative = 0
                             etag_t0_rate = 0.0
                             etag_t1_rate = 0.0
                             etag_t2_rate = 0.0
+                            if hasattr(network, "fifo_etag_entry_count"):
+                                etag_dist = network.fifo_etag_entry_count.get("RB", {}).get(direction, {}).get(pos, {})
+                                if etag_dist:
+                                    etag_t0_cumulative = etag_dist.get("T0", 0)
+                                    etag_t1_cumulative = etag_dist.get("T1", 0)
+                                    etag_t2_cumulative = etag_dist.get("T2", 0)
+                                    total_etag = etag_t0_cumulative + etag_t1_cumulative + etag_t2_cumulative
+                                    if total_etag > 0:
+                                        etag_t0_rate = etag_t0_cumulative / total_etag * 100
+                                        etag_t1_rate = etag_t1_cumulative / total_etag * 100
+                                        etag_t2_rate = etag_t2_cumulative / total_etag * 100
 
-                            if category in network.fifo_etag_entry_count:
-                                if fifo_type in network.fifo_etag_entry_count[category]:
-                                    if pos in network.fifo_etag_entry_count[category][fifo_type]:
-                                        etag_dist = network.fifo_etag_entry_count[category][fifo_type][pos]
-                                        etag_t0_cumulative = etag_dist["T0"]
-                                        etag_t1_cumulative = etag_dist["T1"]
-                                        etag_t2_cumulative = etag_dist["T2"]
-
-                                        total_etag = etag_t0_cumulative + etag_t1_cumulative + etag_t2_cumulative
-                                        if total_etag > 0:
-                                            etag_t0_rate = etag_t0_cumulative / total_etag * 100
-                                            etag_t1_rate = etag_t1_cumulative / total_etag * 100
-                                            etag_t2_rate = etag_t2_cumulative / total_etag * 100
-
-                            # 合并所有统计
-                            results[net_name][category][fifo_type][pos] = {
+                            results[net_name][ch_idx]["RB"][direction][pos] = {
                                 **base_stats,
                                 "itag_cumulative_count": itag_cumulative,
                                 "itag_rate": itag_rate,
@@ -1016,6 +1047,76 @@ class CircuitStatsCollector:
                                 "etag_t1_rate": etag_t1_rate,
                                 "etag_t2_rate": etag_t2_rate,
                             }
+
+                # 收集EQ的FIFO
+                for direction in ["TU", "TD"]:
+                    if direction in network.eject_queues:
+                        for pos, fifo in network.eject_queues[direction].items():
+                            if "EQ" not in results[net_name][ch_idx]:
+                                results[net_name][ch_idx]["EQ"] = {}
+                            if direction not in results[net_name][ch_idx]["EQ"]:
+                                results[net_name][ch_idx]["EQ"][direction] = {}
+
+                            capacity = capacities["EQ"][direction]
+                            base_stats = self._calculate_fifo_stats(
+                                fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles
+                            )
+
+                            # ETag统计 (TU/TD纵向下环)
+                            etag_t0_cumulative = 0
+                            etag_t1_cumulative = 0
+                            etag_t2_cumulative = 0
+                            etag_t0_rate = 0.0
+                            etag_t1_rate = 0.0
+                            etag_t2_rate = 0.0
+                            if hasattr(network, "fifo_etag_entry_count"):
+                                etag_dist = network.fifo_etag_entry_count.get("EQ", {}).get(direction, {}).get(pos, {})
+                                if etag_dist:
+                                    etag_t0_cumulative = etag_dist.get("T0", 0)
+                                    etag_t1_cumulative = etag_dist.get("T1", 0)
+                                    etag_t2_cumulative = etag_dist.get("T2", 0)
+                                    total_etag = etag_t0_cumulative + etag_t1_cumulative + etag_t2_cumulative
+                                    if total_etag > 0:
+                                        etag_t0_rate = etag_t0_cumulative / total_etag * 100
+                                        etag_t1_rate = etag_t1_cumulative / total_etag * 100
+                                        etag_t2_rate = etag_t2_cumulative / total_etag * 100
+
+                            results[net_name][ch_idx]["EQ"][direction][pos] = {
+                                **base_stats,
+                                "itag_cumulative_count": 0,
+                                "itag_rate": 0.0,
+                                "etag_t0_cumulative": etag_t0_cumulative,
+                                "etag_t1_cumulative": etag_t1_cumulative,
+                                "etag_t2_cumulative": etag_t2_cumulative,
+                                "etag_t0_rate": etag_t0_rate,
+                                "etag_t1_rate": etag_t1_rate,
+                                "etag_t2_rate": etag_t2_rate,
+                            }
+
+                # 收集EQ CH_buffer
+                for ip_type in network.EQ_channel_buffer:
+                    for pos, fifo in network.EQ_channel_buffer[ip_type].items():
+                        if "EQ" not in results[net_name][ch_idx]:
+                            results[net_name][ch_idx]["EQ"] = {}
+                        if "CH" not in results[net_name][ch_idx]["EQ"]:
+                            results[net_name][ch_idx]["EQ"]["CH"] = {}
+
+                        pos_key = f"{pos}_{ip_type}"
+                        capacity = capacities["EQ"]["CH"]
+                        base_stats = self._calculate_fifo_stats(
+                            fifo.depth_sum, fifo.max_depth, capacity, fifo.flit_count, total_cycles
+                        )
+                        results[net_name][ch_idx]["EQ"]["CH"][pos_key] = {
+                            **base_stats,
+                            "itag_cumulative_count": 0,
+                            "itag_rate": 0.0,
+                            "etag_t0_cumulative": 0,
+                            "etag_t1_cumulative": 0,
+                            "etag_t2_cumulative": 0,
+                            "etag_t0_rate": 0.0,
+                            "etag_t1_rate": 0.0,
+                            "etag_t2_rate": 0.0,
+                        }
 
         return results
 
@@ -1030,10 +1131,11 @@ class CircuitStatsCollector:
             "max_utilization": max_depth / capacity * 100,
             "flit_count": flit_count,
             "avg_throughput": flit_count / total_cycles if total_cycles > 0 else 0,
+            "capacity": capacity,
         }
 
     def generate_fifo_usage_csv(self, model, output_path: str = None, return_content: bool = False):
-        """生成FIFO使用率CSV文件（仅统计data通道）
+        """生成FIFO使用率CSV文件（支持多通道）
 
         Args:
             model: 仿真模型对象
@@ -1052,7 +1154,7 @@ class CircuitStatsCollector:
         # 准备CSV数据
         rows = []
         headers = [
-            "网络", "类别", "FIFO类型", "位置",
+            "网络", "通道", "类别", "FIFO类型", "位置",
             "平均使用率(%)", "最大使用率(%)", "平均深度", "最大深度",
             "累计flit数", "平均吞吐量(flit/cycle)",
             "ITag累计次数", "ITag率(%)",
@@ -1060,34 +1162,36 @@ class CircuitStatsCollector:
             "ETag_T0率(%)", "ETag_T1率(%)", "ETag_T2率(%)"
         ]
 
-        # 只处理data通道的数据
+        # 处理data网络的所有通道
         if "data" in fifo_stats:
             net_data = fifo_stats["data"]
-            for category, category_data in net_data.items():
-                for fifo_type, fifo_data in category_data.items():
-                    for pos, stats in fifo_data.items():
-                        row = {
-                            "网络": "data",
-                            "类别": category,
-                            "FIFO类型": fifo_type,
-                            "位置": pos,
-                            "平均使用率(%)": f"{stats['avg_utilization']:.2f}",
-                            "最大使用率(%)": f"{stats['max_utilization']:.2f}",
-                            "平均深度": f"{stats['avg_depth']:.2f}",
-                            "最大深度": stats["max_depth"],
-                            "累计flit数": stats["flit_count"],
-                            "平均吞吐量(flit/cycle)": f"{stats['avg_throughput']:.4f}",
-                            # Tag字段
-                            "ITag累计次数": stats["itag_cumulative_count"],
-                            "ITag率(%)": f"{stats['itag_rate']:.2f}",
-                            "ETag_T0累计次数": stats["etag_t0_cumulative"],
-                            "ETag_T1累计次数": stats["etag_t1_cumulative"],
-                            "ETag_T2累计次数": stats["etag_t2_cumulative"],
-                            "ETag_T0率(%)": f"{stats['etag_t0_rate']:.2f}",
-                            "ETag_T1率(%)": f"{stats['etag_t1_rate']:.2f}",
-                            "ETag_T2率(%)": f"{stats['etag_t2_rate']:.2f}",
-                        }
-                        rows.append(row)
+            for ch_idx, ch_data in net_data.items():
+                for category, category_data in ch_data.items():
+                    for fifo_type, fifo_data in category_data.items():
+                        for pos, stats in fifo_data.items():
+                            row = {
+                                "网络": "data",
+                                "通道": ch_idx,
+                                "类别": category,
+                                "FIFO类型": fifo_type,
+                                "位置": pos,
+                                "平均使用率(%)": f"{stats['avg_utilization']:.2f}",
+                                "最大使用率(%)": f"{stats['max_utilization']:.2f}",
+                                "平均深度": f"{stats['avg_depth']:.2f}",
+                                "最大深度": stats["max_depth"],
+                                "累计flit数": stats["flit_count"],
+                                "平均吞吐量(flit/cycle)": f"{stats['avg_throughput']:.4f}",
+                                # Tag字段
+                                "ITag累计次数": stats["itag_cumulative_count"],
+                                "ITag率(%)": f"{stats['itag_rate']:.2f}",
+                                "ETag_T0累计次数": stats["etag_t0_cumulative"],
+                                "ETag_T1累计次数": stats["etag_t1_cumulative"],
+                                "ETag_T2累计次数": stats["etag_t2_cumulative"],
+                                "ETag_T0率(%)": f"{stats['etag_t0_rate']:.2f}",
+                                "ETag_T1率(%)": f"{stats['etag_t1_rate']:.2f}",
+                                "ETag_T2率(%)": f"{stats['etag_t2_rate']:.2f}",
+                            }
+                            rows.append(row)
 
         # 如果要求返回内容，使用StringIO
         if return_content:
