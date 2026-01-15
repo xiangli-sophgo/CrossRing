@@ -1465,9 +1465,9 @@ class D2D_Model:
                     # 注入tracker功能到HTML内容
                     if html_content and "tracker_data.json" in self._result_file_contents:
                         try:
-                            from src.analysis.tracker_html_injector import inject_tracker_functionality_to_content
+                            from src.analysis.outstanding_visualizer import inject_outstanding_functionality_to_content
                             tracker_json = self._result_file_contents["tracker_data.json"]
-                            html_content = inject_tracker_functionality_to_content(html_content, tracker_json)
+                            html_content = inject_outstanding_functionality_to_content(html_content, tracker_json)
                         except Exception:
                             pass
 
@@ -1480,9 +1480,9 @@ class D2D_Model:
 
                     # 步骤8.5: 注入tracker功能到HTML
                     if integrated_path and tracker_json_path:
-                        from src.analysis.tracker_html_injector import inject_tracker_functionality
+                        from src.analysis.outstanding_visualizer import inject_outstanding_functionality
 
-                        inject_tracker_functionality(integrated_path, tracker_json_path)
+                        inject_outstanding_functionality(integrated_path, tracker_json_path)
                     if integrated_path:
                         saved_files.append({"type": "集成可视化报告", "path": integrated_path})
 

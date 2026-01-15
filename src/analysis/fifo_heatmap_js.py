@@ -111,7 +111,7 @@ def generate_fifo_heatmap_javascript(fifo_data: Dict, fifo_options: List[Tuple[s
             const plotDiv = document.getElementsByClassName('plotly-graph-div')[0];
             if (!plotDiv) return;
 
-            // 初始化图表面板（复用tracker-panel或创建新的）
+            // 初始化图表面板（复用outstanding-panel或创建新的）
             initChartPanel();
 
             // 初始化当前FIFO的category和type
@@ -432,14 +432,14 @@ def generate_fifo_heatmap_javascript(fifo_data: Dict, fifo_options: List[Tuple[s
                 }});
             }}
 
-            // 初始化图表面板（复用tracker-panel或创建新的）
+            // 初始化图表面板（复用outstanding-panel或创建新的）
             function initChartPanel() {{
-                // 检查是否已存在tracker-panel（由tracker_html_injector创建）
-                if (document.getElementById('tracker-panel')) {{
+                // 检查是否已存在outstanding-panel（由outstanding_visualizer创建）
+                if (document.getElementById('outstanding-panel')) {{
                     return;
                 }}
 
-                // 如果没有tracker-panel，创建一个新的chart-panel
+                // 如果没有outstanding-panel，创建一个新的chart-panel
                 if (document.getElementById('chart-panel')) return;
 
                 // 添加样式
@@ -487,7 +487,7 @@ def generate_fifo_heatmap_javascript(fifo_data: Dict, fifo_options: List[Tuple[s
                         flex-direction: column;
                         overflow: hidden;
                     }}
-                    .chart-item.tracker-type {{
+                    .chart-item.outstanding-type {{
                         border-color: #1976d2;
                     }}
                     .chart-item.fifo-type {{
@@ -500,7 +500,7 @@ def generate_fifo_heatmap_javascript(fifo_data: Dict, fifo_options: List[Tuple[s
                         color: white;
                         text-align: center;
                     }}
-                    .chart-item-header.tracker {{
+                    .chart-item-header.outstanding {{
                         background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
                     }}
                     .chart-item-header.fifo {{
@@ -573,16 +573,16 @@ def generate_fifo_heatmap_javascript(fifo_data: Dict, fifo_options: List[Tuple[s
                 }}
             }}
 
-            // 更新所有图表（全局函数，供tracker也能调用）
+            // 更新所有图表（全局函数，供outstanding也能调用）
             window.updateAllCharts = function() {{
-                // 优先使用tracker-panel（如果存在）
-                let panel = document.getElementById('tracker-panel');
-                let container = document.getElementById('tracker-container');
-                let queue = window.trackerQueue;
-                let itemClass = 'tracker-item';
-                let chartClass = 'tracker-chart';
+                // 优先使用outstanding-panel（如果存在）
+                let panel = document.getElementById('outstanding-panel');
+                let container = document.getElementById('outstanding-container');
+                let queue = window.outstandingQueue;
+                let itemClass = 'outstanding-item';
+                let chartClass = 'outstanding-chart';
 
-                // 如果没有tracker-panel，使用chart-panel
+                // 如果没有outstanding-panel，使用chart-panel
                 if (!panel) {{
                     panel = document.getElementById('chart-panel');
                     container = document.getElementById('chart-container');
@@ -617,23 +617,23 @@ def generate_fifo_heatmap_javascript(fifo_data: Dict, fifo_options: List[Tuple[s
                     chartItem.className = itemClass;
 
                     // 根据类型添加样式类
-                    if (item.type === 'tracker') {{
-                        chartItem.classList.add('tracker-type');
+                    if (item.type === 'outstanding') {{
+                        chartItem.classList.add('outstanding-type');
                     }} else if (item.type === 'fifo') {{
                         chartItem.classList.add('fifo-type');
                     }}
 
                     const closeBtn = document.createElement('button');
-                    closeBtn.className = panel.id === 'tracker-panel' ? 'close-item-btn' : 'close-chart-btn';
+                    closeBtn.className = panel.id === 'outstanding-panel' ? 'close-item-btn' : 'close-chart-btn';
                     closeBtn.textContent = '×';
                     closeBtn.onclick = () => closeChartItem(index);
 
                     // 创建标题头部
                     const header = document.createElement('div');
                     header.className = 'chart-item-header';
-                    if (item.type === 'tracker') {{
-                        header.classList.add('tracker');
-                        header.textContent = `Tracker使用: ${{item.ipType}} @ Pos ${{item.ipPos}}`;
+                    if (item.type === 'outstanding') {{
+                        header.classList.add('outstanding');
+                        header.textContent = `Outstanding使用情况: ${{item.ipType}} @ Pos ${{item.ipPos}}`;
                     }} else if (item.type === 'fifo') {{
                         header.classList.add('fifo');
                         // 构造FIFO标题：FIFO使用情况: [DieX] 节点Y category-type NETWORK [ChN]
@@ -655,15 +655,15 @@ def generate_fifo_heatmap_javascript(fifo_data: Dict, fifo_options: List[Tuple[s
                     setTimeout(() => {{
                         if (item.type === 'fifo') {{
                             renderFifoChart(item, `chart-item-${{index}}`);
-                        }} else if (item.type === 'tracker' && window.createTrackerChart) {{
-                            window.createTrackerChart(item.ipData, item.ipType, item.ipPos, `chart-item-${{index}}`, item.dieId);
+                        }} else if (item.type === 'outstanding' && window.createOutstandingChart) {{
+                            window.createOutstandingChart(item.ipData, item.ipType, item.ipPos, `chart-item-${{index}}`, item.dieId);
                         }}
                     }}, 10);
                 }});
             }}
 
             function closeChartItem(index) {{
-                let queue = window.trackerQueue || window.chartQueue;
+                let queue = window.outstandingQueue || window.chartQueue;
                 if (queue && index < queue.length) {{
                     queue.splice(index, 1);
                     window.updateAllCharts();
@@ -671,9 +671,9 @@ def generate_fifo_heatmap_javascript(fifo_data: Dict, fifo_options: List[Tuple[s
             }}
 
             window.closeChartPanel = function() {{
-                const panel = document.getElementById('tracker-panel') || document.getElementById('chart-panel');
+                const panel = document.getElementById('outstanding-panel') || document.getElementById('chart-panel');
                 if (panel) panel.classList.remove('active');
-                if (window.trackerQueue) window.trackerQueue.length = 0;
+                if (window.outstandingQueue) window.outstandingQueue.length = 0;
                 if (window.chartQueue) window.chartQueue.length = 0;
             }};
 
@@ -765,8 +765,8 @@ def generate_fifo_heatmap_javascript(fifo_data: Dict, fifo_options: List[Tuple[s
                 const networkLabel = {{'req': 'REQ', 'rsp': 'RSP', 'data': 'DATA'}}[networkType] || networkType;
                 const title = `Die ${{dieId}} 节点${{nodePos}} - ${{category}}-${{fifoType}} (${{networkLabel}} Ch${{chIdx}})`;
 
-                // 使用全局队列（优先使用trackerQueue，否则使用chartQueue）
-                let queue = window.trackerQueue || window.chartQueue;
+                // 使用全局队列（优先使用outstandingQueue，否则使用chartQueue）
+                let queue = window.outstandingQueue || window.chartQueue;
                 if (!queue) {{
                     window.chartQueue = [];
                     queue = window.chartQueue;

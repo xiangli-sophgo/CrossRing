@@ -952,25 +952,18 @@ class SingleDieAnalyzer:
                 # 尝试从_result_file_contents获取tracker数据
                 if hasattr(self.sim_model, "_result_file_contents"):
                     tracker_json = self.sim_model._result_file_contents.get("tracker_data.json")
-                    print(f"[DEBUG] tracker_json from _result_file_contents: {tracker_json is not None}")
                 # 尝试从_tracker_collector获取tracker数据
                 if not tracker_json and hasattr(self.sim_model, "_tracker_collector"):
                     tracker_json = self.sim_model._tracker_collector.save_to_json(return_content=True)
-                    print(f"[DEBUG] tracker_json from _tracker_collector: {tracker_json is not None}")
 
                 if tracker_json:
-                    print(f"[DEBUG] Injecting tracker functionality to {integrated_path}")
-                    from src.analysis.tracker_html_injector import inject_tracker_functionality_to_content
+                    from src.analysis.outstanding_visualizer import inject_outstanding_functionality_to_content
                     with open(integrated_path, "r", encoding="utf-8") as f:
                         html_content = f.read()
-                    html_content = inject_tracker_functionality_to_content(html_content, tracker_json)
+                    html_content = inject_outstanding_functionality_to_content(html_content, tracker_json)
                     with open(integrated_path, "w", encoding="utf-8") as f:
                         f.write(html_content)
-                    print("[DEBUG] Tracker functionality injected successfully")
-                else:
-                    print("[DEBUG] No tracker_json available, skipping injection")
 
         except Exception as e:
-            print(f"[DEBUG] Exception in generate_integrated_report: {e}")
             import traceback
             traceback.print_exc()

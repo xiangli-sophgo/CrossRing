@@ -117,37 +117,6 @@ class DataflowMixin:
         flits = self._network_cycle_process(network, flits, flit_type)
         return flits
 
-    def _Link_process(self, network: Network, flits):
-        """Link模块：Link传输处理
-
-        处理Link上的flit移动
-
-        Args:
-            network: 网络实例
-            flits: 当前网络中的flit列表
-
-        Returns:
-            list: 更新后的flits列表
-        """
-        # 第一步：对Link上的flit执行plan_move
-        for flit in flits:
-            if flit.flit_position == "Link":
-                network.plan_move(flit, self.cycle)
-
-        # 第二步：执行execute_moves并收集需要移除的flit
-        # 只处理在Link上的flit，避免误移除CP中的flit
-        executed_flits = set()
-        for flit in flits:
-            if flit.flit_position == "Link":
-                if network.execute_moves(flit, self.cycle):
-                    executed_flits.add(id(flit))
-
-        # 第三步：一次过滤重建列表（O(n)，比多次remove快）
-        if executed_flits:
-            flits[:] = [flit for flit in flits if id(flit) not in executed_flits]
-
-        return flits
-
     def move_pre_to_queues_all(self):
         #  所有 IPInterface 的 *_pre → FIFO
         # 直接遍历实际创建的IP接口(动态挂载模式)

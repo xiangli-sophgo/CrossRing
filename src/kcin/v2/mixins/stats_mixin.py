@@ -388,8 +388,6 @@ class StatsMixin:
 
         # FIFO使用率热力图 - 收集到结果处理器中
         fifo_enabled = getattr(self, "fifo_utilization_heatmap", False)
-        if self.verbose:
-            print(f"FIFO热力图配置: fifo_utilization_heatmap={fifo_enabled}")
 
         if fifo_enabled:
             try:
@@ -397,8 +395,6 @@ class StatsMixin:
 
                 # 计算总周期数(使用物理周期数,因为depth_sum在每个物理周期累加)
                 total_cycles = self.cycle
-                if self.verbose:
-                    print(f"开始生成FIFO热力图，总周期数: {total_cycles}")
 
                 # 构造dies字典（单Die情况）
                 dies = {0: self}
@@ -408,9 +404,6 @@ class StatsMixin:
                     dies=dies, config=self.config, total_cycles=total_cycles, die_layout=None, die_rotations=None, save_path=None, show_fig=False, return_fig_and_js=True
                 )
 
-                if self.verbose:
-                    print(f"FIFO热力图生成成功，fig={fifo_fig is not None}, js={fifo_js is not None}")
-
                 # 将FIFO图表添加到结果处理器的图表列表中
                 if not hasattr(self.result_processor, "charts_to_merge"):
                     self.result_processor.charts_to_merge = []
@@ -419,9 +412,6 @@ class StatsMixin:
                     self.result_processor.charts_to_merge.insert(1, ("FIFO使用率热力图", fifo_fig, fifo_js))
                 else:
                     self.result_processor.charts_to_merge.append(("FIFO使用率热力图", fifo_fig, fifo_js))
-
-                if self.verbose:
-                    print(f"FIFO热力图已添加到charts_to_merge，当前图表数量: {len(self.result_processor.charts_to_merge)}")
 
             except Exception as e:
                 import traceback
@@ -501,9 +491,9 @@ class StatsMixin:
                     # 注入tracker功能到HTML内容
                     if hasattr(self, "_result_file_contents") and "tracker_data.json" in self._result_file_contents:
                         try:
-                            from src.analysis.tracker_html_injector import inject_tracker_functionality_to_content
+                            from src.analysis.outstanding_visualizer import inject_outstanding_functionality_to_content
                             tracker_json = self._result_file_contents["tracker_data.json"]
-                            html_content = inject_tracker_functionality_to_content(html_content, tracker_json)
+                            html_content = inject_outstanding_functionality_to_content(html_content, tracker_json)
                         except Exception:
                             pass
 
@@ -527,9 +517,9 @@ class StatsMixin:
                 # HTML生成完成后，注入tracker交互功能
                 if integrated_path and hasattr(self, "_tracker_json_path") and os.path.exists(self._tracker_json_path):
                     try:
-                        from src.analysis.tracker_html_injector import inject_tracker_functionality
+                        from src.analysis.outstanding_visualizer import inject_outstanding_functionality
 
-                        inject_tracker_functionality(integrated_path, self._tracker_json_path)
+                        inject_outstanding_functionality(integrated_path, self._tracker_json_path)
                     except Exception as e:
                         if self.verbose:
                             print(f"警告: Tracker交互功能注入失败: {e}")

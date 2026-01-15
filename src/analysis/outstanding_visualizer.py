@@ -1,5 +1,5 @@
 """
-Tracker HTML注入器 - 向现有的HTML文件注入tracker交互功能
+Outstanding可视化器 - 向现有的HTML文件注入outstanding事务可视化功能
 """
 
 import os
@@ -7,13 +7,13 @@ import json
 from typing import Dict
 
 
-def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
+def inject_outstanding_functionality(html_path: str, outstanding_data_path: str) -> str:
     """
-    向现有的HTML文件注入tracker交互功能
+    向现有的HTML文件注入Outstanding可视化功能
 
     Args:
         html_path: HTML文件路径
-        tracker_data_path: tracker数据JSON文件路径
+        outstanding_data_path: outstanding数据JSON文件路径
 
     Returns:
         修改后的HTML文件路径
@@ -22,28 +22,28 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
     with open(html_path, "r", encoding="utf-8") as f:
         html_content = f.read()
 
-    # 读取tracker数据
-    with open(tracker_data_path, "r", encoding="utf-8") as f:
-        tracker_data = json.load(f)
+    # 读取outstanding数据
+    with open(outstanding_data_path, "r", encoding="utf-8") as f:
+        outstanding_data = json.load(f)
 
     # 检查是否已经注入过（检查完整的div定义，而不是字符串引用）
-    if '<div class="tracker-section" id="tracker-panel">' in html_content:
+    if '<div class="outstanding-section" id="outstanding-panel">' in html_content:
         return html_path
 
-    # 生成tracker面板HTML（动态创建，竖向优先布局）
-    tracker_panel_html = """
-    <div class="tracker-section" id="tracker-panel">
-        <button class="close-btn" onclick="closeTrackerPanel()" title="关闭全部">×</button>
-        <div class="tracker-grid" id="tracker-container">
-            <!-- tracker-item将由JavaScript动态创建 -->
+    # 生成outstanding面板HTML（动态创建，竖向优先布局）
+    outstanding_panel_html = """
+    <div class="outstanding-section" id="outstanding-panel">
+        <button class="close-btn" onclick="closeOutstandingPanel()" title="关闭全部">×</button>
+        <div class="outstanding-grid" id="outstanding-container">
+            <!-- outstanding-item将由JavaScript动态创建 -->
         </div>
     </div>
     """
 
     # 生成CSS样式（响应式竖向优先布局，与FIFO热力图保持一致）
-    tracker_css = """
+    outstanding_css = """
     <style>
-        .tracker-section {
+        .outstanding-section {
             position: fixed;
             right: 10px;
             top: 10px;
@@ -60,10 +60,10 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             transition: width 0.3s ease;
         }
         /* 1-2个tracker时窄布局 */
-        .tracker-section.narrow {
+        .outstanding-section.narrow {
             width: 480px;
         }
-        .tracker-section.active {
+        .outstanding-section.active {
             display: block;
         }
         .close-btn {
@@ -85,7 +85,7 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
         .close-btn:hover {
             background: #d32f2f;
         }
-        .tracker-grid {
+        .outstanding-grid {
             display: grid;
             grid-template-columns: repeat(2, 440px);
             grid-auto-rows: 320px;
@@ -96,21 +96,21 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             justify-content: start;
         }
         /* 1个tracker时：单行单列 */
-        .tracker-grid[data-count="1"] {
+        .outstanding-grid[data-count="1"] {
             grid-template-columns: 440px;
             justify-content: center;
         }
         /* 2个tracker时：单行2列 */
-        .tracker-grid[data-count="2"] {
+        .outstanding-grid[data-count="2"] {
             grid-template-columns: repeat(2, 440px);
             justify-content: center;
         }
         /* 3-4个tracker时：2列，自动行 */
-        .tracker-grid[data-count="3"],
-        .tracker-grid[data-count="4"] {
+        .outstanding-grid[data-count="3"],
+        .outstanding-grid[data-count="4"] {
             grid-template-columns: repeat(2, 440px);
         }
-        .tracker-item {
+        .outstanding-item {
             position: relative;
             background: #f5f5f5;
             padding: 0;
@@ -122,14 +122,14 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             flex-direction: column;
             overflow: hidden;
         }
-        .tracker-item-title {
+        .outstanding-item-title {
             font-weight: bold;
             margin-bottom: 10px;
             color: #1976d2;
             font-size: 14px;
             flex-shrink: 0;
         }
-        .tracker-chart {
+        .outstanding-chart {
             width: 430px;
             height: 285px;
             flex-shrink: 0;
@@ -142,7 +142,7 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             color: white;
             text-align: center;
         }
-        .chart-item-header.tracker {
+        .chart-item-header.outstanding {
             background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
         }
         .chart-item-header.fifo {
@@ -171,51 +171,51 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
     """
 
     # 生成JavaScript代码（支持2x2网格和FIFO队列）
-    tracker_js = f"""
+    outstanding_js = f"""
     <script>
-        // 嵌入tracker数据
-        const trackerData = {json.dumps(tracker_data, ensure_ascii=False)};
+        // 嵌入Outstanding数据
+        const outstandingData = {json.dumps(outstanding_data, ensure_ascii=False)};
 
         // IP显示队列（最多4个，FIFO）- 使用window全局变量以便与FIFO图表共享
-        window.trackerQueue = [];
-        const MAX_TRACKERS = 4;
+        window.outstandingQueue = [];
+        const MAX_OUTSTANDING = 4;
 
         // 页面加载后初始化点击监听
         document.addEventListener('DOMContentLoaded', function() {{
-            console.log('[Tracker] DOMContentLoaded, waiting 1s to init...');
-            setTimeout(initializeTrackerListener, 1000);
+            console.log('[Outstanding] DOMContentLoaded, waiting 1s to init...');
+            setTimeout(initializeOutstandingListener, 1000);
         }});
 
-        function initializeTrackerListener() {{
-            console.log('[Tracker] initializeTrackerListener called');
+        function initializeOutstandingListener() {{
+            console.log('[Outstanding] initializeOutstandingListener called');
             const flowGraphDiv = document.getElementById('chart-0');
             if (!flowGraphDiv) {{
-                console.log('[Tracker] ERROR: chart-0 not found!');
+                console.log('[Outstanding] ERROR: chart-0 not found!');
                 // 尝试查找其他可能的图表容器
                 const allDivs = document.querySelectorAll('[id^="chart-"]');
-                console.log('[Tracker] Available chart divs:', Array.from(allDivs).map(d => d.id));
+                console.log('[Outstanding] Available chart divs:', Array.from(allDivs).map(d => d.id));
                 return;
             }}
-            console.log('[Tracker] Found chart-0 div');
+            console.log('[Outstanding] Found chart-0 div');
 
             // 检查Plotly图表是否已初始化
             if (!flowGraphDiv.data || !flowGraphDiv.layout) {{
-                console.log('[Tracker] Plotly not ready, retrying in 100ms...');
-                setTimeout(initializeTrackerListener, 100);
+                console.log('[Outstanding] Plotly not ready, retrying in 100ms...');
+                setTimeout(initializeOutstandingListener, 100);
                 return;
             }}
-            console.log('[Tracker] Plotly ready, bindng click event...');
-            console.log('[Tracker] trackerData keys:', Object.keys(trackerData));
+            console.log('[Outstanding] Plotly ready, bindng click event...');
+            console.log('[Outstanding] outstandingData keys:', Object.keys(outstandingData));
 
             // 使用Plotly原生事件绑定
             flowGraphDiv.on('plotly_click', function(data) {{
-                console.log('[Tracker] plotly_click event fired!');
-                console.log('[Tracker] Click data:', data);
+                console.log('[Outstanding] plotly_click event fired!');
+                console.log('[Outstanding] Click data:', data);
                 if (data.points && data.points.length > 0) {{
                     const point = data.points[0];
-                    console.log('[Tracker] Clicked point:', point);
-                    console.log('[Tracker] point.customdata:', point.customdata);
-                    console.log('[Tracker] point.text:', point.text);
+                    console.log('[Outstanding] Clicked point:', point);
+                    console.log('[Outstanding] point.customdata:', point.customdata);
+                    console.log('[Outstanding] point.text:', point.text);
                     let dieId, ipType, ipPos;
 
                     if (point.customdata) {{
@@ -223,144 +223,144 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
                             dieId = point.customdata[0];
                             ipType = point.customdata[1];
                             ipPos = point.customdata[2];
-                            console.log('[Tracker] Parsed from array customdata:', dieId, ipType, ipPos);
+                            console.log('[Outstanding] Parsed from array customdata:', dieId, ipType, ipPos);
                         }} else if (typeof point.customdata === 'object') {{
                             dieId = point.customdata.die_id;
                             ipType = point.customdata.ip_type;
                             ipPos = point.customdata.ip_pos;
-                            console.log('[Tracker] Parsed from object customdata:', dieId, ipType, ipPos);
+                            console.log('[Outstanding] Parsed from object customdata:', dieId, ipType, ipPos);
                         }}
                     }}
 
                     // 从text中解析IP信息（备用方案）
                     if (!ipType && point.text) {{
-                        console.log('[Tracker] Trying to parse from text...');
+                        console.log('[Outstanding] Trying to parse from text...');
                         let match = point.text.match(/(\\w+_\\d+)\\s*@\\s*Pos\\s*(\\d+)/);
                         if (match) {{
                             ipType = match[1];
                             ipPos = parseInt(match[2]);
                             dieId = 0;
-                            console.log('[Tracker] Parsed from text:', dieId, ipType, ipPos);
+                            console.log('[Outstanding] Parsed from text:', dieId, ipType, ipPos);
                         }} else {{
-                            console.log('[Tracker] Text does not match IP pattern, ignoring click');
+                            console.log('[Outstanding] Text does not match IP pattern, ignoring click');
                             return;
                         }}
                     }}
 
                     if (ipType && ipPos !== undefined) {{
-                        console.log('[Tracker] Calling addTrackerToQueue...');
-                        addTrackerToQueue(dieId || 0, ipType, ipPos);
+                        console.log('[Outstanding] Calling addOutstandingToQueue...');
+                        addOutstandingToQueue(dieId || 0, ipType, ipPos);
                     }} else {{
-                        console.log('[Tracker] ipType or ipPos undefined, not adding to queue');
+                        console.log('[Outstanding] ipType or ipPos undefined, not adding to queue');
                     }}
                 }} else {{
-                    console.log('[Tracker] No points in click data');
+                    console.log('[Outstanding] No points in click data');
                 }}
             }});
-            console.log('[Tracker] Click event bindng complete');
+            console.log('[Outstanding] Click event bindng complete');
         }}
 
-        function addTrackerToQueue(dieId, ipType, ipPos) {{
-            console.log('[Tracker] addTrackerToQueue called:', dieId, ipType, ipPos);
-            const dieData = trackerData[dieId.toString()];
+        function addOutstandingToQueue(dieId, ipType, ipPos) {{
+            console.log('[Outstanding] addOutstandingToQueue called:', dieId, ipType, ipPos);
+            const dieData = outstandingData[dieId.toString()];
             if (!dieData) {{
-                console.log('[Tracker] dieData not found for die:', dieId);
+                console.log('[Outstanding] dieData not found for die:', dieId);
                 return;
             }}
 
             const ipTypeData = dieData[ipType];
             if (!ipTypeData) {{
-                console.log('[Tracker] ipTypeData not found for:', ipType);
+                console.log('[Outstanding] ipTypeData not found for:', ipType);
                 return;
             }}
 
             const ipData = ipTypeData[ipPos.toString()];
             if (!ipData) {{
-                console.log('[Tracker] ipData not found for pos:', ipPos);
+                console.log('[Outstanding] ipData not found for pos:', ipPos);
                 return;
             }}
 
             // 检查是否已经在队列中
             const ipKey = `${{dieId}}_${{ipType}}_${{ipPos}}`;
-            const existingIndex = window.trackerQueue.findIndex(item => item.key === ipKey);
+            const existingIndex = window.outstandingQueue.findIndex(item => item.key === ipKey);
             if (existingIndex !== -1) {{
-                console.log('[Tracker] Already in queue:', ipKey);
+                console.log('[Outstanding] Already in queue:', ipKey);
                 return;
             }}
 
             // 添加到队列，如果满了则移除最旧的
-            if (window.trackerQueue.length >= MAX_TRACKERS) {{
-                window.trackerQueue.shift();
+            if (window.outstandingQueue.length >= MAX_OUTSTANDING) {{
+                window.outstandingQueue.shift();
             }}
 
             // 添加到队列，包含type字段以便与FIFO图表兼容
-            window.trackerQueue.push({{ type: 'tracker', key: ipKey, dieId, ipType, ipPos, ipData }});
-            console.log('[Tracker] Added to queue, length:', window.trackerQueue.length);
+            window.outstandingQueue.push({{ type: 'outstanding', key: ipKey, dieId, ipType, ipPos, ipData }});
+            console.log('[Outstanding] Added to queue, length:', window.outstandingQueue.length);
 
-            const panel = document.getElementById('tracker-panel');
+            const panel = document.getElementById('outstanding-panel');
             if (panel) panel.classList.add('active');
 
             // 优先使用统一的updateAllCharts（如果FIFO热力图也存在），否则用自己的
             if (typeof window.updateAllCharts === 'function') {{
-                console.log('[Tracker] Using window.updateAllCharts');
+                console.log('[Outstanding] Using window.updateAllCharts');
                 window.updateAllCharts();
             }} else {{
-                console.log('[Tracker] Using updateAllTrackerCharts (fallback)');
-                updateAllTrackerCharts();
+                console.log('[Outstanding] Using updateAllOutstandingCharts (fallback)');
+                updateAllOutstandingCharts();
             }}
         }}
 
-        function updateAllTrackerCharts() {{
-            const container = document.getElementById('tracker-container');
-            const panel = document.getElementById('tracker-panel');
+        function updateAllOutstandingCharts() {{
+            const container = document.getElementById('outstanding-container');
+            const panel = document.getElementById('outstanding-panel');
 
-            if (window.trackerQueue.length === 0) {{
+            if (window.outstandingQueue.length === 0) {{
                 panel.classList.remove('active');
                 return;
             }}
 
             panel.classList.add('active');
 
-            if (window.trackerQueue.length === 1) {{
+            if (window.outstandingQueue.length === 1) {{
                 panel.classList.add('narrow');
             }} else {{
                 panel.classList.remove('narrow');
             }}
 
             container.innerHTML = '';
-            container.setAttribute('data-count', window.trackerQueue.length);
+            container.setAttribute('data-count', window.outstandingQueue.length);
 
-            // 动态创建tracker-item
-            window.trackerQueue.forEach((item, index) => {{
-                const trackerItem = document.createElement('div');
-                trackerItem.className = 'tracker-item';
-                trackerItem.innerHTML = `
-                    <button class="close-item-btn" onclick="closeTrackerItem(${{index}})">×</button>
-                    <div id="tracker-chart-${{index}}" class="tracker-chart"></div>
+            // 动态创建outstanding-item
+            window.outstandingQueue.forEach((item, index) => {{
+                const outstandingItem = document.createElement('div');
+                outstandingItem.className = 'outstanding-item';
+                outstandingItem.innerHTML = `
+                    <button class="close-item-btn" onclick="closeOutstandingItem(${{index}})">×</button>
+                    <div id="outstanding-chart-${{index}}" class="outstanding-chart"></div>
                 `;
-                container.appendChild(trackerItem);
+                container.appendChild(outstandingItem);
 
                 setTimeout(() => {{
-                    window.createTrackerChart(item.ipData, item.ipType, item.ipPos, `tracker-chart-${{index}}`, item.dieId);
+                    window.createOutstandingChart(item.ipData, item.ipType, item.ipPos, `outstanding-chart-${{index}}`, item.dieId);
                 }}, 10);
             }});
         }}
 
-        function closeTrackerItem(index) {{
-            if (index < window.trackerQueue.length) {{
-                window.trackerQueue.splice(index, 1);
-                updateAllTrackerCharts();
+        function closeOutstandingItem(index) {{
+            if (index < window.outstandingQueue.length) {{
+                window.outstandingQueue.splice(index, 1);
+                updateAllOutstandingCharts();
             }}
         }}
 
-        function closeTrackerPanel() {{
-            const panel = document.getElementById('tracker-panel');
+        function closeOutstandingPanel() {{
+            const panel = document.getElementById('outstanding-panel');
             panel.classList.remove('active');
-            window.trackerQueue.length = 0; // 清空队列
+            window.outstandingQueue.length = 0; // 清空队列
         }}
 
-        window.createTrackerChart = function(ipData, ipType, ipPos, targetDivId, dieId) {{
-            const trackerEvents = ipData.events;
+        window.createOutstandingChart = function(ipData, ipType, ipPos, targetDivId, dieId) {{
+            const outstandingEvents = ipData.events;
             const totalAllocated = ipData.total_allocated;
             const totalConfig = ipData.total_config;
 
@@ -368,8 +368,8 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             const traces = [];
             const networkFrequency = 2.0; // GHz
 
-            // Tracker类型映射
-            const trackerNames = {{
+            // Outstanding类型映射
+            const outstandingNames = {{
                 'rn_read': 'RN读',
                 'rn_write': 'RN写',
                 'sn_ro': 'SN读',
@@ -378,8 +378,8 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
                 'write_retry': 'SN写Retry'
             }};
 
-            // Tracker颜色映射：读=蓝色，写=橙色，retry用紫色和红色区分
-            const trackerColors = {{
+            // Outstanding颜色映射：读=蓝色，写=橙色，retry用紫色和红色区分
+            const outstandingColors = {{
                 'rn_read': '#1f77b4',      // 蓝色
                 'rn_write': '#ff7f0e',     // 橙色
                 'sn_ro': '#1f77b4',        // 蓝色
@@ -389,10 +389,10 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             }};
 
             // 为每种tracker类型创建曲线
-            for (const [trackerType, eventData] of Object.entries(trackerEvents)) {{
+            for (const [outstandingType, eventData] of Object.entries(outstandingEvents)) {{
                 // 跳过DB类型（rn_rdb, rn_wdb, sn_wdb）
-                if (trackerType.includes('rdb') || trackerType.includes('wdb')) {{
-                    console.log(`[Tracker] ${{trackerType}}: 跳过DB类型`);
+                if (outstandingType.includes('rdb') || outstandingType.includes('wdb')) {{
+                    console.log(`[Outstanding] ${{outstandingType}}: 跳过DB类型`);
                     continue;
                 }}
 
@@ -400,11 +400,11 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
                 const releases = eventData.releases || [];
 
                 if (allocations.length === 0 && releases.length === 0) {{
-                    console.log(`[Tracker] ${{trackerType}}: 无事件数据`);
+                    console.log(`[Outstanding] ${{outstandingType}}: 无事件数据`);
                     continue;
                 }}
 
-                console.log(`[Tracker] ${{trackerType}}: ${{allocations.length}}次分配, ${{releases.length}}次释放`);
+                console.log(`[Outstanding] ${{outstandingType}}: ${{allocations.length}}次分配, ${{releases.length}}次释放`);
 
                 // 构建事件流
                 const events = [];
@@ -429,15 +429,15 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
                     cumulativeAllocations.push(cumulativeCount);
                 }}
 
-                console.log(`[Tracker] ${{trackerType}} 时间范围: ${{Math.min(...times)}}-${{Math.max(...times)}} ns`);
-                console.log(`[Tracker] ${{trackerType}} 使用个数范围: ${{Math.min(...usageCounts)}}-${{Math.max(...usageCounts)}}`);
+                console.log(`[Outstanding] ${{outstandingType}} 时间范围: ${{Math.min(...times)}}-${{Math.max(...times)}} ns`);
+                console.log(`[Outstanding] ${{outstandingType}} 使用个数范围: ${{Math.min(...usageCounts)}}-${{Math.max(...usageCounts)}}`);
 
                 traces.push({{
                     x: times,
                     y: usageCounts,
                     mode: 'lines',
-                    name: trackerNames[trackerType] || trackerType,
-                    line: {{ width: 2.5, shape: 'hv', color: trackerColors[trackerType] || '#888888' }},  // 阶梯线，固定颜色
+                    name: outstandingNames[outstandingType] || outstandingType,
+                    line: {{ width: 2.5, shape: 'hv', color: outstandingColors[outstandingType] || '#888888' }},  // 阶梯线，固定颜色
                     customdata: cumulativeAllocations,  // 传递累计分配数据
                     hovertemplate: '时间: %{{x:.1f}} ns' +
                         '<br>当前使用: %{{y}}' +
@@ -447,11 +447,11 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             }}
 
             if (traces.length === 0) {{
-                console.warn(`[Tracker] ${{ipType}}@${{ipPos}} 无tracker数据`);
+                console.warn(`[Outstanding] ${{ipType}}@${{ipPos}} 无outstanding数据`);
                 return;
             }}
 
-            console.log(`[Tracker] 总共创建了${{traces.length}}条曲线`);
+            console.log(`[Outstanding] 总共创建了${{traces.length}}条曲线`);
 
             // 计算Y轴最大值
             let maxUsageCount = 0;
@@ -484,25 +484,25 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             // 渲染图表
             const targetDiv = document.getElementById(targetDivId);
             if (!targetDiv) {{
-                console.error(`[Tracker] 找不到目标div: ${{targetDivId}}`);
+                console.error(`[Outstanding] 找不到目标div: ${{targetDivId}}`);
                 return;
             }}
 
             try {{
                 Plotly.newPlot(targetDivId, traces, layout, {{displayModeBar: false, responsive: true}});
-                console.log(`[Tracker] 图表渲染成功: ${{targetDivId}}`);
+                console.log(`[Outstanding] 图表渲染成功: ${{targetDivId}}`);
             }} catch (error) {{
-                console.error(`[Tracker] 渲染失败:`, error);
+                console.error(`[Outstanding] 渲染失败:`, error);
             }}
         }}
     </script>
     """
 
     # 注入CSS（在</head>之前）
-    html_content = html_content.replace("</head>", tracker_css + "</head>")
+    html_content = html_content.replace("</head>", outstanding_css + "</head>")
 
     # 注入面板HTML（在</body>之前）
-    html_content = html_content.replace("</body>", tracker_panel_html + tracker_js + "</body>")
+    html_content = html_content.replace("</body>", outstanding_panel_html + outstanding_js + "</body>")
 
     # 保存修改后的HTML
     with open(html_path, "w", encoding="utf-8") as f:
@@ -511,38 +511,38 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
     return html_path
 
 
-def inject_tracker_functionality_to_content(html_content: str, tracker_json: str) -> str:
+def inject_outstanding_functionality_to_content(html_content: str, outstanding_json: str) -> str:
     """
-    向HTML内容注入tracker交互功能（不写文件）
+    向HTML内容注入Outstanding可视化功能（不写文件）
 
     Args:
         html_content: HTML内容字符串
-        tracker_json: tracker数据JSON字符串
+        outstanding_json: outstanding数据JSON字符串
 
     Returns:
         修改后的HTML内容字符串
     """
-    # 解析tracker数据
-    tracker_data = json.loads(tracker_json) if isinstance(tracker_json, str) else tracker_json
+    # 解析outstanding数据
+    outstanding_data = json.loads(outstanding_json) if isinstance(outstanding_json, str) else outstanding_json
 
     # 检查是否已经注入过（检查完整的div定义，而不是字符串引用）
-    if '<div class="tracker-section" id="tracker-panel">' in html_content:
+    if '<div class="outstanding-section" id="outstanding-panel">' in html_content:
         return html_content
 
-    # 生成tracker面板HTML（动态创建，竖向优先布局）
-    tracker_panel_html = """
-    <div class="tracker-section" id="tracker-panel">
-        <button class="close-btn" onclick="closeTrackerPanel()" title="关闭全部">×</button>
-        <div class="tracker-grid" id="tracker-container">
-            <!-- tracker-item将由JavaScript动态创建 -->
+    # 生成outstanding面板HTML（动态创建，竖向优先布局）
+    outstanding_panel_html = """
+    <div class="outstanding-section" id="outstanding-panel">
+        <button class="close-btn" onclick="closeOutstandingPanel()" title="关闭全部">×</button>
+        <div class="outstanding-grid" id="outstanding-container">
+            <!-- outstanding-item将由JavaScript动态创建 -->
         </div>
     </div>
     """
 
-    # 生成CSS样式（与inject_tracker_functionality保持一致）
-    tracker_css = """
+    # 生成CSS样式（与inject_outstanding_functionality保持一致）
+    outstanding_css = """
     <style>
-        .tracker-section {
+        .outstanding-section {
             position: fixed;
             right: 10px;
             top: 10px;
@@ -559,10 +559,10 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             transition: width 0.3s ease;
         }
         /* 1-2个tracker时窄布局 */
-        .tracker-section.narrow {
+        .outstanding-section.narrow {
             width: 480px;
         }
-        .tracker-section.active {
+        .outstanding-section.active {
             display: block;
         }
         .close-btn {
@@ -584,7 +584,7 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
         .close-btn:hover {
             background: #d32f2f;
         }
-        .tracker-grid {
+        .outstanding-grid {
             display: grid;
             grid-template-columns: repeat(2, 440px);
             grid-auto-rows: 320px;
@@ -595,21 +595,21 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             justify-content: start;
         }
         /* 1个tracker时：单行单列 */
-        .tracker-grid[data-count="1"] {
+        .outstanding-grid[data-count="1"] {
             grid-template-columns: 440px;
             justify-content: center;
         }
         /* 2个tracker时：单行2列 */
-        .tracker-grid[data-count="2"] {
+        .outstanding-grid[data-count="2"] {
             grid-template-columns: repeat(2, 440px);
             justify-content: center;
         }
         /* 3-4个tracker时：2列，自动行 */
-        .tracker-grid[data-count="3"],
-        .tracker-grid[data-count="4"] {
+        .outstanding-grid[data-count="3"],
+        .outstanding-grid[data-count="4"] {
             grid-template-columns: repeat(2, 440px);
         }
-        .tracker-item {
+        .outstanding-item {
             position: relative;
             background: #f5f5f5;
             padding: 0;
@@ -621,14 +621,14 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             flex-direction: column;
             overflow: hidden;
         }
-        .tracker-item-title {
+        .outstanding-item-title {
             font-weight: bold;
             margin-bottom: 10px;
             color: #1976d2;
             font-size: 14px;
             flex-shrink: 0;
         }
-        .tracker-chart {
+        .outstanding-chart {
             width: 430px;
             height: 285px;
             flex-shrink: 0;
@@ -641,7 +641,7 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             color: white;
             text-align: center;
         }
-        .chart-item-header.tracker {
+        .chart-item-header.outstanding {
             background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
         }
         .chart-item-header.fifo {
@@ -669,55 +669,55 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
     </style>
     """
 
-    # 生成JavaScript代码（与inject_tracker_functionality保持一致）
-    tracker_data_str = json.dumps(tracker_data, ensure_ascii=False)
-    tracker_js = f"""
+    # 生成JavaScript代码（与inject_outstanding_functionality保持一致）
+    outstanding_data_str = json.dumps(outstanding_data, ensure_ascii=False)
+    outstanding_js = f"""
     <script>
-        console.log('[Tracker] Script loaded! trackerData keys:', Object.keys({tracker_data_str}));
+        console.log('[Outstanding] Script loaded! outstandingData keys:', Object.keys({outstanding_data_str}));
 
-        // 嵌入tracker数据
-        const trackerData = {tracker_data_str};
+        // 嵌入Outstanding数据
+        const outstandingData = {outstanding_data_str};
 
         // IP显示队列（最多4个，FIFO）- 使用window全局变量以便与FIFO图表共享
-        window.trackerQueue = [];
-        const MAX_TRACKERS = 4;
+        window.outstandingQueue = [];
+        const MAX_OUTSTANDING = 4;
 
         // 页面加载后初始化点击监听
         document.addEventListener('DOMContentLoaded', function() {{
-            console.log('[Tracker] DOMContentLoaded, waiting 1s to init...');
-            setTimeout(initializeTrackerListener, 1000);
+            console.log('[Outstanding] DOMContentLoaded, waiting 1s to init...');
+            setTimeout(initializeOutstandingListener, 1000);
         }});
 
-        function initializeTrackerListener() {{
-            console.log('[Tracker] initializeTrackerListener called');
+        function initializeOutstandingListener() {{
+            console.log('[Outstanding] initializeOutstandingListener called');
             const flowGraphDiv = document.getElementById('chart-0');
             if (!flowGraphDiv) {{
-                console.log('[Tracker] ERROR: chart-0 not found!');
+                console.log('[Outstanding] ERROR: chart-0 not found!');
                 // 尝试查找其他可能的图表容器
                 const allDivs = document.querySelectorAll('[id^="chart-"]');
-                console.log('[Tracker] Available chart divs:', Array.from(allDivs).map(d => d.id));
+                console.log('[Outstanding] Available chart divs:', Array.from(allDivs).map(d => d.id));
                 return;
             }}
-            console.log('[Tracker] Found chart-0 div');
+            console.log('[Outstanding] Found chart-0 div');
 
             // 检查Plotly图表是否已初始化
             if (!flowGraphDiv.data || !flowGraphDiv.layout) {{
-                console.log('[Tracker] Plotly not ready, retrying in 100ms...');
-                setTimeout(initializeTrackerListener, 100);
+                console.log('[Outstanding] Plotly not ready, retrying in 100ms...');
+                setTimeout(initializeOutstandingListener, 100);
                 return;
             }}
-            console.log('[Tracker] Plotly ready, bindng click event...');
-            console.log('[Tracker] trackerData keys:', Object.keys(trackerData));
+            console.log('[Outstanding] Plotly ready, bindng click event...');
+            console.log('[Outstanding] outstandingData keys:', Object.keys(outstandingData));
 
             // 使用Plotly原生事件绑定
             flowGraphDiv.on('plotly_click', function(data) {{
-                console.log('[Tracker] plotly_click event fired!');
-                console.log('[Tracker] Click data:', data);
+                console.log('[Outstanding] plotly_click event fired!');
+                console.log('[Outstanding] Click data:', data);
                 if (data.points && data.points.length > 0) {{
                     const point = data.points[0];
-                    console.log('[Tracker] Clicked point:', point);
-                    console.log('[Tracker] point.customdata:', point.customdata);
-                    console.log('[Tracker] point.text:', point.text);
+                    console.log('[Outstanding] Clicked point:', point);
+                    console.log('[Outstanding] point.customdata:', point.customdata);
+                    console.log('[Outstanding] point.text:', point.text);
                     let dieId, ipType, ipPos;
 
                     if (point.customdata) {{
@@ -725,144 +725,144 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
                             dieId = point.customdata[0];
                             ipType = point.customdata[1];
                             ipPos = point.customdata[2];
-                            console.log('[Tracker] Parsed from array customdata:', dieId, ipType, ipPos);
+                            console.log('[Outstanding] Parsed from array customdata:', dieId, ipType, ipPos);
                         }} else if (typeof point.customdata === 'object') {{
                             dieId = point.customdata.die_id;
                             ipType = point.customdata.ip_type;
                             ipPos = point.customdata.ip_pos;
-                            console.log('[Tracker] Parsed from object customdata:', dieId, ipType, ipPos);
+                            console.log('[Outstanding] Parsed from object customdata:', dieId, ipType, ipPos);
                         }}
                     }}
 
                     // 从text中解析IP信息（备用方案）
                     if (!ipType && point.text) {{
-                        console.log('[Tracker] Trying to parse from text...');
+                        console.log('[Outstanding] Trying to parse from text...');
                         let match = point.text.match(/(\\w+_\\d+)\\s*@\\s*Pos\\s*(\\d+)/);
                         if (match) {{
                             ipType = match[1];
                             ipPos = parseInt(match[2]);
                             dieId = 0;
-                            console.log('[Tracker] Parsed from text:', dieId, ipType, ipPos);
+                            console.log('[Outstanding] Parsed from text:', dieId, ipType, ipPos);
                         }} else {{
-                            console.log('[Tracker] Text does not match IP pattern, ignoring click');
+                            console.log('[Outstanding] Text does not match IP pattern, ignoring click');
                             return;
                         }}
                     }}
 
                     if (ipType && ipPos !== undefined) {{
-                        console.log('[Tracker] Calling addTrackerToQueue...');
-                        addTrackerToQueue(dieId || 0, ipType, ipPos);
+                        console.log('[Outstanding] Calling addOutstandingToQueue...');
+                        addOutstandingToQueue(dieId || 0, ipType, ipPos);
                     }} else {{
-                        console.log('[Tracker] ipType or ipPos undefined, not adding to queue');
+                        console.log('[Outstanding] ipType or ipPos undefined, not adding to queue');
                     }}
                 }} else {{
-                    console.log('[Tracker] No points in click data');
+                    console.log('[Outstanding] No points in click data');
                 }}
             }});
-            console.log('[Tracker] Click event bindng complete');
+            console.log('[Outstanding] Click event bindng complete');
         }}
 
-        function addTrackerToQueue(dieId, ipType, ipPos) {{
-            console.log('[Tracker] addTrackerToQueue called:', dieId, ipType, ipPos);
-            const dieData = trackerData[dieId.toString()];
+        function addOutstandingToQueue(dieId, ipType, ipPos) {{
+            console.log('[Outstanding] addOutstandingToQueue called:', dieId, ipType, ipPos);
+            const dieData = outstandingData[dieId.toString()];
             if (!dieData) {{
-                console.log('[Tracker] dieData not found for die:', dieId);
+                console.log('[Outstanding] dieData not found for die:', dieId);
                 return;
             }}
 
             const ipTypeData = dieData[ipType];
             if (!ipTypeData) {{
-                console.log('[Tracker] ipTypeData not found for:', ipType);
+                console.log('[Outstanding] ipTypeData not found for:', ipType);
                 return;
             }}
 
             const ipData = ipTypeData[ipPos.toString()];
             if (!ipData) {{
-                console.log('[Tracker] ipData not found for pos:', ipPos);
+                console.log('[Outstanding] ipData not found for pos:', ipPos);
                 return;
             }}
 
             // 检查是否已经在队列中
             const ipKey = `${{dieId}}_${{ipType}}_${{ipPos}}`;
-            const existingIndex = window.trackerQueue.findIndex(item => item.key === ipKey);
+            const existingIndex = window.outstandingQueue.findIndex(item => item.key === ipKey);
             if (existingIndex !== -1) {{
-                console.log('[Tracker] Already in queue:', ipKey);
+                console.log('[Outstanding] Already in queue:', ipKey);
                 return;
             }}
 
             // 添加到队列，如果满了则移除最旧的
-            if (window.trackerQueue.length >= MAX_TRACKERS) {{
-                window.trackerQueue.shift();
+            if (window.outstandingQueue.length >= MAX_OUTSTANDING) {{
+                window.outstandingQueue.shift();
             }}
 
             // 添加到队列，包含type字段以便与FIFO图表兼容
-            window.trackerQueue.push({{ type: 'tracker', key: ipKey, dieId, ipType, ipPos, ipData }});
-            console.log('[Tracker] Added to queue, length:', window.trackerQueue.length);
+            window.outstandingQueue.push({{ type: 'outstanding', key: ipKey, dieId, ipType, ipPos, ipData }});
+            console.log('[Outstanding] Added to queue, length:', window.outstandingQueue.length);
 
-            const panel = document.getElementById('tracker-panel');
+            const panel = document.getElementById('outstanding-panel');
             if (panel) panel.classList.add('active');
 
             // 优先使用统一的updateAllCharts（如果FIFO热力图也存在），否则用自己的
             if (typeof window.updateAllCharts === 'function') {{
-                console.log('[Tracker] Using window.updateAllCharts');
+                console.log('[Outstanding] Using window.updateAllCharts');
                 window.updateAllCharts();
             }} else {{
-                console.log('[Tracker] Using updateAllTrackerCharts (fallback)');
-                updateAllTrackerCharts();
+                console.log('[Outstanding] Using updateAllOutstandingCharts (fallback)');
+                updateAllOutstandingCharts();
             }}
         }}
 
-        function updateAllTrackerCharts() {{
-            const container = document.getElementById('tracker-container');
-            const panel = document.getElementById('tracker-panel');
+        function updateAllOutstandingCharts() {{
+            const container = document.getElementById('outstanding-container');
+            const panel = document.getElementById('outstanding-panel');
 
-            if (window.trackerQueue.length === 0) {{
+            if (window.outstandingQueue.length === 0) {{
                 panel.classList.remove('active');
                 return;
             }}
 
             panel.classList.add('active');
 
-            if (window.trackerQueue.length === 1) {{
+            if (window.outstandingQueue.length === 1) {{
                 panel.classList.add('narrow');
             }} else {{
                 panel.classList.remove('narrow');
             }}
 
             container.innerHTML = '';
-            container.setAttribute('data-count', window.trackerQueue.length);
+            container.setAttribute('data-count', window.outstandingQueue.length);
 
-            // 动态创建tracker-item
-            window.trackerQueue.forEach((item, index) => {{
-                const trackerItem = document.createElement('div');
-                trackerItem.className = 'tracker-item';
-                trackerItem.innerHTML = `
-                    <button class="close-item-btn" onclick="closeTrackerItem(${{index}})">×</button>
-                    <div id="tracker-chart-${{index}}" class="tracker-chart"></div>
+            // 动态创建outstanding-item
+            window.outstandingQueue.forEach((item, index) => {{
+                const outstandingItem = document.createElement('div');
+                outstandingItem.className = 'outstanding-item';
+                outstandingItem.innerHTML = `
+                    <button class="close-item-btn" onclick="closeOutstandingItem(${{index}})">×</button>
+                    <div id="outstanding-chart-${{index}}" class="outstanding-chart"></div>
                 `;
-                container.appendChild(trackerItem);
+                container.appendChild(outstandingItem);
 
                 setTimeout(() => {{
-                    window.createTrackerChart(item.ipData, item.ipType, item.ipPos, `tracker-chart-${{index}}`, item.dieId);
+                    window.createOutstandingChart(item.ipData, item.ipType, item.ipPos, `outstanding-chart-${{index}}`, item.dieId);
                 }}, 10);
             }});
         }}
 
-        function closeTrackerItem(index) {{
-            if (index < window.trackerQueue.length) {{
-                window.trackerQueue.splice(index, 1);
-                updateAllTrackerCharts();
+        function closeOutstandingItem(index) {{
+            if (index < window.outstandingQueue.length) {{
+                window.outstandingQueue.splice(index, 1);
+                updateAllOutstandingCharts();
             }}
         }}
 
-        function closeTrackerPanel() {{
-            const panel = document.getElementById('tracker-panel');
+        function closeOutstandingPanel() {{
+            const panel = document.getElementById('outstanding-panel');
             panel.classList.remove('active');
-            window.trackerQueue.length = 0; // 清空队列
+            window.outstandingQueue.length = 0; // 清空队列
         }}
 
-        window.createTrackerChart = function(ipData, ipType, ipPos, targetDivId, dieId) {{
-            const trackerEvents = ipData.events;
+        window.createOutstandingChart = function(ipData, ipType, ipPos, targetDivId, dieId) {{
+            const outstandingEvents = ipData.events;
             const totalAllocated = ipData.total_allocated;
             const totalConfig = ipData.total_config;
 
@@ -870,8 +870,8 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             const traces = [];
             const networkFrequency = 2.0; // GHz
 
-            // Tracker类型映射
-            const trackerNames = {{
+            // Outstanding类型映射
+            const outstandingNames = {{
                 'rn_read': 'RN读',
                 'rn_write': 'RN写',
                 'sn_ro': 'SN读',
@@ -880,8 +880,8 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
                 'write_retry': 'SN写Retry'
             }};
 
-            // Tracker颜色映射：读=蓝色，写=橙色，retry用紫色和红色区分
-            const trackerColors = {{
+            // Outstanding颜色映射：读=蓝色，写=橙色，retry用紫色和红色区分
+            const outstandingColors = {{
                 'rn_read': '#1f77b4',      // 蓝色
                 'rn_write': '#ff7f0e',     // 橙色
                 'sn_ro': '#1f77b4',        // 蓝色
@@ -891,10 +891,10 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             }};
 
             // 为每种tracker类型创建曲线
-            for (const [trackerType, eventData] of Object.entries(trackerEvents)) {{
+            for (const [outstandingType, eventData] of Object.entries(outstandingEvents)) {{
                 // 跳过DB类型（rn_rdb, rn_wdb, sn_wdb）
-                if (trackerType.includes('rdb') || trackerType.includes('wdb')) {{
-                    console.log(`[Tracker] ${{trackerType}}: 跳过DB类型`);
+                if (outstandingType.includes('rdb') || outstandingType.includes('wdb')) {{
+                    console.log(`[Outstanding] ${{outstandingType}}: 跳过DB类型`);
                     continue;
                 }}
 
@@ -902,11 +902,11 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
                 const releases = eventData.releases || [];
 
                 if (allocations.length === 0 && releases.length === 0) {{
-                    console.log(`[Tracker] ${{trackerType}}: 无事件数据`);
+                    console.log(`[Outstanding] ${{outstandingType}}: 无事件数据`);
                     continue;
                 }}
 
-                console.log(`[Tracker] ${{trackerType}}: ${{allocations.length}}次分配, ${{releases.length}}次释放`);
+                console.log(`[Outstanding] ${{outstandingType}}: ${{allocations.length}}次分配, ${{releases.length}}次释放`);
 
                 // 构建事件流
                 const events = [];
@@ -931,15 +931,15 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
                     cumulativeAllocations.push(cumulativeCount);
                 }}
 
-                console.log(`[Tracker] ${{trackerType}} 时间范围: ${{Math.min(...times)}}-${{Math.max(...times)}} ns`);
-                console.log(`[Tracker] ${{trackerType}} 使用个数范围: ${{Math.min(...usageCounts)}}-${{Math.max(...usageCounts)}}`);
+                console.log(`[Outstanding] ${{outstandingType}} 时间范围: ${{Math.min(...times)}}-${{Math.max(...times)}} ns`);
+                console.log(`[Outstanding] ${{outstandingType}} 使用个数范围: ${{Math.min(...usageCounts)}}-${{Math.max(...usageCounts)}}`);
 
                 traces.push({{
                     x: times,
                     y: usageCounts,
                     mode: 'lines',
-                    name: trackerNames[trackerType] || trackerType,
-                    line: {{ width: 2.5, shape: 'hv', color: trackerColors[trackerType] || '#888888' }},  // 阶梯线，固定颜色
+                    name: outstandingNames[outstandingType] || outstandingType,
+                    line: {{ width: 2.5, shape: 'hv', color: outstandingColors[outstandingType] || '#888888' }},  // 阶梯线，固定颜色
                     customdata: cumulativeAllocations,  // 传递累计分配数据
                     hovertemplate: '时间: %{{x:.1f}} ns' +
                         '<br>当前使用: %{{y}}' +
@@ -949,11 +949,11 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             }}
 
             if (traces.length === 0) {{
-                console.warn(`[Tracker] ${{ipType}}@${{ipPos}} 无tracker数据`);
+                console.warn(`[Outstanding] ${{ipType}}@${{ipPos}} 无outstanding数据`);
                 return;
             }}
 
-            console.log(`[Tracker] 总共创建了${{traces.length}}条曲线`);
+            console.log(`[Outstanding] 总共创建了${{traces.length}}条曲线`);
 
             // 计算Y轴最大值
             let maxUsageCount = 0;
@@ -986,24 +986,24 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
             // 渲染图表
             const targetDiv = document.getElementById(targetDivId);
             if (!targetDiv) {{
-                console.error(`[Tracker] 找不到目标div: ${{targetDivId}}`);
+                console.error(`[Outstanding] 找不到目标div: ${{targetDivId}}`);
                 return;
             }}
 
             try {{
                 Plotly.newPlot(targetDivId, traces, layout, {{displayModeBar: false, responsive: true}});
-                console.log(`[Tracker] 图表渲染成功: ${{targetDivId}}`);
+                console.log(`[Outstanding] 图表渲染成功: ${{targetDivId}}`);
             }} catch (error) {{
-                console.error(`[Tracker] 渲染失败:`, error);
+                console.error(`[Outstanding] 渲染失败:`, error);
             }}
         }}
     </script>
     """
 
     # 注入CSS（在</head>之前）
-    html_content = html_content.replace("</head>", tracker_css + "</head>")
+    html_content = html_content.replace("</head>", outstanding_css + "</head>")
 
     # 注入面板HTML和JS（在</body>之前）
-    html_content = html_content.replace("</body>", tracker_panel_html + tracker_js + "</body>")
+    html_content = html_content.replace("</body>", outstanding_panel_html + outstanding_js + "</body>")
 
     return html_content
