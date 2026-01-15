@@ -921,7 +921,7 @@ const Simulation: React.FC = () => {
     <div>
       <Row gutter={24} align="stretch">
         {/* 左侧：配置表单 */}
-        <Col xs={24} lg={12} style={{ display: 'flex', flexDirection: 'column' }}>
+        <Col xs={24} lg={12}>
           <Card
             title={
               <Space>
@@ -929,7 +929,7 @@ const Simulation: React.FC = () => {
                 <span>仿真配置</span>
               </Space>
             }
-            style={{ marginBottom: 24, flex: 1 }}
+            style={{ marginBottom: 24 }}
           >
             <Form
               form={form}
@@ -1233,6 +1233,20 @@ const Simulation: React.FC = () => {
               </Form.Item>
             </Form>
           </Card>
+        </Col>
+
+        {/* 右侧：文件选择和任务执行 */}
+        <Col xs={24} lg={12}>
+          <TrafficFileTree
+            trafficTree={trafficTree}
+            selectedFiles={selectedFiles}
+            expandedKeys={expandedKeys}
+            loading={loadingFiles}
+            onSelect={setSelectedFiles}
+            onExpandedKeysChange={setExpandedKeys}
+            onRefresh={() => loadTrafficFilesTree(mode as 'kcin' | 'dcin', true)}
+            onPreviewFile={handlePreviewFile}
+          />
 
           {/* 运行中的任务卡片列表 */}
           {Array.from(runningTasks.entries()).map(([taskId, { task, startTime }]) => (
@@ -1250,20 +1264,6 @@ const Simulation: React.FC = () => {
               } : undefined}
             />
           ))}
-        </Col>
-
-        {/* 右侧：文件选择 */}
-        <Col xs={24} lg={12} style={{ display: 'flex', flexDirection: 'column' }}>
-          <TrafficFileTree
-            trafficTree={trafficTree}
-            selectedFiles={selectedFiles}
-            expandedKeys={expandedKeys}
-            loading={loadingFiles}
-            onSelect={setSelectedFiles}
-            onExpandedKeysChange={setExpandedKeys}
-            onRefresh={() => loadTrafficFilesTree(mode as 'kcin' | 'dcin', true)}
-            onPreviewFile={handlePreviewFile}
-          />
         </Col>
       </Row>
 

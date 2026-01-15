@@ -67,8 +67,8 @@ export const TrafficFileTree: React.FC<TrafficFileTreeProps> = ({
           </Button>
         </Space>
       }
-      style={{ marginBottom: 24, flex: 1 }}
-      bodyStyle={{ maxHeight: 600, overflow: 'auto' }}
+      style={{ marginBottom: 24 }}
+      bodyStyle={{ maxHeight: 400, overflow: 'auto' }}
     >
       <Spin spinning={loading}>
         {trafficTree.length > 0 ? (

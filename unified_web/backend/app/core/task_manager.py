@@ -83,6 +83,8 @@ def _run_single_simulation(sim_params: Dict[str, Any]) -> Dict[str, Any]:
         sim_params: 仿真参数字典
             - combination_overrides: 参数遍历时的配置覆盖项，会与 config_overrides 合并
             - combination_index: 参数组合索引（用于日志和结果标识）
+            - progress_queue: 进度消息队列（可选）
+            - task_index: 任务索引（用于进度报告）
 
     Returns:
         结果字典
@@ -91,6 +93,9 @@ def _run_single_simulation(sim_params: Dict[str, Any]) -> Dict[str, Any]:
 
     traffic_file = sim_params["traffic_file"]
     combination_index = sim_params.get("combination_index")
+    progress_queue = sim_params.get("progress_queue")
+    task_index = sim_params.get("task_index")
+
     try:
         # 合并配置覆盖项: base config_overrides + combination_overrides
         config_overrides = sim_params.get("config_overrides") or {}
@@ -107,13 +112,36 @@ def _run_single_simulation(sim_params: Dict[str, Any]) -> Dict[str, Any]:
             die_config_overrides=sim_params.get("die_config_overrides"),
         )
 
+        # 设置进度回调（如果提供了进度队列）
+        if progress_queue is not None and task_index is not None:
+            def on_progress(data: dict):
+                try:
+                    # 发送进度消息到队列
+                    progress_queue.put({
+                        'task_index': task_index,
+                        'traffic_file': traffic_file,
+                        'progress': int((data.get('current_time', 0) / data.get('max_time', 1)) * 100),
+                        'current_time': data.get('current_time', 0),
+                        'max_time': data.get('max_time', 0),
+                    })
+                except Exception as e:
+                    # 忽略队列错误，不影响仿真
+                    pass
+
+            engine.set_progress_callback(on_progress)
+
         engine.setup(
             traffic_file_path=sim_params["traffic_file_path"],
             traffic_files=[traffic_file],
             show_result_analysis=sim_params.get("show_result", False),
         )
 
-        result = engine.run_sync(max_time=sim_params["max_time"])
+        # 使用自定义的 print_interval（并行任务降低粒度）
+        print_interval = sim_params.get("print_interval")
+        result = engine.run_sync(
+            max_time=sim_params["max_time"],
+            print_interval=print_interval
+        )
         result.results["traffic_file"] = traffic_file
 
         # 保存到数据库（仅在成功时保存）
@@ -433,9 +461,14 @@ class TaskManager:
                 return
 
             # 多执行单元时使用并行执行
+            # 创建进度队列（用于子进程向主进程报告进度）
+            from multiprocessing import Manager
+            manager = Manager()
+            progress_queue = manager.Queue()
+
             # 准备所有仿真参数
             sim_params_list = []
-            for unit in execution_units:
+            for idx, unit in enumerate(execution_units):
                 sim_params = {
                     "mode": task.mode,
                     "config_path": task.config_path,
@@ -448,10 +481,13 @@ class TaskManager:
                     "traffic_file_path": task.traffic_file_path,
                     "traffic_file": unit["traffic_file"],
                     "max_time": task.max_time,
+                    "print_interval": task.max_time // 5,  # 并行任务降低粒度到5份（20%）
                     "save_to_db": task.save_to_db,
                     "experiment_name": task.experiment_name,
                     "experiment_description": task.experiment_description,
                     "show_result": not task.save_to_db,
+                    "progress_queue": progress_queue,
+                    "task_index": idx,
                 }
                 sim_params_list.append(sim_params)
 
@@ -463,7 +499,7 @@ class TaskManager:
             # 分配 worker（考虑其他正在运行的任务）
             max_workers = self.allocate_workers(task_id, requested_workers)
 
-            # 更新状态
+            # 更新状态，初始化各任务进度
             task.sim_details = {
                 "file_index": 0,
                 "total_files": total_units,
@@ -477,10 +513,56 @@ class TaskManager:
                 "recv_flits": 0,
                 "total_flits": 0,
                 "trans_flits": 0,
+                "tasks_progress": [  # 各任务进度列表
+                    {
+                        "task_index": idx,
+                        "traffic_file": unit["traffic_file"],
+                        "progress": 0,
+                        "current_time": 0,
+                        "max_time": task.max_time,
+                        "status": "pending"
+                    }
+                    for idx, unit in enumerate(execution_units)
+                ],
             }
 
             # 使用线程池在后台运行进程池（避免阻塞事件循环）
             loop = asyncio.get_event_loop()
+
+            # 创建进度消费任务（监听子进程的进度更新）
+            progress_consumer_running = True
+
+            async def consume_progress_queue():
+                """消费进度队列，更新任务进度并通知前端"""
+                while progress_consumer_running:
+                    try:
+                        # 非阻塞检查队列
+                        if not progress_queue.empty():
+                            msg = progress_queue.get_nowait()
+                            task_idx = msg['task_index']
+
+                            # 更新对应任务的进度
+                            if task.sim_details and 'tasks_progress' in task.sim_details:
+                                if task_idx < len(task.sim_details['tasks_progress']):
+                                    task.sim_details['tasks_progress'][task_idx].update({
+                                        'progress': msg['progress'],
+                                        'current_time': msg.get('current_time', 0),
+                                        'status': 'running' if msg['progress'] < 100 else 'completed'
+                                    })
+
+                                    # 计算整体进度（所有任务进度的平均值）
+                                    total_progress = sum(t['progress'] for t in task.sim_details['tasks_progress'])
+                                    task.progress = int(total_progress / total_units)
+
+                                    # 通知前端
+                                    self._notify_subscribers_sync(task_id, task, level="task_level")
+                    except:
+                        pass
+
+                    await asyncio.sleep(0.2)  # 每200ms检查一次
+
+            # 启动进度消费任务
+            progress_task = loop.create_task(consume_progress_queue())
 
             def run_parallel():
                 completed_results = []
@@ -579,7 +661,15 @@ class TaskManager:
                 return completed_results
 
             # 在线程中运行并行任务
-            results_list = await loop.run_in_executor(None, run_parallel)
+            try:
+                results_list = await loop.run_in_executor(None, run_parallel)
+            finally:
+                # 停止进度消费任务
+                progress_consumer_running = False
+                try:
+                    await asyncio.wait_for(progress_task, timeout=1.0)
+                except:
+                    progress_task.cancel()
 
             # 更新状态为结果处理中
             task.sim_details = {

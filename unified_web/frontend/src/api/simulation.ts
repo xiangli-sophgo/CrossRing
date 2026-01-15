@@ -28,6 +28,15 @@ export interface TaskResponse {
   message: string
 }
 
+export interface TaskProgress {
+  task_index: number
+  traffic_file: string
+  progress: number
+  current_time: number
+  max_time: number
+  status: string  // pending | running | completed
+}
+
 export interface SimDetails {
   file_index: number
   total_files: number
@@ -42,6 +51,7 @@ export interface SimDetails {
   total_flits: number
   trans_flits: number  // 网络在途flit数
   processing_stage?: string  // 结果处理阶段提示
+  tasks_progress?: TaskProgress[]  // 并行任务时，各子任务的进度
 }
 
 export interface TaskStatus {

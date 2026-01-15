@@ -2,7 +2,7 @@
  * 状态卡片组件集合 - TaskStatusCard
  */
 import React, { useState, useEffect } from 'react'
-import { Card, Row, Col, Statistic, Progress, Space, Typography, Divider, Alert, Tag, Button } from 'antd'
+import { Card, Row, Col, Statistic, Progress, Space, Typography, Divider, Alert, Tag, Button, Modal, List } from 'antd'
 import {
   ThunderboltOutlined,
   CheckCircleOutlined,
@@ -11,9 +11,10 @@ import {
   SyncOutlined,
   StopOutlined,
   CloseOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons'
 import { primaryColor, successColor, warningColor, errorColor } from '@/theme/colors'
-import type { TaskStatus } from '@/api/simulation'
+import type { TaskStatus, TaskProgress } from '@/api/simulation'
 import { getElapsedTime } from '../helpers'
 
 const { Text } = Typography
@@ -47,6 +48,7 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
   onClose,
 }) => {
   const [elapsedTime, setElapsedTime] = useState(getElapsedTime(startTime))
+  const [showProgressModal, setShowProgressModal] = useState(false)
 
   // 每秒更新运行时间
   useEffect(() => {
@@ -61,6 +63,26 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
 
     return () => clearInterval(timer)
   }, [startTime, currentTask.status])
+
+  // 处理进度条点击
+  const handleProgressClick = () => {
+    if (currentTask.sim_details?.is_parallel && currentTask.sim_details?.tasks_progress) {
+      setShowProgressModal(true)
+    }
+  }
+
+  // 计算任务统计
+  const getTaskStats = () => {
+    if (!currentTask.sim_details?.tasks_progress) {
+      return { running: 0, completed: 0, pending: 0 }
+    }
+    const tasks = currentTask.sim_details.tasks_progress
+    return {
+      running: tasks.filter(t => t.status === 'running').length,
+      completed: tasks.filter(t => t.status === 'completed').length,
+      pending: tasks.filter(t => t.status === 'pending').length,
+    }
+  }
 
   const taskName = currentTask.experiment_name || `任务 ${currentTask.task_id.slice(0, 8)}`
   return (
@@ -99,7 +121,9 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
     >
       <Row gutter={[24, 16]}>
         <Col span={8}>
-          {currentTask.progress === 100 && currentTask.status === 'running' ? (
+          {currentTask.progress === 100 &&
+           currentTask.status === 'running' &&
+           !currentTask.sim_details?.is_parallel ? (
             <Statistic
               title="任务进度"
               value="结果处理中"
@@ -136,14 +160,27 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
 
       <Divider style={{ margin: '16px 0' }} />
 
-      <Progress
-        percent={currentTask.progress}
-        status={currentTask.status === 'failed' ? 'exception' : currentTask.status === 'completed' ? 'success' : 'active'}
-        strokeColor={currentTask.status === 'running' ? { from: primaryColor, to: '#4096ff' } : undefined}
-        style={{ marginBottom: 12 }}
-      />
+      {/* 进度条（并行任务可点击查看详情） */}
+      <div style={{ position: 'relative' }}>
+        <div
+          style={{
+            cursor: currentTask.sim_details?.is_parallel && currentTask.sim_details?.tasks_progress ? 'pointer' : 'default'
+          }}
+          onClick={handleProgressClick}
+        >
+          <Progress
+            percent={currentTask.progress}
+            status={currentTask.status === 'failed' ? 'exception' : currentTask.status === 'completed' ? 'success' : 'active'}
+            strokeColor={currentTask.status === 'running' ? { from: primaryColor, to: '#4096ff' } : undefined}
+            style={{ marginBottom: 12 }}
+          />
+        </div>
+      </div>
 
-      {currentTask.sim_details?.current_file && !currentTask.sim_details?.processing_stage && (
+      {/* 串行任务显示当前文件 */}
+      {!currentTask.sim_details?.is_parallel &&
+       currentTask.sim_details?.current_file &&
+       !currentTask.sim_details?.processing_stage && (
         <div style={{ marginBottom: 12 }}>
           <Text type="secondary">当前文件: </Text>
           <Text strong>{currentTask.sim_details.current_file}</Text>
@@ -191,14 +228,97 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
       <Divider style={{ margin: '16px 0' }} />
 
       <Space direction="vertical" style={{ width: '100%' }} size={4}>
-        <div>
-          <Text type="secondary">任务ID: </Text>
-          <Text code copyable={{ text: currentTask.task_id }}>{currentTask.task_id}</Text>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <Text type="secondary">任务ID: </Text>
+            <Text code copyable={{ text: currentTask.task_id }}>{currentTask.task_id}</Text>
+          </div>
+          {currentTask.sim_details?.is_parallel && currentTask.sim_details?.tasks_progress && (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              <InfoCircleOutlined /> 点击进度条查看各任务详情
+            </Text>
+          )}
         </div>
         {currentTask.error && (
           <Alert type="error" message={currentTask.error} showIcon style={{ marginTop: 8 }} />
         )}
       </Space>
+
+      {/* 并行任务详情 Modal */}
+      <Modal
+        title="并行任务进度详情"
+        open={showProgressModal}
+        onCancel={() => setShowProgressModal(false)}
+        footer={null}
+        width={600}
+      >
+        {currentTask.sim_details?.tasks_progress && (() => {
+          const stats = getTaskStats()
+          const runningTasks = currentTask.sim_details.tasks_progress.filter(t => t.status === 'running')
+
+          return (
+            <>
+              {/* 统计信息 */}
+              <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
+                <Row gutter={16}>
+                  <Col span={8}>
+                    <Statistic
+                      title="运行中"
+                      value={stats.running}
+                      valueStyle={{ color: primaryColor, fontSize: 20 }}
+                    />
+                  </Col>
+                  <Col span={8}>
+                    <Statistic
+                      title="已完成"
+                      value={stats.completed}
+                      valueStyle={{ color: successColor, fontSize: 20 }}
+                    />
+                  </Col>
+                  <Col span={8}>
+                    <Statistic
+                      title="等待中"
+                      value={stats.pending}
+                      valueStyle={{ color: warningColor, fontSize: 20 }}
+                    />
+                  </Col>
+                </Row>
+              </div>
+
+              {/* 运行中的任务列表 */}
+              {runningTasks.length > 0 ? (
+                <List
+                  dataSource={runningTasks}
+                  renderItem={(task) => (
+                    <List.Item style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
+                      <div style={{ width: '100%' }}>
+                        <div style={{ marginBottom: 8 }}>
+                          <Text strong style={{ color: primaryColor }}>
+                            任务 {task.task_index + 1}:
+                          </Text>{' '}
+                          <Text>{task.traffic_file}</Text>
+                        </div>
+                        <Progress
+                          percent={task.progress}
+                          status="active"
+                          strokeColor={{ from: primaryColor, to: '#4096ff' }}
+                        />
+                        <div style={{ marginTop: 4, fontSize: 12, color: '#999' }}>
+                          仿真时间: {task.current_time} / {task.max_time} ns
+                        </div>
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              ) : (
+                <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>
+                  暂无运行中的任务
+                </div>
+              )}
+            </>
+          )
+        })()}
+      </Modal>
     </Card>
   )
 }

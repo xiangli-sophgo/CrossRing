@@ -646,30 +646,52 @@ class LatencyDistributionPlotter:
                     col=1,
                 )
 
-                # 添加统计线
+                # 添加统计线和标签
                 mean_val = np.mean(values)
+                p50_val = np.percentile(values, 50)
                 p95_val = self.latency_stats[category]["mixed"].get("p95", 0)
                 p99_val = self.latency_stats[category]["mixed"].get("p99", 0)
 
-                # P95线
-                fig.add_vline(
-                    x=p95_val,
-                    line_dash="dashdot",
-                    line_color="orange",
-                    line_width=2,
-                    row=row_idx,
-                    col=1,
-                )
+                # 计算平均值对应的百分位数
+                mean_percentile = np.sum(np.array(values) <= mean_val) / len(values) * 100
 
-                # P99线
-                fig.add_vline(
-                    x=p99_val,
-                    line_dash="solid",
-                    line_color="red",
-                    line_width=2,
-                    row=row_idx,
-                    col=1,
-                )
+                # 统计线配置：(值, 名称, 颜色, 线型, Y位置)
+                stats_lines = [
+                    (mean_val, f"平均值 (P{mean_percentile:.0f})", "green", "dash", 0.85),
+                    (p50_val, "P50", "blue", "dot", 0.70),
+                    (p95_val, "P95", "orange", "dashdot", 0.55),
+                    (p99_val, "P99", "red", "solid", 0.40),
+                ]
+
+                # 确定subplot的坐标系引用
+                xref = "x" if row_idx == 1 else f"x{row_idx * 2 - 1}"  # 左列是奇数subplot
+                yref = "y" if row_idx == 1 else f"y{row_idx * 2 - 1}"
+
+                for stat_val, stat_name, color, dash_style, y_position in stats_lines:
+                    # 添加垂直线
+                    fig.add_vline(
+                        x=stat_val,
+                        line_dash=dash_style,
+                        line_color=color,
+                        line_width=2,
+                        row=row_idx,
+                        col=1,
+                    )
+
+                    # 添加文本标注
+                    fig.add_annotation(
+                        x=stat_val,
+                        y=y_position,
+                        yref=f"{yref} domain",
+                        xref=xref,
+                        text=f"{stat_name}: {stat_val:.1f}ns",
+                        showarrow=False,
+                        font=dict(size=12, color=color),
+                        bgcolor="rgba(255, 255, 255, 0.9)",
+                        bordercolor=color,
+                        borderwidth=1,
+                        borderpad=2,
+                    )
 
             # === 右列：散点图 ===
             time_value_pairs = self.latency_stats[category]["mixed"].get("time_value_pairs", [])

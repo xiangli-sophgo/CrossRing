@@ -71,7 +71,7 @@
     "speed_gbps": 128.0,
     "burst_length": 4,
     "request_type": "W",
-    "end_time_ns": 6000,
+    "end_time_ns": 10000,
     "id": "13ebe755-465e-42c5-8a65-1a2dc2bc8573",
     "topology": "4x4",
     "mode": "kcin",
