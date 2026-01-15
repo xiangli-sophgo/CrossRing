@@ -167,6 +167,39 @@ class BaseModel(StatsMixin, DataflowMixin):
         # 取消标志（用于外部中断仿真）
         self._cancelled = False
 
+        # 批量仿真优化：预计算同步周期和offset
+        self._init_batch_simulation_params()
+
+    def _init_batch_simulation_params(self):
+        """初始化批量仿真优化参数：预计算同步周期和offset列表"""
+        from math import gcd
+
+        def lcm(a, b):
+            return abs(a * b) // gcd(a, b)
+
+        # 计算同步周期（IP_SCALE和NETWORK_SCALE的最小公倍数）
+        self.SYNC_PERIOD = lcm(self.config.NETWORK_SCALE, self.config.IP_SCALE)
+
+        # 预计算需要执行网络操作的cycle offset（使用集合快速查找）
+        self.network_offsets_set = {
+            i for i in range(self.SYNC_PERIOD) if i % self.config.NETWORK_SCALE == 0
+        }
+
+        # 预计算需要执行IP操作的cycle offset（使用集合快速查找）
+        self.ip_offsets_set = {
+            i for i in range(self.SYNC_PERIOD) if i % self.config.IP_SCALE == 0
+        }
+
+        # 预计算所有需要操作的cycle offset（排序列表用于遍历）
+        self.active_offsets = sorted(self.network_offsets_set | self.ip_offsets_set)
+
+        if self.verbose:
+            print(f"批量仿真优化参数:")
+            print(f"  同步周期: {self.SYNC_PERIOD}")
+            print(f"  网络操作offsets: {sorted(self.network_offsets_set)}")
+            print(f"  IP操作offsets: {sorted(self.ip_offsets_set)}")
+            print(f"  活跃cycle比例: {len(self.active_offsets)}/{self.SYNC_PERIOD} = {len(self.active_offsets)/self.SYNC_PERIOD*100:.1f}%")
+
     def setup_traffic_scheduler(self, traffic_file_path: str, traffic_chains: list) -> None:
         """
         配置流量调度器并提取IP需求
@@ -844,8 +877,12 @@ class BaseModel(StatsMixin, DataflowMixin):
                 self.RB_ETag_T0_per_channel[channel][node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
                 self.RB_total_flits_per_channel[channel][node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
 
-    def step(self):
+    def step(self, exec_ip=None, exec_network=None):
         """执行单周期仿真步骤
+
+        Args:
+            exec_ip: 是否执行IP操作（None表示自动判断）
+            exec_network: 是否执行网络操作（None表示自动判断）
 
         数据流依赖关系：
 
@@ -891,12 +928,19 @@ class BaseModel(StatsMixin, DataflowMixin):
         - pre缓冲机制：实现单周期内多级FIFO传输，避免读写冲突
         - 步骤顺序：严格按照数据流方向执行，确保因果关系正确
         """
-        self.release_completed_sn_tracker()
+        # 自动判断（兼容旧代码）
+        if exec_ip is None:
+            exec_ip = (self.cycle % self.config.IP_SCALE == 0)
+        if exec_network is None:
+            exec_network = (self.cycle % self.config.NETWORK_SCALE == 0)
 
-        self.process_new_request()
+        # IP域操作
+        if exec_ip:
+            self.release_completed_sn_tracker()
+            self.process_new_request()
 
-        # 网络域操作 - 每 NETWORK_SCALE 个仿真周期执行一次
-        if self.cycle % self.config.NETWORK_SCALE == 0:
+        # 网络域操作
+        if exec_network:
             self.ip_inject_to_network()
 
             # Network arbitration and movement - 处理所有通道
@@ -915,19 +959,21 @@ class BaseModel(StatsMixin, DataflowMixin):
             for network in self.req_networks + self.rsp_networks + self.data_networks:
                 network.collect_cycle_end_link_statistics(self.cycle)
 
-        self.debug_func()
+            # Evaluate throughput time - 合并所有data通道
+            all_data_flits = sum(self._step_flits, [])
+            self.update_throughput_metrics(all_data_flits)
 
-        # Evaluate throughput time - 合并所有data通道
-        all_data_flits = sum(self._step_flits, [])
-        self.update_throughput_metrics(all_data_flits)
+            # 调试和可视化（只在网络状态更新后调用）
+            self.debug_func()
 
-        completed_traffics = self.traffic_scheduler.check_and_advance_chains(self.cycle)
-        if completed_traffics and self.verbose:
-            print(f"Completed traffics: {completed_traffics}")
+            # Traffic完成检查（只在网络更新后）
+            completed_traffics = self.traffic_scheduler.check_and_advance_chains(self.cycle)
+            if completed_traffics and self.verbose:
+                print(f"Completed traffics: {completed_traffics}")
 
-        # 处理延迟释放的Entry - 所有通道
-        for network in self.req_networks + self.rsp_networks + self.data_networks:
-            self._process_pending_entry_release(network)
+            # 处理延迟释放的Entry - 所有通道
+            for network in self.req_networks + self.rsp_networks + self.data_networks:
+                self._process_pending_entry_release(network)
 
     def is_completed(self):
         """Check if this die's simulation is completed."""
@@ -941,7 +987,7 @@ class BaseModel(StatsMixin, DataflowMixin):
         return traffic_completed and recv_completed and trans_completed and write_completed
 
     def run(self):
-        """Main simulation loop."""
+        """Main simulation loop - 批量优化版本."""
         simulation_start = time.perf_counter()
         self.load_request_stream()
         # Initialize step variables - 2D列表（每个通道一个列表）
@@ -954,34 +1000,59 @@ class BaseModel(StatsMixin, DataflowMixin):
         # 启用FIFO事件记录
         StatisticalFIFO.enable_event_recording(True)
 
+        # 计算最大仿真周期数
+        max_cycles = int(self.end_time * self.config.CYCLES_PER_NS)
+
         try:
-            while True:
+            # 批量处理：按同步周期分批执行
+            for batch_start in range(0, max_cycles + self.SYNC_PERIOD, self.SYNC_PERIOD):
                 # 检查取消标志
                 if self._cancelled:
                     if self.verbose:
                         print("\n仿真被取消，正在保存结果...")
                     break
 
-                self.cycle += 1
-                self.cycle_mod = self.cycle % self.config.CYCLES_PER_NS
+                # 遍历当前批次中的活跃cycle
+                for offset in self.active_offsets:
+                    self.cycle = batch_start + offset
 
-                # 更新StatisticalFIFO的当前cycle
-                StatisticalFIFO.set_current_cycle(self.cycle)
-
-                # Execute one step
-                self.step()
-
-                if self.cycle / self.config.CYCLES_PER_NS % self.print_interval == 0:
-                    self.log_summary()
-
-                if self.is_completed() or self.cycle > self.end_time * self.config.CYCLES_PER_NS:
-                    if tail_time == 0:
-                        if self.verbose:
-                            print("Finish!")
+                    # 检查是否超出最大周期
+                    if self.cycle > max_cycles:
                         break
-                    else:
-                        tail_time -= 1
 
+                    # 更新cycle_mod
+                    self.cycle_mod = self.cycle % self.config.CYCLES_PER_NS
+
+                    # 更新StatisticalFIFO的当前cycle
+                    StatisticalFIFO.set_current_cycle(self.cycle)
+
+                    # 判断当前cycle需要执行的操作
+                    need_ip = (offset in self.ip_offsets_set)
+                    need_network = (offset in self.network_offsets_set)
+
+                    # 执行一步（传入明确的执行标志）
+                    self.step(exec_ip=need_ip, exec_network=need_network)
+
+                    # 打印进度
+                    if self.cycle / self.config.CYCLES_PER_NS % self.print_interval == 0:
+                        self.log_summary()
+
+                    # 检查完成条件
+                    if self.is_completed() or self.cycle > max_cycles:
+                        if tail_time == 0:
+                            if self.verbose:
+                                print("Finish!")
+                            raise StopIteration  # 跳出双重循环
+                        else:
+                            tail_time -= 1
+
+                # 如果超出最大周期，退出外层循环
+                if self.cycle > max_cycles:
+                    break
+
+        except StopIteration:
+            # 正常完成，由检查完成条件触发
+            pass
         except KeyboardInterrupt:
             print("\n仿真中断 (Ctrl+C)，正在退出...")
             # 不重新抛出异常，继续执行结果分析

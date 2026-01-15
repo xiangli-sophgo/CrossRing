@@ -91,7 +91,7 @@ class D2DAnalyzer:
 
         self.config = config
         self.min_gap_threshold = min_gap_threshold
-        self.network_frequency = config.CYCLES_PER_NS
+        self.cycles_per_ns = config.CYCLES_PER_NS  # 每纳秒的仿真周期数
 
         # D2D数据存储
         self.d2d_requests: List[D2DRequestInfo] = []
@@ -101,7 +101,7 @@ class D2DAnalyzer:
         self.validator = DataValidator()
         self.interval_calculator = TimeIntervalCalculator(min_gap_threshold)
         self.calculator = BandwidthCalculator(self.interval_calculator)
-        self.request_collector = RequestCollector(self.network_frequency)
+        self.request_collector = RequestCollector(self.cycles_per_ns)
         self.latency_collector = LatencyStatsCollector()
         self.circuit_collector = CircuitStatsCollector()
         self.visualizer = BandwidthPlotter()
@@ -362,13 +362,13 @@ class D2DAnalyzer:
                         cmd_latency_cycle = getattr(first_flit, 'cmd_latency', None)
                         data_latency_cycle = getattr(first_flit, 'data_latency', None)
                         trans_latency_cycle = getattr(first_flit, 'transaction_latency', None)
-                        cmd_latency = cmd_latency_cycle / self.network_frequency if cmd_latency_cycle is not None else -1
-                        data_latency = data_latency_cycle / self.network_frequency if data_latency_cycle is not None else -1
-                        transaction_latency = trans_latency_cycle / self.network_frequency if trans_latency_cycle is not None else -1
+                        cmd_latency = cmd_latency_cycle / self.cycles_per_ns if cmd_latency_cycle is not None else -1
+                        data_latency = data_latency_cycle / self.cycles_per_ns if data_latency_cycle is not None else -1
+                        transaction_latency = trans_latency_cycle / self.cycles_per_ns if trans_latency_cycle is not None else -1
                     else:
                         cmd_latency = -1
                         data_latency = -1
-                        transaction_latency = (lifecycle.completed_cycle - lifecycle.created_cycle) / self.network_frequency if lifecycle.completed_cycle else -1
+                        transaction_latency = (lifecycle.completed_cycle - lifecycle.created_cycle) / self.cycles_per_ns if lifecycle.completed_cycle else -1
 
                     # 从data_flits收集绕环统计数据
                     data_eject_attempts_h_list = [f.eject_attempts_h for f in lifecycle.data_flits]
@@ -380,8 +380,8 @@ class D2DAnalyzer:
                     from src.analysis.analyzers import RequestInfo
                     req_info = RequestInfo(
                         packet_id=packet_id,
-                        start_time=round(lifecycle.created_cycle / self.network_frequency),
-                        end_time=round(lifecycle.completed_cycle / self.network_frequency),
+                        start_time=round(lifecycle.created_cycle / self.cycles_per_ns),
+                        end_time=round(lifecycle.completed_cycle / self.cycles_per_ns),
                         req_type=lifecycle.op_type,
                         burst_length=lifecycle.burst_size,
                         total_bytes=lifecycle.burst_size * 128,

@@ -1650,14 +1650,14 @@ class JSONExporter:
 class ParquetExporter:
     """Parquet格式导出器 - 用于波形数据存储"""
 
-    def __init__(self, network_frequency: float = 2.0):
+    def __init__(self, cycles_per_ns: float = 2.0):
         """
         初始化Parquet导出器
 
         Args:
-            network_frequency: 网络频率 (GHz)，用于将cycle转换为ns
+            cycles_per_ns: 每纳秒的仿真周期数(CYCLES_PER_NS)，用于cycle→ns转换
         """
-        self.network_frequency = network_frequency
+        self.cycles_per_ns = cycles_per_ns
 
     def export_waveform_data(self, sim_model, output_path: str) -> list:
         """
@@ -1788,8 +1788,8 @@ class ParquetExporter:
             data["dest_node"].append(lifecycle.destination)
             data["dest_type"].append(lifecycle.dest_type or "")
             data["burst_length"].append(lifecycle.burst_size)
-            data["start_time_ns"].append(start_cycle / self.network_frequency)
-            data["end_time_ns"].append(end_cycle / self.network_frequency)
+            data["start_time_ns"].append(start_cycle / self.cycles_per_ns)
+            data["end_time_ns"].append(end_cycle / self.cycles_per_ns)
 
             # 从flit读取已计算的延迟值（ip_interface.py中已计算）
             first_flit = lifecycle.data_flits[0] if lifecycle.data_flits else None
@@ -1797,13 +1797,13 @@ class ParquetExporter:
                 cmd_latency_cycle = getattr(first_flit, 'cmd_latency', float('inf'))
                 data_latency_cycle = getattr(first_flit, 'data_latency', float('inf'))
                 trans_latency_cycle = getattr(first_flit, 'transaction_latency', float('inf'))
-                cmd_latency = cmd_latency_cycle / self.network_frequency if cmd_latency_cycle < float('inf') else -1
-                data_latency = data_latency_cycle / self.network_frequency if data_latency_cycle < float('inf') else -1
-                trans_latency = trans_latency_cycle / self.network_frequency if trans_latency_cycle < float('inf') else (end_cycle - start_cycle) / self.network_frequency
+                cmd_latency = cmd_latency_cycle / self.cycles_per_ns if cmd_latency_cycle < float('inf') else -1
+                data_latency = data_latency_cycle / self.cycles_per_ns if data_latency_cycle < float('inf') else -1
+                trans_latency = trans_latency_cycle / self.cycles_per_ns if trans_latency_cycle < float('inf') else (end_cycle - start_cycle) / self.cycles_per_ns
             else:
                 cmd_latency = -1
                 data_latency = -1
-                trans_latency = (end_cycle - start_cycle) / self.network_frequency
+                trans_latency = (end_cycle - start_cycle) / self.cycles_per_ns
 
             data["cmd_latency_ns"].append(cmd_latency)
             data["data_latency_ns"].append(data_latency)
@@ -1884,7 +1884,7 @@ class ParquetExporter:
 
         # 转换为 ns
         timestamps_ns = {
-            pos: cycle / self.network_frequency
+            pos: cycle / self.cycles_per_ns
             for pos, cycle in timestamps.items()
         }
 

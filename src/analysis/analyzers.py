@@ -221,7 +221,7 @@ class SingleDieAnalyzer:
 
         self.config = config
         self.min_gap_threshold = min_gap_threshold
-        self.network_frequency = config.CYCLES_PER_NS  # cycles per ns
+        self.cycles_per_ns = config.CYCLES_PER_NS  # 每纳秒的仿真周期数
         self.plot_rn_bw_fig = plot_rn_bw_fig
         self.plot_flow_graph = plot_flow_graph
         self.flow_graph_interactive = flow_graph_interactive
@@ -250,14 +250,14 @@ class SingleDieAnalyzer:
         self.validator = DataValidator()
         self.interval_calculator = TimeIntervalCalculator(min_gap_threshold)
         self.calculator = BandwidthCalculator(self.interval_calculator)
-        self.request_collector = RequestCollector(self.network_frequency)
+        self.request_collector = RequestCollector(self.cycles_per_ns)
         self.latency_collector = LatencyStatsCollector()
         self.circuit_collector = CircuitStatsCollector()
         self.visualizer = BandwidthPlotter()
         self.flow_visualizer = SingleDieFlowRenderer()  # 用于静态PNG流图
         self.interactive_flow_visualizer = SingleDieFlowRenderer()
         self.exporter = CSVExporter(verbose=self.verbose)
-        self.parquet_exporter = ParquetExporter(network_frequency=config.CYCLES_PER_NS if config else 2.0)
+        self.parquet_exporter = ParquetExporter(cycles_per_ns=config.CYCLES_PER_NS if config else 2.0)
         self.report_generator = ReportGenerator()
 
     def collect_ip_statistics(self):
@@ -409,7 +409,16 @@ class SingleDieAnalyzer:
                 "write_requests": total_write_requests,
                 "total_read_flits": total_read_flits,
                 "total_write_flits": total_write_flits,
-                "analysis_config": {"min_gap_threshold_ns": self.min_gap_threshold, "network_frequency_ghz": self.network_frequency},
+                "analysis_config": {
+                    "min_gap_threshold_ns": self.min_gap_threshold,
+                    "cycles_per_ns": self.cycles_per_ns,
+                    "network_frequency_ghz": self.config.NETWORK_FREQUENCY,
+                    "ip_frequency_ghz": self.config.IP_FREQUENCY,
+                    "network_scale": self.config.NETWORK_SCALE,
+                    "ip_scale": self.config.IP_SCALE,
+                    "effective_network_freq_ghz": self.config.EFFECTIVE_NETWORK_FREQ,
+                    "effective_ip_freq_ghz": self.config.EFFECTIVE_IP_FREQ,
+                },
                 "circuit_stats": circuit_stats,
             },
         }
@@ -457,7 +466,7 @@ class SingleDieAnalyzer:
             t_start = time.time()
             total_bandwidth, rn_fig = self.visualizer.plot_rn_bandwidth_curves_work_interval(
                 rn_bandwidth_time_series=self.rn_bandwidth_time_series,
-                network_frequency=self.network_frequency,
+                cycles_per_ns=self.cycles_per_ns,
                 save_path=None,  # 不保存独立文件
                 show_fig=False,  # 不显示
                 return_fig=True,  # 返回Figure对象
@@ -468,6 +477,15 @@ class SingleDieAnalyzer:
 
         results["Total_sum_BW"] = total_bandwidth
         results["summary"]["Total_sum_BW"] = total_bandwidth
+
+        # 将频率配置参数提升到顶层，方便前端表格显示
+        results["network_frequency_ghz"] = self.config.NETWORK_FREQUENCY
+        results["ip_frequency_ghz"] = self.config.IP_FREQUENCY
+        results["cycles_per_ns"] = self.cycles_per_ns
+        results["network_scale"] = self.config.NETWORK_SCALE
+        results["ip_scale"] = self.config.IP_SCALE
+        results["effective_network_freq_ghz"] = self.config.EFFECTIVE_NETWORK_FREQ
+        results["effective_ip_freq_ghz"] = self.config.EFFECTIVE_IP_FREQ
 
         # 绘制静态流图（PNG）
         if self.plot_flow_graph and self.sim_model:

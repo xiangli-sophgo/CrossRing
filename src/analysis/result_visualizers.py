@@ -43,14 +43,14 @@ class BandwidthPlotter:
         """初始化带宽曲线绘制器"""
         pass
 
-    def plot_rn_bandwidth_curves(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None, show_fig: bool = False, return_fig: bool = False):
+    def plot_rn_bandwidth_curves(self, rn_bandwidth_time_series: Dict, cycles_per_ns: float = 2.0, save_path: str = None, show_fig: bool = False, return_fig: bool = False):
         """
         绘制RN带宽时间曲线（Plotly交互式版本）
 
         Args:
             rn_bandwidth_time_series: RN带宽时间序列数据
                 格式: {port_key: {"time": [...], "start_times": [...], "bytes": [...]}}
-            network_frequency: 网络频率 (GHz)
+            cycles_per_ns: 每纳秒的仿真周期数(CYCLES_PER_NS)，用于cycle→ns转换
             save_path: 保存路径（.html文件）
             show_fig: 是否在浏览器中显示图像
             return_fig: 是否返回Figure对象而不是保存文件
@@ -146,13 +146,13 @@ class BandwidthPlotter:
 
         return total_bw
 
-    def plot_rn_bandwidth_curves_work_interval(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None, show_fig: bool = False, return_fig: bool = False):
+    def plot_rn_bandwidth_curves_work_interval(self, rn_bandwidth_time_series: Dict, cycles_per_ns: float = 2.0, save_path: str = None, show_fig: bool = False, return_fig: bool = False):
         """
         绘制RN带宽工作区间曲线（去除空闲时段）
 
         Args:
             rn_bandwidth_time_series: RN带宽时间序列数据
-            network_frequency: 网络频率
+            cycles_per_ns: 每纳秒的仿真周期数(CYCLES_PER_NS)，用于cycle→ns转换
             save_path: 保存路径
             show_fig: 是否在浏览器中显示图像
             return_fig: 是否返回Figure对象
@@ -161,7 +161,7 @@ class BandwidthPlotter:
             float or tuple: 如果return_fig=False，返回带宽积分；如果return_fig=True，返回(带宽积分, Figure对象)
         """
         # 简化实现：调用主函数
-        return self.plot_rn_bandwidth_curves(rn_bandwidth_time_series, network_frequency, save_path, show_fig, return_fig)
+        return self.plot_rn_bandwidth_curves(rn_bandwidth_time_series, cycles_per_ns, save_path, show_fig, return_fig)
 
 
 class HeatmapDrawer:

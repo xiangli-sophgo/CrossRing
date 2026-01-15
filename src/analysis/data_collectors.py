@@ -24,14 +24,14 @@ from src.utils.flit import Flit, get_original_source_type, get_original_destinat
 class RequestCollector:
     """请求数据收集器 - 从仿真模型或CSV文件收集请求数据"""
 
-    def __init__(self, network_frequency: float = 2.0):
+    def __init__(self, cycles_per_ns: float = 2.0):
         """
         初始化请求收集器
 
         Args:
-            network_frequency: 网络频率 (GHz)
+            cycles_per_ns: 每纳秒的仿真周期数(CYCLES_PER_NS)，用于cycle→ns转换
         """
-        self.network_frequency = float(network_frequency)
+        self.cycles_per_ns = float(cycles_per_ns)
         self.requests: List[RequestInfo] = []
         self.d2d_requests: List[D2DRequestInfo] = []
 
@@ -85,8 +85,8 @@ class RequestCollector:
                 continue  # 跳过无效请求
 
             # 转换为ns
-            start_time = round(start_time_cycle / self.network_frequency)
-            end_time = round(end_time_cycle / self.network_frequency)
+            start_time = round(start_time_cycle / self.cycles_per_ns)
+            end_time = round(end_time_cycle / self.cycles_per_ns)
 
             # 源目标节点信息来自lifecycle
             actual_source_node = lifecycle.source
@@ -168,12 +168,12 @@ class RequestCollector:
             data_received = timestamps.get('data_received_complete_cycle', float('inf'))
 
             if cmd_entry < float('inf') and cmd_received < float('inf'):
-                cmd_latency = round((cmd_received - cmd_entry) / self.network_frequency)
+                cmd_latency = round((cmd_received - cmd_entry) / self.cycles_per_ns)
             else:
                 cmd_latency = -1
 
             if data_entry < float('inf') and data_received < float('inf'):
-                data_latency = round((data_received - data_entry) / self.network_frequency)
+                data_latency = round((data_received - data_entry) / self.cycles_per_ns)
             else:
                 data_latency = -1
         else:  # write
@@ -184,12 +184,12 @@ class RequestCollector:
             data_received = timestamps.get('data_received_complete_cycle', float('inf'))
 
             if cmd_entry < float('inf') and cmd_received < float('inf'):
-                cmd_latency = round((cmd_received - cmd_entry) / self.network_frequency)
+                cmd_latency = round((cmd_received - cmd_entry) / self.cycles_per_ns)
             else:
                 cmd_latency = -1
 
             if data_entry < float('inf') and data_received < float('inf'):
-                data_latency = round((data_received - data_entry) / self.network_frequency)
+                data_latency = round((data_received - data_entry) / self.cycles_per_ns)
             else:
                 data_latency = -1
 
@@ -198,7 +198,7 @@ class RequestCollector:
         end_cycle = lifecycle.completed_cycle
 
         if start_cycle < float('inf') and end_cycle < float('inf'):
-            transaction_latency = round((end_cycle - start_cycle) / self.network_frequency)
+            transaction_latency = round((end_cycle - start_cycle) / self.cycles_per_ns)
         else:
             transaction_latency = -1
 
@@ -231,8 +231,8 @@ class RequestCollector:
         else:
             config_data = config_dict
 
-        # 更新网络频率
-        self.network_frequency = config_data.get("network_frequency", 1.0)
+        # 更新cycles_per_ns（向后兼容旧的network_frequency键名）
+        self.cycles_per_ns = config_data.get("cycles_per_ns", config_data.get("network_frequency", 1.0))
 
         # 读取CSV文件
         read_csv = os.path.join(csv_folder, "read_requests.csv")
@@ -366,8 +366,8 @@ class RequestCollector:
             cmd_latency, data_latency, transaction_latency = self._calculate_d2d_latencies(lifecycle, timestamps)
 
             # 计算时间
-            start_time_ns = round(lifecycle.created_cycle / self.network_frequency)
-            end_time_ns = round(lifecycle.completed_cycle / self.network_frequency)
+            start_time_ns = round(lifecycle.created_cycle / self.cycles_per_ns)
+            end_time_ns = round(lifecycle.completed_cycle / self.cycles_per_ns)
 
             # 从flit获取D2D节点信息
             first_flit = None
@@ -468,7 +468,7 @@ class RequestCollector:
         if attr_name and hasattr(flit, attr_name):
             value = getattr(flit, attr_name)
             if value < float("inf"):
-                return round(value / self.network_frequency)
+                return round(value / self.cycles_per_ns)
 
         if not allow_default:
             raise ValueError(
@@ -485,7 +485,7 @@ class RequestCollector:
         if hasattr(flit, attr_name):
             value = getattr(flit, attr_name)
             if value < float("inf"):
-                return round(value / self.network_frequency)
+                return round(value / self.cycles_per_ns)
         return 0
 
     def _extract_d2d_info(self, first_flit, representative_flit, packet_id: int) -> Optional[D2DRequestInfo]:

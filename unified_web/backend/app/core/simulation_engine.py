@@ -86,6 +86,10 @@ class SimulationEngine:
             from src.kcin.v1 import REQ_RSP_model
             self.config = V1Config(self.config_path)
 
+        # UI拓扑配置优先级最高，自动覆盖配置文件中的TOPO_TYPE
+        if self.topology:
+            self.config_overrides['TOPO_TYPE'] = self.topology
+
         # 应用配置覆盖
         for key, value in self.config_overrides.items():
             if hasattr(self.config, key):
@@ -94,7 +98,7 @@ class SimulationEngine:
         # 处理配置中的特殊值（auto、.inf等）
         self._resolve_config_types()
 
-        topo_type = self.config.TOPO_TYPE if self.config.TOPO_TYPE else self.topology
+        topo_type = self.config.TOPO_TYPE
 
         self.model = REQ_RSP_model(
             model_type="REQ_RSP",
@@ -180,6 +184,12 @@ class SimulationEngine:
             dcin_config_file=self.config_path,
             die_config_file=self.die_config_path,
         )
+
+        # UI拓扑配置优先级最高，自动覆盖DIE配置中的TOPO_TYPE
+        if self.topology and self.die_config_overrides is not None:
+            self.die_config_overrides['TOPO_TYPE'] = self.topology
+        elif self.topology:
+            self.die_config_overrides = {'TOPO_TYPE': self.topology}
 
         # 应用DCIN配置覆盖
         for key, value in self.config_overrides.items():
