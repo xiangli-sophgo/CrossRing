@@ -1,7 +1,16 @@
 """
-IPInterface class for NoC simulation.
-Handles IP interface functionality including frequency conversion, OSTD/Data-buffer behavior,
-and network interaction through inject/eject FIFOs.
+IPInterface 组件 - CrossRing v2 IP接口
+
+本模块提供 IP 接口功能，包括：
+- 频率转换（1GHz ↔ 2GHz）
+- OSTD（Outstanding Transaction）和 Data-buffer 管理
+- 网络交互（inject/eject FIFO）
+- 多通道支持和通道选择
+- RN/SN tracker 资源管理
+
+主要类:
+    IPInterface: IP接口类，处理IP与网络之间的数据流转换和资源管理
+    RingIPInterface: Ring模式扩展Mixin类
 """
 
 from __future__ import annotations
@@ -51,12 +60,85 @@ class RingIPInterface:
 
 
 class IPInterface:
-    """
-    模拟一个 IP 的频率转化和 OSTD/Data-buffer 行为:
-      - inject_fifo: 1GHz 入队
-      - l2h_fifo: 1→2GHz 上转换 FIFO（深度可调）
-      - tx_channel_buffer_pre → RS.input_fifos[ch_buffer]（2GHz发送）
-      - RS.output_fifos[ch_buffer] → rx_channel_buffer → h2l_fifo → eject_fifo → IP（1GHz接收）
+    """IP接口 - 频率转换和流量控制
+
+    模拟 IP 核与 NoC 网络之间的接口，处理：
+    1. 频率转换（1GHz ↔ 2GHz）
+    2. OSTD（Outstanding Transaction）管理
+    3. Data-buffer 管理（RDB/WDB）
+    4. 多通道支持和通道选择
+
+    ===============================================================================
+                        频率转换架构（关键！）
+    ===============================================================================
+
+    IP核工作在1GHz，NoC网络工作在2GHz。IPInterface实现无损的频率转换：
+
+    发送路径（1GHz → 2GHz）：
+    -----------------------
+    IP核(1GHz) → inject_fifo → l2h_fifo_pre → l2h_fifo → tx_channel_buffer_pre → RS(2GHz)
+                  ├─ IP.enqueue()      ├─ inject_step()
+                  │  (traffic注入)     │  (每IP_SCALE周期)
+                  │                    │
+                  │                    ├─ inject_fifo → l2h_fifo_pre (1GHz域)
+                  │                    └─ l2h_fifo_pre → l2h_fifo (跨域)
+                  │                       l2h_fifo → tx_channel_buffer_pre (2GHz域)
+                  │
+                  └─ 频率关系：NETWORK_SCALE=1, IP_SCALE=2时
+                     - 1GHz域：每2个cycle执行一次
+                     - 2GHz域：每1个cycle执行一次
+
+    接收路径（2GHz → 1GHz）：
+    -----------------------
+    RS(2GHz) → rx_channel_buffer → h2l_fifo_h_pre → h2l_fifo_h → h2l_fifo_l_pre → h2l_fifo_l → IP核(1GHz)
+               ├─ move_pre_to_queues()  ├─ eject_step()
+               │  (RS输出到IP)          │  (每IP_SCALE周期)
+               │                        │
+               │                        ├─ rx_channel_buffer → h2l_fifo_h_pre (2GHz域)
+               │                        ├─ h2l_fifo_h_pre → h2l_fifo_h (跨域)
+               │                        └─ h2l_fifo_h → h2l_fifo_l_pre → h2l_fifo_l (1GHz域)
+               │
+               └─ 两级下转换确保无数据丢失
+
+    关键设计：
+    ----------
+    1. l2h_fifo深度配置：
+       - 过小：可能导致inject_fifo无法及时输出（IP核发送阻塞）
+       - 过大：占用资源，但不影响功能
+       - 推荐：根据burst大小和网络拥塞情况调整
+
+    2. h2l_fifo两级设计：
+       - h2l_fifo_h（2GHz域）：快速接收RS输出
+       - h2l_fifo_l（1GHz域）：缓冲给IP核
+       - 两级确保频率转换时无数据丢失
+
+    3. pre缓冲机制：
+       - l2h_fifo_pre, h2l_fifo_h_pre, h2l_fifo_l_pre
+       - 实现单周期多级FIFO传输
+       - 与RS的pre缓冲配合，确保数据流管道化
+
+    4. 多通道支持：
+       - 每种网络类型（req/rsp/data）可配置多个独立通道
+       - channel_selector根据策略（id_based/round_robin等）选择通道
+       - 增加总带宽，减少不同流量间的拥塞
+
+    ===============================================================================
+                        RN/SN 资源管理
+    ===============================================================================
+
+    RN（Requester Node）资源：
+    - rn_tracker: 读/写tracker，跟踪outstanding transactions
+    - rn_rdb/rn_wdb: 读/写数据缓冲
+    - 配置参数：RN_R_TRACKER_OSTD, RN_W_TRACKER_OSTD, RN_RDB_SIZE, RN_WDB_SIZE
+
+    SN（Subordinate Node）资源：
+    - sn_tracker: RO（Read-Only）和 Share（读写共享）tracker
+    - sn_wdb: 写数据缓冲
+    - 配置参数：根据IP类型（ddr/l2m/d2d_sn）有不同的默认值
+
+    UNIFIED_RW_TRACKER模式：
+    - 读写tracker共享同一个资源池
+    - 提高资源利用率，但可能导致读写互相竞争
     """
 
     def __init__(
@@ -204,7 +286,7 @@ class IPInterface:
             self.tx_token_bucket = None
             self.rx_token_bucket = None
 
-        # ========== RN资源管理（每个IP独立管理） ==========
+        # ==================== RN资源管理（每个IP独立管理） ====================
         # RN Tracker
         self.rn_tracker = {"read": [], "write": []}
         self.rn_tracker_count = {"read": {"count": config.RN_R_TRACKER_OSTD}, "write": {"count": config.RN_W_TRACKER_OSTD}}
@@ -232,7 +314,7 @@ class IPInterface:
         self.rn_rdb_recv = []
         self.rn_wdb_send = []
 
-        # ========== SN资源管理（每个IP独立管理） ==========
+        # ==================== SN资源管理（每个IP独立管理） ====================
         self.sn_tracker = []
         self.sn_req_wait = {"read": [], "write": []}
         self.sn_rdb = []
@@ -289,7 +371,7 @@ class IPInterface:
                 self.rn_rdb_count["count"] = rdb_size
                 self.rn_wdb_count["count"] = wdb_size
 
-        # ========== Tracker使用情况记录（事件驱动） ==========
+        # ==================== Tracker使用情况记录（事件驱动） ====================
         self.tracker_events = {
             "rn_read": {"allocations": [], "releases": []},
             "rn_write": {"allocations": [], "releases": []},
@@ -1312,7 +1394,7 @@ class IPInterface:
         if flit and flit.packet_id == target_id and flit.flit_id == flit_id:
             print(inspect.currentframe().f_back.f_code.co_name, flit)
 
-    # ========== Tracker记录方法 ==========
+    # ==================== Tracker记录方法 ====================
     def _record_tracker_allocation(self, tracker_type: str):
         """记录tracker分配事件"""
         if self.tracker_total_config.get(tracker_type, 0) == 0:

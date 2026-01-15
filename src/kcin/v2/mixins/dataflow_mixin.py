@@ -1,6 +1,14 @@
 """
-网络数据流处理相关的Mixin类
-包含IQ/Link/RB/EQ/CP处理、Flit移动、Tag处理等功能
+CrossRing v2 仿真系统 - 数据流处理Mixin
+
+本模块提供网络数据流处理相关功能，包括：
+- IP ↔ RingStation 数据流管理
+- 网络周期处理和flit移动
+- pre缓冲与主FIFO之间的转移
+- Entry释放和统计更新
+
+主要类:
+    DataflowMixin: 数据流处理功能混入类，提供网络数据流相关方法
 """
 
 from src.kcin.v2.components import Network, IPInterface
@@ -45,6 +53,44 @@ class DataflowMixin:
 
     def _move_pre_to_queues(self, network: Network, node_id, network_type: str):
         """v2统一架构: 所有 pre → FIFO 的移动 + IP ↔ RingStation 数据流处理
+
+        执行4个Phase的数据传输:
+        Phase 1: RS输入端 pre → input_fifos
+        Phase 2: IP发送缓冲 → RS输入端pre (IP → RS)
+        Phase 3: RS输出端 pre → output_fifos
+        Phase 4: RS输出端FIFO → IP接收缓冲 (RS → IP)
+
+        为什么需要分4个Phase？
+        ======================
+
+        问题背景:
+        在单个仿真周期内，同一个FIFO可能需要被多次读写。如果不分Phase，
+        会出现"读后写"冲突：
+
+        冲突场景示例（如果不分Phase）：
+        1. RS.process_cycle()执行仲裁，决定将input_fifos[TL][0]转移到output_fifos_pre[ddr_0]
+        2. 立即执行：output_fifos_pre[ddr_0] → output_fifos[ddr_0]
+        3. 立即执行：output_fifos[ddr_0] → IP.rx_channel_buffer
+        4. 问题：RS在同一周期内既读又写output_fifos[ddr_0]，违反硬件时序
+
+        Phase分离解决方案:
+        ------------------
+        Phase 1: 将上周期产生的input_fifos_pre内容移入input_fifos
+                 → 为本周期仲裁提供输入数据
+
+        Phase 2: 将IP的发送缓冲移入RS的input_fifos_pre
+                 → 准备下周期的输入（不会与Phase 1冲突）
+
+        Phase 3: 将本周期仲裁产生的output_fifos_pre移入output_fifos
+                 → 使本周期仲裁结果可见
+
+        Phase 4: 从output_fifos取数据到IP接收缓冲
+                 → 不会与Phase 3冲突（Phase 3已完成）
+
+        关键设计:
+        - pre缓冲作为"延迟一周期"的机制，实现管道化
+        - 每个Phase严格顺序执行，避免同一FIFO的读写冲突
+        - Phase 1和Phase 3确保仲裁逻辑看到正确的FIFO状态
 
         Args:
             network: 网络实例

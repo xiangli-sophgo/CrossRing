@@ -63,7 +63,7 @@ class RingStation:
         if network_ref and hasattr(network_ref, 'name'):
             self._network_suffix = "_" + network_ref.name.split()[0].lower()[:3]
 
-        # ========== 输入端 FIFO ==========
+        # ==================== 输入端 FIFO ====================
         # 每个 IP 类型有独立的 channel buffer
         self.input_fifos = {}
         for ch in self.ch_names:
@@ -80,7 +80,7 @@ class RingStation:
             )
         self.input_fifos_pre = {k: None for k in self.input_fifos.keys()}
 
-        # ========== 输出端 FIFO ==========
+        # ==================== 输出端 FIFO ====================
         # 每个 IP 类型有独立的 channel buffer
         self.output_fifos = {}
         for ch in self.ch_names:
@@ -97,7 +97,7 @@ class RingStation:
             )
         self.output_fifos_pre = {k: None for k in self.output_fifos.keys()}
 
-        # ========== 仲裁状态 ==========
+        # ==================== 仲裁状态 ====================
         # 每个输出端口的轮询指针
         self.arb_pointers = {port: 0 for port in self.output_fifos.keys()}
 
@@ -114,7 +114,7 @@ class RingStation:
         for direction in self.RING_DIRECTIONS:
             self.output_candidates[direction] = list(self.ch_names) + other_dirs[direction]
 
-        # ========== 统计 ==========
+        # ==================== 统计 ====================
         self.stats = {
             "cross_dimension_transfers": 0,
             "local_ejects": 0,
@@ -167,9 +167,7 @@ class RingStation:
             if ip_type not in self.output_candidates[direction]:
                 self.output_candidates[direction].append(ip_type)
 
-    # ------------------------------------------------------------------
-    # 核心处理方法
-    # ------------------------------------------------------------------
+    # ==================== 核心处理方法 ====================
 
     def move_pre_to_fifos(self, cycle: int = 0):
         """将 pre 缓冲中的 flit 移动到 FIFO（兼容接口）"""
@@ -197,11 +195,62 @@ class RingStation:
                     self.output_fifos_pre[port] = None  # 只有成功添加后才清空
 
     def process_cycle(self, cycle: int):
-        """
-        每周期处理：
-        1. 收集路由请求
-        2. 仲裁决定每个输出端口的来源
-        3. 执行数据转移
+        """RingStation核心仲裁和路由逻辑
+
+        每周期执行3个步骤完成数据转发：
+
+        Step 1: 收集路由请求 (_collect_routing_requests)
+        ----------------------------------------------
+        遍历所有输入端口（IP类型 + TL/TR/TU/TD），对每个非空的input_fifo：
+        - 查看队首flit（peek，不移除）
+        - 调用_determine_output_port()确定目标输出端口
+        - 记录到routing_requests字典: {output_port: [(input_port, flit), ...]}
+
+        路由决策逻辑:
+        a) 到达目的地节点 → 输出到destination_type对应的IP channel
+        b) 根据flit.path → 确定下一跳方向（TL/TR/TU/TD）
+        c) 无path时 → 使用XY路由算法计算方向
+
+        Step 2: 仲裁 (_arbitrate)
+        --------------------------
+        对每个输出端口，从其候选输入中选择一个winner：
+        - 检查输出端口可用性（output_fifos_pre为空 且 output_fifos未满）
+        - 过滤已被其他输出端口选中的输入（避免一个输入同时发到多个输出）
+        - 轮询仲裁（Round-Robin）：
+          * 使用arb_pointers[output_port]记录上次选中位置
+          * 从上次位置+1开始，按output_candidates[output_port]顺序查找
+          * 找到第一个匹配的输入端口作为winner
+        - 更新arb_pointers，确保下次仲裁时公平
+
+        仲裁冲突场景:
+        - 多个输入竞争同一输出 → Round-Robin选择一个，其余下周期重试
+        - 输出端口不可用 → 所有候选延迟到下周期
+
+        Step 3: 执行转移 (_execute_transfers)
+        -------------------------------------
+        对每个仲裁成功的(output_port, winner)：
+        - 从input_fifos[input_port]移除队首flit（popleft）
+        - 将flit放入output_fifos_pre[output_port]（准备下周期移入output_fifos）
+        - 更新统计：跨维度转换、本地注入、本地弹出
+
+        关键设计：
+        ----------
+        1. pre缓冲机制：
+           仲裁结果先放入output_fifos_pre，下周期再移入output_fifos
+           → 避免同一周期内output_fifos的读写冲突
+           → 实现管道化，每周期可处理新的仲裁
+
+        2. 轮询公平性：
+           arb_pointers确保每个输入端口都有机会被选中
+           → 避免饥饿，保证长期公平
+
+        3. 单周期内部时序：
+           peek → 仲裁决策 → popleft → 写pre缓冲
+           → 所有操作在一个周期内完成，符合硬件时序
+
+        时序依赖：
+        - 调用前提：input_fifos已包含本周期可用数据（由_move_pre_to_queues Phase1保证）
+        - 调用后续：output_fifos_pre将在_move_pre_to_queues Phase3中移入output_fifos
         """
         # Step 1: 收集所有输入端的 flit 和它们需要的输出端口
         routing_requests = self._collect_routing_requests(cycle)
@@ -432,9 +481,7 @@ class RingStation:
             return True
         return False
 
-    # ------------------------------------------------------------------
-    # 外部接口方法
-    # ------------------------------------------------------------------
+    # ==================== 外部接口方法 ====================
 
     def enqueue_from_ring(self, flit: Flit, direction: str) -> bool:
         """
@@ -524,18 +571,14 @@ class RingStation:
         return None
 
     def has_output(self, port: str) -> bool:
-        """检查输出端口是否有 flit"""
         return port in self.output_fifos and len(self.output_fifos[port]) > 0
 
     def can_accept_input(self, port: str) -> bool:
-        """检查输入端口是否可以接受新 flit"""
         if port not in self.input_fifos:
             return False
         return self.input_fifos_pre[port] is None
 
-    # ------------------------------------------------------------------
-    # 调试和统计方法
-    # ------------------------------------------------------------------
+    # ==================== 调试和统计方法 ====================
 
     def get_status(self) -> Dict[str, Any]:
         """获取当前状态"""

@@ -1,3 +1,76 @@
+"""
+CrossRing v2 仿真系统 - 基础模型
+
+本模块提供 CrossRing NoC 仿真的核心功能，包括：
+- 网络拓扑初始化和配置管理
+- 仿真主循环和周期执行
+- IP接口、RingStation、环形链表的协调
+- 统计数据收集和结果分析
+
+主要类:
+    BaseModel: 仿真基础模型，结合StatsMixin和DataflowMixin提供完整仿真功能
+
+===============================================================================
+                            仿真全局流程
+===============================================================================
+
+1. 初始化阶段 (initial)
+   ├─ 创建拓扑和网络 (邻接矩阵、三网络:req/rsp/data)
+   ├─ 构建路由表 (XY/YX确定性路由)
+   ├─ 动态创建IP接口 (根据traffic文件)
+   ├─ 初始化RingStation (每节点一个，包含仲裁逻辑)
+   └─ 初始化统计计数器
+
+2. 仿真主循环 (run)
+   └─ while not completed:
+      ├─ cycle += 1
+      ├─ step()  ← 单周期执行
+      │  ├─ release_completed_sn_tracker()
+      │  ├─ process_new_request()
+      │  ├─ [每NETWORK_SCALE周期执行网络处理]
+      │  │  ├─ ip_inject_to_network()
+      │  │  ├─ move_flits_in_network() x3
+      │  │  ├─ network_to_ip_eject()
+      │  │  └─ move_pre_to_queues_all()
+      │  ├─ debug_func()
+      │  └─ update_throughput_metrics()
+      └─ is_completed() 检查
+
+3. 结果分析阶段
+   └─ process_comprehensive_results()
+
+===============================================================================
+                      单周期内的数据流时序 (关键！)
+===============================================================================
+
+假设 NETWORK_SCALE=1, IP_SCALE=2 (常见配置)
+
+周期N (N % NETWORK_SCALE == 0):
+│
+├─ release_completed_sn_tracker()  # 检查延迟释放队列
+├─ process_new_request()            # Traffic → IP.inject_fifo (1GHz域)
+│
+├─ ip_inject_to_network()           # 发送阶段
+│  └─ IP.inject_step()
+│     ├─ inject_fifo → l2h_fifo_pre → l2h_fifo  (1GHz→2GHz转换)
+│     └─ l2h_fifo → tx_channel_buffer_pre        (准备发送到RS)
+│
+├─ move_flits_in_network() x3       # 网络处理 (req/rsp/data三网络)
+│  └─ _network_cycle_process()
+│     ├─ RS.process_cycle()        # RingStation仲裁
+│     └─ Ring.process_all_rings()  # 环形链表移动
+│
+├─ network_to_ip_eject()            # 接收阶段
+│  └─ IP.eject_step()
+│     └─ rx_channel_buffer → h2l_fifo_h → h2l_fifo_l → IP核
+│
+└─ move_pre_to_queues_all()         # pre缓冲 → 主FIFO
+   ├─ IP: l2h_fifo_pre → l2h_fifo
+   └─ RS: 所有pre缓冲 → 主FIFO
+
+注意：pre缓冲实现"单周期多级FIFO管道效果"，可视化时不显示
+"""
+
 from collections import deque, defaultdict
 
 from src.kcin.base.topology_utils import create_adjacency_matrix, find_shortest_paths
@@ -25,7 +98,7 @@ from src.kcin.base.channel_selector import ChannelSelector
 
 
 class BaseModel(StatsMixin, DataflowMixin):
-    # 全局packet_id生成器（从Node类迁移）
+    # 全局packet_id生成器
     _global_packet_id = 0
 
     @classmethod
@@ -413,7 +486,7 @@ class BaseModel(StatsMixin, DataflowMixin):
         # print("\n提示: 按 Ctrl+C 可以随时中断仿真并查看当前结果\n")
         self.run()
 
-    # ==================== 多通道支持方法 ====================
+    # ==================== 多通道支持 ====================
     def _load_network_channel_config(self):
         """从config加载网络通道配置"""
         config_dict = getattr(self.config, "NETWORK_CHANNEL_CONFIG", {})
@@ -556,7 +629,6 @@ class BaseModel(StatsMixin, DataflowMixin):
         self._last_printed_cycle = -1
         self.flit_num, self.req_num, self.rsp_num = 0, 0, 0
         self.new_write_req = []
-        # v2架构: IQ_directions和IQ_direction_conditions已移至RingStation仲裁
         self.read_ip_intervals = defaultdict(list)  # 存储每个IP的读请求时间区间
         self.write_ip_intervals = defaultdict(list)  # 存储每个IP的写请求时间区间
 
@@ -588,7 +660,6 @@ class BaseModel(StatsMixin, DataflowMixin):
         self.req_cir_h_num_stat, self.req_cir_v_num_stat = 0, 0
         self.rsp_cir_h_num_stat, self.rsp_cir_v_num_stat = 0, 0
         self.data_cir_h_num_stat, self.data_cir_v_num_stat = 0, 0
-        # 反方向上环统计
         self.req_reverse_h_num_stat, self.req_reverse_v_num_stat = 0, 0
         self.rsp_reverse_h_num_stat, self.rsp_reverse_v_num_stat = 0, 0
         self.data_reverse_h_num_stat, self.data_reverse_v_num_stat = 0, 0
@@ -599,29 +670,24 @@ class BaseModel(StatsMixin, DataflowMixin):
         self.EQ_ETag_T1_num_stat, self.EQ_ETag_T0_num_stat = 0, 0
         self.RB_ETag_T1_num_stat, self.RB_ETag_T0_num_stat = 0, 0
 
-        # Per-node FIFO ETag statistics
-        self.EQ_ETag_T1_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count}}
-        self.EQ_ETag_T0_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count}}
-        self.RB_ETag_T1_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}
-        self.RB_ETag_T0_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}
+        self.EQ_ETag_T1_per_node_fifo = {}
+        self.EQ_ETag_T0_per_node_fifo = {}
+        self.RB_ETag_T1_per_node_fifo = {}
+        self.RB_ETag_T0_per_node_fifo = {}
 
-        # 总数据量统计 (每个节点下环到RB和EQ的flit总数)
-        self.EQ_total_flits_per_node = {}  # {node_id: {"TU": count, "TD": count}}
-        self.RB_total_flits_per_node = {}  # {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}
+        self.EQ_total_flits_per_node = {}
+        self.RB_total_flits_per_node = {}
 
-        # 按通道类型分开的ETag统计
-        self.EQ_ETag_T1_per_channel = {"req": {}, "rsp": {}, "data": {}}  # {channel: {node_id: {"TU": count, "TD": count}}}
+        self.EQ_ETag_T1_per_channel = {"req": {}, "rsp": {}, "data": {}}
         self.EQ_ETag_T0_per_channel = {"req": {}, "rsp": {}, "data": {}}
-        self.RB_ETag_T1_per_channel = {"req": {}, "rsp": {}, "data": {}}  # {channel: {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}}
+        self.RB_ETag_T1_per_channel = {"req": {}, "rsp": {}, "data": {}}
         self.RB_ETag_T0_per_channel = {"req": {}, "rsp": {}, "data": {}}
 
-        # 按通道类型分开的总数据量统计
-        self.EQ_total_flits_per_channel = {"req": {}, "rsp": {}, "data": {}}  # {channel: {node_id: {"TU": count, "TD": count}}}
-        self.RB_total_flits_per_channel = {"req": {}, "rsp": {}, "data": {}}  # {channel: {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}}
+        self.EQ_total_flits_per_channel = {"req": {}, "rsp": {}, "data": {}}
+        self.RB_total_flits_per_channel = {"req": {}, "rsp": {}, "data": {}}
         self.ITag_h_num_stat, self.ITag_v_num_stat = 0, 0
         self.Total_sum_BW_stat = 0
 
-        # Mixed (total) bandwidth/latency stats initialization
         self.mixed_unweighted_bw_stat = 0
         self.mixed_weighted_bw_stat = 0
         self.cmd_mixed_avg_latency_stat = 0
@@ -630,17 +696,13 @@ class BaseModel(StatsMixin, DataflowMixin):
         self.data_mixed_max_latency_stat = 0
         self.trans_mixed_avg_latency_stat = 0
         self.trans_mixed_max_latency_stat = 0
-        # Overall average bandwidth stats (unweighted and weighted)
         self.total_unweighted_bw_stat = 0
         self.total_weighted_bw_stat = 0
 
-        # Performance monitoring - simple simulation time tracking
         self.simulation_start_time = None
 
-        # Initialize per-node FIFO ETag statistics after networks are created
         self._initialize_per_node_etag_stats()
 
-        # 初始化Network的channel buffer(延迟初始化) - 所有通道
         for network in self.req_networks + self.rsp_networks + self.data_networks:
             network.initialize_buffers()
 
@@ -783,7 +845,52 @@ class BaseModel(StatsMixin, DataflowMixin):
                 self.RB_total_flits_per_channel[channel][node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
 
     def step(self):
-        """Execute one simulation cycle step."""
+        """执行单周期仿真步骤
+
+        数据流依赖关系：
+
+        1. release_completed_sn_tracker()
+           - 独立操作：检查并释放到期的tracker
+           - 无数据依赖
+
+        2. process_new_request()
+           - 读取traffic文件，生成新请求
+           - 写入：IP.inject_fifo
+           - 依赖：release_completed_sn_tracker()必须先执行（避免资源竞争）
+
+        3. 网络处理（每NETWORK_SCALE周期）：
+           a) ip_inject_to_network()
+              - 读取：IP.inject_fifo, IP.l2h_fifo
+              - 写入：IP.tx_channel_buffer_pre
+              - 依赖：process_new_request()的输出
+
+           b) move_flits_in_network() × 3（req/rsp/data）
+              - 读取：IP.tx_channel_buffer_pre, RS各FIFO, Ring环
+              - 写入：RS各FIFO, Ring环, RS.output_fifos_pre
+              - 依赖：ip_inject_to_network()的输出
+
+           c) network_to_ip_eject()
+              - 读取：RS.output_fifos
+              - 写入：IP.rx_channel_buffer, IP.h2l_fifo_h
+              - 依赖：move_flits_in_network()的输出
+
+           d) move_pre_to_queues_all()
+              - 读取：所有*_pre缓冲
+              - 写入：对应的主FIFO
+              - 依赖：上述所有步骤完成（处理pre缓冲）
+
+        4. debug_func()
+           - 可视化更新
+           - 依赖：所有数据流操作完成
+
+        5. update_throughput_metrics()
+           - 统计更新
+           - 依赖：网络处理完成
+
+        关键设计：
+        - pre缓冲机制：实现单周期内多级FIFO传输，避免读写冲突
+        - 步骤顺序：严格按照数据流方向执行，确保因果关系正确
+        """
         self.release_completed_sn_tracker()
 
         self.process_new_request()
@@ -814,7 +921,6 @@ class BaseModel(StatsMixin, DataflowMixin):
         all_data_flits = sum(self._step_flits, [])
         self.update_throughput_metrics(all_data_flits)
 
-        # 检查traffic完成情况并推进链
         completed_traffics = self.traffic_scheduler.check_and_advance_chains(self.cycle)
         if completed_traffics and self.verbose:
             print(f"Completed traffics: {completed_traffics}")
