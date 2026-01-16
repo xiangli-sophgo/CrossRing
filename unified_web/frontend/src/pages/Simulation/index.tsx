@@ -383,6 +383,16 @@ const Simulation: React.FC = () => {
       const content = await getConfigContent(configPath)
       setConfigValues(content)
       setOriginalConfigValues(content)  // 同时保存原始配置
+      
+      // 如果配置文件中有 TOPO_TYPE，自动更新表单的 rows 和 cols
+      if (content.TOPO_TYPE) {
+        const topoMatch = content.TOPO_TYPE.match(/^(\d+)x(\d+)$/)
+        if (topoMatch) {
+          const rows = parseInt(topoMatch[1])
+          const cols = parseInt(topoMatch[2])
+          form.setFieldsValue({ rows, cols })
+        }
+      }
     } catch (error) {
       console.error('加载配置内容失败:', error)
       message.error('加载配置内容失败')
@@ -404,6 +414,16 @@ const Simulation: React.FC = () => {
       const content = await getConfigContent(configPath)
       setDieConfigValues(content)
       setOriginalDieConfigValues(content)  // 同时保存原始配置
+      
+      // DCIN模式下，如果DIE配置文件中有 TOPO_TYPE，自动更新表单的 rows 和 cols
+      if (content.TOPO_TYPE) {
+        const topoMatch = content.TOPO_TYPE.match(/^(\d+)x(\d+)$/)
+        if (topoMatch) {
+          const rows = parseInt(topoMatch[1])
+          const cols = parseInt(topoMatch[2])
+          form.setFieldsValue({ rows, cols })
+        }
+      }
     } catch (error) {
       console.error('加载DIE配置内容失败:', error)
       message.error('加载DIE配置内容失败')
@@ -1033,8 +1053,14 @@ const Simulation: React.FC = () => {
                           return
                         }
                         try {
-                          await saveConfigContent(configPath, configValues)
+                          // 将表单中的拓扑配置同步到 configValues
+                          const formValues = form.getFieldsValue()
+                          const topology = `${formValues.rows}x${formValues.cols}`
+                          const configToSave = { ...configValues, TOPO_TYPE: topology }
+                          await saveConfigContent(configPath, configToSave)
                           message.success('配置已保存')
+                          // 重新加载配置以更新显示
+                          loadConfigContent(configPath)
                         } catch (e: any) {
                           message.error(`保存失败: ${e.response?.data?.detail || e.message || '未知错误'}`)
                         }
@@ -1095,8 +1121,14 @@ const Simulation: React.FC = () => {
                               return
                             }
                             try {
-                              await saveConfigContent(configPath, dieConfigValues)
+                              // 将表单中的拓扑配置同步到 dieConfigValues
+                              const formValues = form.getFieldsValue()
+                              const topology = `${formValues.rows}x${formValues.cols}`
+                              const configToSave = { ...dieConfigValues, TOPO_TYPE: topology }
+                              await saveConfigContent(configPath, configToSave)
                               message.success('配置已保存')
+                              // 重新加载配置以更新显示
+                              loadDieConfigContent(configPath)
                             } catch (e: any) {
                               message.error(`保存失败: ${e.response?.data?.detail || e.message || '未知错误'}`)
                             }
@@ -1295,7 +1327,11 @@ const Simulation: React.FC = () => {
             const configPath = saveAsType === 'main'
               ? form.getFieldValue('config_path')
               : form.getFieldValue('die_config_path')
-            const content = saveAsType === 'main' ? configValues : dieConfigValues
+            // 将表单中的拓扑配置同步到配置内容
+            const formValues = form.getFieldsValue()
+            const topology = `${formValues.rows}x${formValues.cols}`
+            const baseContent = saveAsType === 'main' ? configValues : dieConfigValues
+            const content = { ...baseContent, TOPO_TYPE: topology }
             const result = await saveConfigContent(configPath || 'default.yaml', content, saveAsName)
             message.success(`配置已另存为: ${result.filename}`)
             setSaveAsModalVisible(false)
